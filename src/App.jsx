@@ -20,6 +20,7 @@ import "./theme-dark.css";
 import "./theme-pink.css";
 import "./styles/glass.css";
 import "./flash.css";
+import { LiteModeProvider } from "./LiteModePerformancePatch";
 
 // Lazy-load heavy panels – code-split into separate chunks so the initial
 // JS bundle is smaller and the app shell loads faster.
@@ -655,6 +656,7 @@ export default function App() {
   else if (view === "metal") activeDept = "Metal";
 
   return (
+    <LiteModeProvider>
     <UserProvider>
       <FlashProvider>
         <DataProvider activeDept={activeDept}>
@@ -696,6 +698,7 @@ export default function App() {
         </DataProvider>
       </FlashProvider>
     </UserProvider>
+    </LiteModeProvider>
   );
 }
 

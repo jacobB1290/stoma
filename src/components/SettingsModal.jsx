@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { useUser } from "../context/UserContext";
 import { useLiteMode } from "../LiteModePerformancePatch";
@@ -346,11 +346,6 @@ export default function SettingsModal({
 }) {
   const { lite: liteUi, toggle: toggleLiteUi } = useLiteMode();
   const { name } = useUser();
-
-  const isDebugMode = useMemo(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get("debug") === "true";
-  }, []);
 
   /* --- update flags ---------------------------------------------------- */
   const initUpdate =
@@ -727,24 +722,70 @@ export default function SettingsModal({
               </div>
             </Card>
 
-            {/* PERFORMANCE - Only show in debug mode */}
-            {isDebugMode && (
-              <Card
-                open={card === "performance"}
-                toggle={() => toggleCard("performance")}
-                icon={<IconBolt />}
-                title="Performance"
-              >
-                <div className="pt-3">
+            {/* PERFORMANCE – always visible */}
+            <Card
+              open={card === "performance"}
+              toggle={() => toggleCard("performance")}
+              icon={<IconBolt />}
+              title="Performance"
+            >
+              <div className="pt-3 space-y-1">
+                {/* Lite Mode master toggle */}
+                <div
+                  className={`p-3 rounded-lg border transition-colors ${
+                    liteUi
+                      ? "bg-amber-50 border-amber-200"
+                      : "bg-gray-50 border-gray-200/50"
+                  }`}
+                >
                   <ToggleSwitch
                     enabled={liteUi}
                     onChange={toggleLiteUi}
-                    label="Lite Mode"
-                    description="Disable animations and effects for better performance"
+                    label="⚡ Lite Mode"
+                    description={
+                      liteUi
+                        ? "Active – animations, blur & GPU effects disabled"
+                        : "For Raspberry Pi and low-power hardware"
+                    }
                   />
                 </div>
-              </Card>
-            )}
+
+                {liteUi && (
+                  <div className="mt-1 px-1 space-y-1 text-xs text-gray-500">
+                    <p className="font-medium text-gray-600 pt-1">Active overrides:</p>
+                    <ul className="space-y-0.5 list-none pl-0">
+                      <li className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        All animations &amp; transitions stopped
+                      </li>
+                      <li className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        Backdrop blur &amp; GPU filters removed
+                      </li>
+                      <li className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        Glass panels → solid white surfaces
+                      </li>
+                      <li className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        Render rate capped to 20 fps
+                      </li>
+                      <li className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        Priority / overdue shown as static rings
+                      </li>
+                    </ul>
+                    <p className="text-gray-400 pt-0.5">Shortcut: Alt + Shift + L</p>
+                  </div>
+                )}
+
+                {!liteUi && (
+                  <p className="text-xs text-gray-400 px-1 pt-1 pb-0.5">
+                    Shortcut: Alt + Shift + L
+                  </p>
+                )}
+              </div>
+            </Card>
 
             {/* SYSTEM */}
             <Card
