@@ -1,0 +1,707 @@
+/* nodebox/src/theme-pink.css - PINK THEME v3 */
+
+html.theme-pink {
+  color-scheme: light;
+
+  /* ───────── foundation ───────── */
+  --w-bg: #f5e8ed;
+  --w-surface: #fdf8fa;
+  --w-surface-2: #f2e0e7;
+  --w-surface-3: #ebcfdb;
+
+  --w-border: #4a1a2d1f;
+  --w-border-strong: #4a1a2d2e;
+
+  --w-text: #2d1a24;
+  --w-text-muted: #6b4a5a;
+  --w-text-subtle: #8b6b7a;
+
+  /* Primary accent - deep rose */
+  --w-accent: #9d4b6c;
+  --w-accent-hover: #b85a7e;
+  --w-accent-surface: #e8c4d4;
+  --w-accent-surface-2: #deb3c6;
+  --w-accent-border: #9d4b6c42;
+  --w-accent-ink: #4a1a2d;
+
+  --primary: var(--w-accent);
+  --primary-hover: var(--w-accent-hover);
+  --primary-light: #9d4b6c24;
+  --primary-glow: #9d4b6c47;
+
+  --w-focus: #9d4b6c57;
+
+  /* ───────── shadows ───────── */
+  --w-shadow-1: 0 1px 2px #4a1a2d0f;
+  --w-shadow-2: 0 8px 20px -12px #4a1a2d40;
+  --w-shadow-3: 0 16px 40px -16px #4a1a2d59;
+  --w-row-shadow: 0 8px 18px #4a1a2d1f;
+
+  /* ───────── row colors (harmonious pastels) ───────── */
+  --w-row-blue: #e1e8f9;
+  --w-row-purple: #ebe1f9;
+  --w-row-pink: #f9e1ee;
+  --w-row-stage2: #f5e8ff;
+
+  /* ───────── status colors ───────── */
+  --w-priority-surface: #ffe4e6;
+  --w-priority-surface-2: #fecdd3;
+  --w-priority-border: #e8466438;
+  --w-priority-ink: #9f1239;
+  --w-priority-dot: #fda4af;
+  --w-priority-bar: #fda4af;
+  --w-priority-flash: #f87171;
+
+  --w-overdue-surface: #fee2e2;
+  --w-overdue-surface-2: #fecaca;
+  --w-overdue-border: #ef44443d;
+  --w-overdue-ink: #991b1b;
+
+  --w-rush-surface: #fff0e6;
+  --w-rush-surface-2: #feddcc;
+  --w-rush-border: #e87a4a3d;
+  --w-rush-ink: #9a3412;
+  --w-rush-dot: #fdba74;
+  --w-rush-bar: #fdba74;
+
+  --w-hold-surface: #fef7e0;
+  --w-hold-surface-2: #fde68a;
+  --w-hold-border: #d9980b38;
+  --w-hold-ink: #92400e;
+  --w-hold-dot: #fcd34d;
+
+  --w-newacct-surface: #fce7f3;
+  --w-newacct-surface-2: #fbcfe8;
+  --w-newacct-border: #ec48993a;
+  --w-newacct-ink: #9d174d;
+  --w-newacct-dot: #f472b6;
+
+  /* ───────── New Account sheen tuning ───────── */
+  --newaccount-sheen-opacity: 0.48;
+  --newaccount-sheen-blend: screen;
+  --newaccount-sheen-blur: 11px;
+  --newaccount-sheen-speed: 8.5s;
+
+  --w-ring-priority: var(--w-priority-surface-2);
+  --w-ring-rush: var(--w-rush-surface-2);
+  --w-ring-hold: var(--w-hold-surface);
+
+  --w-panel-overdue: var(--w-overdue-surface-2);
+  --w-panel-hold: #f7e8d4;
+
+  /* ───────── column tints ───────── */
+  --w-column-bg: #faf5f7;
+  --w-column-bg-alt: #f8f2f5;
+
+  /* ───────── glass ───────── */
+  --glass-bg: #fdf8fae6;
+  --glass-bg-dark: #fdf8faf0;
+  --glass-br: #4a1a2d1f;
+
+  --shadow-sm: var(--w-shadow-1);
+  --shadow-md: var(--w-shadow-2);
+  --shadow-lg: var(--w-shadow-3);
+}
+
+/* ───────── body background ───────── */
+html.theme-pink body {
+  background-color: var(--w-bg);
+  background-image: linear-gradient(
+    135deg,
+    #f9eff3 0%,
+    var(--w-bg) 50%,
+    #f0dce4 100%
+  );
+  color: var(--w-text);
+}
+
+/* ───────── focus ring ───────── */
+html.theme-pink :is(a, button, input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--w-focus);
+  border-radius: 10px;
+}
+
+/* ───────── header ───────── */
+html.theme-pink #root > div > header {
+  background: #fdf8fad1;
+  border-bottom: 1px solid var(--w-border);
+  box-shadow: var(--w-shadow-2);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+html.theme-pink #root > div > header :is(h1, h2, h3, h4, p, span, div) {
+  color: var(--w-text);
+}
+
+/* ───────── glass system ───────── */
+html.theme-pink :is(.glass, .glass-nb, .glass-nb-dark) {
+  border-color: var(--glass-br);
+  background: var(--glass-bg);
+}
+
+html.theme-pink .glass:hover {
+  background: #fdf8faed;
+}
+
+html.theme-pink .glass-panel {
+  background: #fdf8faf5;
+  border: 1px solid var(--w-border);
+  box-shadow: var(--w-shadow-2);
+}
+
+html.theme-pink :is(.glass-card, .glass-card-dark) {
+  background: #fdf8faf8;
+  border: 1px solid var(--w-border);
+  box-shadow: var(--w-shadow-1);
+  color: var(--w-text);
+}
+
+/* ───────── columns / panels ───────── */
+html.theme-pink .bg-\[\#16525F\]:not(button):not(a):not([role="button"]) {
+  background: var(--w-column-bg);
+  border: 1px solid var(--w-border);
+  box-shadow: var(--w-shadow-2);
+}
+
+html.theme-pink [class*="flex-1"][class*="flex-col"][class*="rounded"] {
+  background: var(--w-column-bg);
+}
+
+/* ───────── buttons ───────── */
+html.theme-pink .primary-button {
+  background: var(--w-accent-surface);
+  color: var(--w-accent-ink);
+  border: 1px solid var(--w-accent-border);
+  box-shadow: var(--shadow-sm);
+}
+
+html.theme-pink .primary-button:hover:not(:disabled) {
+  background: var(--w-accent-surface-2);
+}
+
+html.theme-pink
+  :is(button, a, [role="button"]):is(
+    .bg-gray-900,
+    .bg-\[\#16525F\],
+    .bg-teal-600,
+    .bg-teal-700
+  ) {
+  background-color: var(--w-accent-surface);
+  color: var(--w-accent-ink);
+  border: 1px solid var(--w-accent-border);
+  box-shadow: var(--shadow-sm);
+}
+
+html.theme-pink
+  :is(button, a, [role="button"]):is(
+    .hover\:bg-\[\#1F6F7C\],
+    .hover\:bg-teal-700
+  ):hover {
+  background-color: var(--w-accent-surface-2);
+}
+
+/* ───────── toggle buttons ───────── */
+html.theme-pink .toggle-button {
+  border-color: var(--w-border);
+}
+
+html.theme-pink .toggle-inactive {
+  background: var(--w-surface);
+  color: var(--w-text);
+  border-color: var(--w-border);
+  box-shadow: var(--shadow-sm);
+}
+
+html.theme-pink .toggle-active {
+  color: var(--w-text);
+  border-color: var(--w-border-strong);
+  box-shadow: var(--w-shadow-1);
+}
+
+html.theme-pink .toggle-glow-red {
+  background: var(--w-priority-surface-2);
+  color: var(--w-priority-ink);
+  border-color: var(--w-priority-border);
+}
+
+html.theme-pink .toggle-glow-orange {
+  background: var(--w-rush-surface-2);
+  color: var(--w-rush-ink);
+  border-color: var(--w-rush-border);
+}
+
+html.theme-pink .toggle-glow-amber {
+  background: var(--w-hold-surface);
+  color: var(--w-hold-ink);
+  border-color: var(--w-hold-border);
+}
+
+html.theme-pink .toggle-glow-pink {
+  background: var(--w-newacct-surface-2);
+  color: var(--w-newacct-ink);
+  border-color: var(--w-newacct-border);
+}
+
+/* ───────── status text colors ───────── */
+html.theme-pink :is(.text-red-500, .text-red-600, .text-red-700) {
+  color: var(--w-priority-ink);
+}
+
+html.theme-pink :is(.text-orange-500, .text-orange-600) {
+  color: var(--w-rush-ink);
+}
+
+html.theme-pink :is(.text-amber-500, .text-amber-600) {
+  color: var(--w-hold-ink);
+}
+
+html.theme-pink :is(.text-teal-600, .text-teal-700, .text-teal-800) {
+  color: var(--w-accent-ink);
+}
+
+html.theme-pink :is(.text-pink-500, .text-pink-600, .text-pink-700) {
+  color: var(--w-newacct-ink);
+}
+
+/* ───────── status backgrounds ───────── */
+html.theme-pink :is(.bg-red-50, .bg-red-100, .bg-red-200) {
+  background: var(--w-priority-surface);
+}
+
+html.theme-pink :is(.bg-orange-50, .bg-orange-100) {
+  background: var(--w-rush-surface);
+}
+
+html.theme-pink :is(.bg-amber-50, .bg-amber-100) {
+  background: var(--w-hold-surface);
+}
+
+html.theme-pink :is(.bg-pink-50, .bg-pink-100) {
+  background: var(--w-newacct-surface);
+}
+
+html.theme-pink .bg-pink-500 {
+  background-color: var(--w-newacct-dot) !important;
+}
+
+html.theme-pink .bg-teal-50 {
+  background: var(--w-accent-surface);
+}
+
+html.theme-pink .bg-teal-100 {
+  background: var(--w-accent-surface-2);
+}
+
+/* ───────── PRIORITY/RUSH INDICATOR BARS (pastel) ───────── */
+html.theme-pink .bg-red-500,
+html.theme-pink .bg-red-600 {
+  background: var(--w-priority-bar) !important;
+}
+
+html.theme-pink .bg-orange-500,
+html.theme-pink .bg-orange-600 {
+  background: var(--w-rush-bar) !important;
+}
+
+html.theme-pink .bg-amber-500 {
+  background: var(--w-hold-dot);
+}
+
+/* ───────── borders ───────── */
+html.theme-pink :is(.border-teal-600, .border-teal-700) {
+  border-color: var(--w-accent-border);
+}
+
+/* ───────── rings ───────── */
+html.theme-pink .ring-red-500 {
+  --tw-ring-color: var(--w-ring-priority);
+}
+
+html.theme-pink .ring-orange-400 {
+  --tw-ring-color: var(--w-ring-rush);
+}
+
+html.theme-pink .ring-amber-400 {
+  --tw-ring-color: var(--w-ring-hold);
+}
+
+html.theme-pink :is(.ring-red-500\/30, .ring-blue-500\/30) {
+  --tw-ring-color: #9d4b6c38;
+}
+
+html.theme-pink .ring-orange-500\/30 {
+  --tw-ring-color: #e87a4a38;
+}
+
+html.theme-pink .ring-amber-500\/30 {
+  --tw-ring-color: #d9980b38;
+}
+
+/* ───────── board columns ───────── */
+html.theme-pink .bg-red-700.flex-1.flex.flex-col.p-4.rounded-lg {
+  background: #f9e0e3;
+  border: 1px solid #ef444438;
+  box-shadow: var(--w-shadow-2);
+}
+
+html.theme-pink .bg-amber-700.flex-1.flex.flex-col.p-4.rounded-lg {
+  background: #f7ecda;
+  border: 1px solid #d9980b38;
+  box-shadow: var(--w-shadow-2);
+}
+
+html.theme-pink .bg-yellow-100.flex-1.flex.flex-col.p-4.rounded-lg {
+  background: var(--w-column-bg);
+  border: 1px solid #d9980b38;
+  box-shadow: var(--w-shadow-2);
+}
+
+/* ───────── case cards ───────── */
+html.theme-pink
+  :is(.bg-\[\#4D8490\], .bg-\[\#55679B\], .bg-\[\#C75A9E\], .bg-\[\#6F5BA8\]) {
+  color: var(--w-text);
+  border: 1px solid var(--w-border);
+  filter: drop-shadow(var(--w-row-shadow));
+}
+
+html.theme-pink .bg-\[\#4D8490\] {
+  background: var(--w-row-blue);
+  border-color: #6b8cc92e;
+}
+
+html.theme-pink .bg-\[\#55679B\] {
+  background: var(--w-row-purple);
+  border-color: #8b6bc92e;
+}
+
+html.theme-pink .bg-\[\#C75A9E\] {
+  background: var(--w-row-pink);
+  border-color: #c96ba52e;
+}
+
+html.theme-pink .bg-\[\#6F5BA8\] {
+  background: var(--w-row-stage2);
+  border-color: #9b6bc92e;
+}
+
+/* ───────── white opacity backgrounds - now pink tinted ───────── */
+html.theme-pink .bg-white\/5 {
+  background-color: #f5e8ed0d;
+}
+
+html.theme-pink .bg-white\/10 {
+  background-color: #f5e8ed1a;
+}
+
+html.theme-pink .bg-white\/20 {
+  background-color: #f5e8ed33;
+}
+
+html.theme-pink .bg-white\/30 {
+  background-color: #f5e8ed4d;
+}
+
+html.theme-pink :is(.bg-white\/35, .bg-white\/40) {
+  background-color: #f5e8ed66;
+}
+
+html.theme-pink .bg-white\/50 {
+  background-color: #faf5f7db;
+}
+
+html.theme-pink .bg-white\/60 {
+  background-color: #faf5f7e6;
+}
+
+html.theme-pink .bg-white\/70 {
+  background-color: #faf5f7eb;
+}
+
+html.theme-pink .bg-white\/90 {
+  background-color: #faf5f7f5;
+}
+
+html.theme-pink .hover\:bg-white\/40:hover {
+  background-color: #f5e8ed66;
+}
+
+html.theme-pink .hover\:bg-white\/60:hover {
+  background-color: #f5e8ed99;
+}
+
+/* ───────── borders ───────── */
+html.theme-pink
+  :is(
+    .border-white,
+    .border-white\/20,
+    .border-white\/30,
+    .border-white\/40,
+    .border-white\/50
+  ) {
+  border-color: var(--w-border);
+}
+
+html.theme-pink .ring-white\/30 {
+  --tw-ring-color: #4a1a2d24;
+}
+
+/* ───────── text colors ───────── */
+html.theme-pink .text-white {
+  color: var(--w-text);
+}
+
+html.theme-pink .text-white\/90 {
+  color: var(--w-text);
+  opacity: 0.92;
+}
+
+html.theme-pink .text-white\/80 {
+  color: var(--w-text);
+  opacity: 0.85;
+}
+
+html.theme-pink .text-white\/70 {
+  color: var(--w-text);
+  opacity: 0.78;
+}
+
+html.theme-pink .text-white\/60 {
+  color: var(--w-text);
+  opacity: 0.7;
+}
+
+html.theme-pink .text-white\/50 {
+  color: var(--w-text-muted);
+  opacity: 0.9;
+}
+
+html.theme-pink .text-black\/50 {
+  color: var(--w-text-muted);
+}
+
+html.theme-pink :is(.h-px.bg-black\/20, .h-px.bg-white\/20) {
+  background-color: #4a1a2d1f;
+}
+
+/* ───────── slate backgrounds ───────── */
+html.theme-pink .bg-gray-900:not(button):not(a):not([role="button"]) {
+  background-color: var(--w-surface);
+  border: 1px solid var(--w-border);
+  color: var(--w-text);
+  box-shadow: var(--w-shadow-1);
+}
+
+html.theme-pink :is(.bg-slate-800, .bg-slate-700\/50) {
+  background-color: #f5e8ed1a;
+  border-color: var(--w-border);
+  color: var(--w-text);
+}
+
+html.theme-pink .border-slate-700 {
+  border-color: var(--w-border);
+}
+
+/* ───────── gradients ───────── */
+html.theme-pink .bg-gradient-to-br.from-slate-900.to-slate-800 {
+  background: linear-gradient(135deg, #fdf8fafb 0%, #f2e0e7fb 100%);
+  color: var(--w-text);
+}
+
+html.theme-pink .bg-gradient-to-br.from-slate-900.via-slate-800.to-slate-900 {
+  background: linear-gradient(
+    135deg,
+    #fdf8fafb 0%,
+    #f2e0e7fb 55%,
+    #fdf8fafb 100%
+  );
+  color: var(--w-text);
+}
+
+html.theme-pink
+  .bg-gradient-to-br.from-slate-900
+  :is(.text-slate-300, .text-slate-400) {
+  color: var(--w-text-muted);
+}
+
+/* ───────── preserve white text on colored backgrounds ───────── */
+html.theme-pink
+  :is(
+    .bg-blue-500,
+    .bg-blue-600,
+    .bg-blue-700,
+    .bg-indigo-600,
+    .bg-green-500,
+    .bg-green-600,
+    .bg-amber-500,
+    .bg-amber-600,
+    .bg-gradient-to-r,
+    .bg-\[\#1F6F7C\]
+  ).text-white,
+html.theme-pink
+  :is(
+    .bg-blue-500,
+    .bg-blue-600,
+    .bg-blue-700,
+    .bg-indigo-600,
+    .bg-green-500,
+    .bg-green-600,
+    .bg-amber-500,
+    .bg-amber-600,
+    .bg-gradient-to-r,
+    .bg-\[\#1F6F7C\]
+  )
+  .text-white {
+  color: #ffffff;
+  opacity: 1;
+}
+
+/* Danger buttons keep white text */
+html.theme-pink button.bg-red-500.text-white,
+html.theme-pink button.bg-red-600.text-white,
+html.theme-pink button.bg-red-700.text-white {
+  color: #ffffff !important;
+}
+
+/* Rose accent buttons use dark ink */
+html.theme-pink
+  :is(
+    .bg-teal-600,
+    .bg-teal-700,
+    .bg-gray-900,
+    .bg-\[\#16525F\],
+    .bg-\[\#1F6F7C\]
+  ):is(.text-white),
+html.theme-pink
+  :is(
+    .bg-teal-600,
+    .bg-teal-700,
+    .bg-gray-900,
+    .bg-\[\#16525F\],
+    .bg-\[\#1F6F7C\]
+  )
+  .text-white {
+  color: var(--w-accent-ink);
+}
+
+/* ───────── animations ───────── */
+@keyframes row-pulse-lite {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes row-glow-lite {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.15);
+  }
+}
+
+html.theme-pink :is(.pulse-red, .flash-red)::after {
+  animation: row-pulse-lite 1.5s ease-in-out infinite;
+  background: var(--w-priority-flash) !important;
+  mix-blend-mode: multiply;
+}
+
+html.theme-pink .glow {
+  animation: row-glow-lite 2s ease-in-out infinite;
+  box-shadow: 0 0 0 1px #9d4b6c26, 0 6px 14px #4a1a2d1f;
+}
+
+html.theme-pink .pulse-red {
+  filter: brightness(1.02) saturate(1.05);
+}
+
+html.theme-pink .case-row.dragging {
+  filter: drop-shadow(0 12px 24px #4a1a2d2e);
+}
+
+/* ───────── scrollbar ───────── */
+html.theme-pink .scrollbar::-webkit-scrollbar-track {
+  background: #f5e8ed4d;
+}
+
+html.theme-pink .scrollbar::-webkit-scrollbar-thumb {
+  background-color: #4a1a2d2e;
+}
+
+html.theme-pink .scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #4a1a2d42;
+}
+
+/* ───────── forms ───────── */
+html.theme-pink :is(input, textarea)::placeholder {
+  color: var(--w-text-subtle);
+}
+
+html.theme-pink table :is(thead th, tbody td) {
+  color: var(--w-text);
+}
+
+/* ───────── misc ───────── */
+html.theme-pink .fixed.inset-0 header {
+  padding-left: 4rem;
+}
+
+html.theme-pink .bg-gradient-to-r .bg-white\/50 {
+  background-color: #faf5f7d6;
+  border: 1px solid #4a1a2d14;
+}
+
+html.theme-pink .glass-nb h2.text-gray-100 {
+  color: var(--w-text);
+}
+
+html.theme-pink .glass-nb svg.text-gray-200 {
+  color: var(--w-text-muted);
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEW ACCOUNT SHEEN - PINK THEME OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html.theme-pink {
+  --newaccount-sheen-opacity: 0.55;
+  --newaccount-sheen-blur: 6px;
+  --newaccount-sheen-speed: 2.8s;
+  --newaccount-glow-opacity: 0.12;
+  --newaccount-color-primary: 157, 75, 108;
+  --newaccount-color-secondary: 199, 90, 158;
+}
+
+html.theme-pink .new-account-sheen {
+  box-shadow: 0 0 0 1px rgba(157, 75, 108, 0.22),
+    0 4px 22px -4px rgba(157, 75, 108, 0.32),
+    0 0 30px -8px rgba(199, 90, 158, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+html.theme-pink .new-account-sheen::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 15%,
+    rgba(255, 255, 255, 0.3) 35%,
+    rgba(255, 255, 255, var(--newaccount-sheen-opacity, 0.55)) 50%,
+    rgba(255, 255, 255, 0.3) 65%,
+    rgba(255, 255, 255, 0.15) 85%,
+    transparent 100%
+  );
+}
+
+html.theme-pink .new-account-sheen::after {
+  background: radial-gradient(
+    ellipse 150% 100% at 50% 50%,
+    rgba(199, 90, 158, var(--newaccount-glow-opacity, 0.12)) 0%,
+    rgba(157, 75, 108, 0.05) 40%,
+    transparent 70%
+  );
+}

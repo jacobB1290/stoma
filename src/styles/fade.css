@@ -1,0 +1,14 @@
+/* one tiny fade‑in utility */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-in {
+  animation: fadeInUp 0.35s cubic-bezier(0.25, 0.8, 0.32, 1) both;
+}
