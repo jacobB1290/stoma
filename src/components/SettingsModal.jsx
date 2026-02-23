@@ -744,8 +744,8 @@ export default function SettingsModal({
                     label="⚡ Lite Mode"
                     description={
                       liteUi
-                        ? "Active – animations, blur & GPU effects disabled"
-                        : "For Raspberry Pi and low-power hardware"
+                        ? "Active – blur & GPU compositor layers removed"
+                        : "Removes blur & GPU layers so animations stay smooth on slow hardware"
                     }
                   />
                 </div>
@@ -756,26 +756,18 @@ export default function SettingsModal({
                     <ul className="space-y-0.5 list-none pl-0">
                       <li className="flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                        All animations &amp; transitions stopped
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
                         Backdrop blur &amp; GPU filters removed
                       </li>
                       <li className="flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                        Glass panels → solid white surfaces
+                        Glass panels → solid surfaces
                       </li>
                       <li className="flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                        Render rate capped to 20 fps
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                        Priority / overdue shown as static rings
+                        Translucent backgrounds made opaque
                       </li>
                     </ul>
-                    <p className="text-gray-400 pt-0.5">Shortcut: Alt + Shift + L</p>
+                    <p className="text-gray-400 pt-0.5">Animations run at full speed · Shortcut: Alt + Shift + L</p>
                   </div>
                 )}
 

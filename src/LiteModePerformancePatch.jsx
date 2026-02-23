@@ -1,42 +1,20 @@
 /**
- * LiteModePerformancePatch.jsx  –  Stomaboard Lite Mode v2
+ * LiteModePerformancePatch.jsx  –  Stomaboard Lite Mode v3
  * ─────────────────────────────────────────────────────────
- * A ground-up rewrite designed for low-power hardware (Raspberry Pi,
- * older laptops, cheap Windows PCs).
+ * Designed for low-power hardware (Raspberry Pi, cheap Windows PCs).
  *
- * What it does
- * ────────────
- *  1. Injects a comprehensive CSS override sheet onto <html class="lite">
- *     that surgically removes every GPU-compositing expense:
- *       • backdrop-filter / filter / blur / saturate       → removed
- *       • framer-motion layout animations                  → disabled
- *       • CSS keyframe animations (glow, pulse-red, ping)  → stopped
- *       • box-shadow, ring                                 → flattened
- *       • will-change                                      → auto
- *       • smooth-scroll                                    → auto
- *       • opacity fractions on backgrounds                 → solid
+ * Philosophy: animations are FINE – they run on the CPU/JS side and
+ * are cheap.  What kills a Pi is the GPU compositing pipeline:
+ *   • backdrop-filter (blur/saturate)  → forces a separate GPU layer
+ *   • filter (brightness on .glow)     → triggers full repaint + composite
+ *   • mix-blend-mode                   → requires extra compositing pass
+ *   • will-change: transform/opacity   → pre-promotes elements to GPU layers
+ *   • translucent bg-white/* colours  → alpha compositing on every paint
  *
- *  2. Patches window.requestAnimationFrame to throttle at ≤ 20 fps so
- *     framer-motion's layout engine doesn't eat all four Pi cores.
- *     The original rAF is restored when Lite Mode is turned off.
- *
- *  3. Tells framer-motion reducedMotion="always" via <MotionConfig> so
- *     every <motion.div> skips its spring/tween interpolation.
- *
- *  4. Exposes useLiteMode() hook → { lite: bool, toggle: fn } for
- *     any component (currently SettingsModal).
- *
- *  5. Persists preference to localStorage("lite-ui").
- *
- *  6. Keyboard shortcut: Alt + Shift + L  (for power users / IT staff).
- *
- * What it does NOT do
- * ───────────────────
- *  • Does not change layout or break any interactive behaviour.
- *  • Does not alter data, routing, modals, or React state.
- *  • Does not re-theme the app – it stays on whatever theme the user chose.
- *    (The light-coloured flat background only activates on glass/translucent
- *     classes that would otherwise need a GPU layer.)
+ * So Lite Mode ONLY removes those compositor costs.
+ * Framer-motion springs, AnimatePresence, layout animations, the
+ * glow/pulse-red flash effects, and all CSS transitions run at full
+ * speed exactly as on a normal machine.
  */
 
 import React, {
@@ -53,168 +31,90 @@ const LiteCtx = createContext({ lite: false, toggle: () => {} });
 export const useLiteMode = () => useContext(LiteCtx);
 
 /* ─────────────────────── CSS override sheet ──────────────────────── */
-const STYLE_ID = "stomaboard-lite-css-v2";
+const STYLE_ID = "stomaboard-lite-css-v3";
 
 function injectLiteCSS() {
   if (document.getElementById(STYLE_ID)) return;
 
   const css = /* css */ `
 /* ═══════════════════════════════════════════════════════════════════
-   STOMABOARD LITE MODE  –  performance override sheet
-   Applied when <html> carries the class "lite"
-   Every rule uses !important to win over inline styles and libraries.
+   STOMABOARD LITE MODE  –  GPU compositor override sheet
+   Applied when <html> carries the class "lite".
+   Target: remove expensive GPU layers only.
+   Animations, transitions, and framer-motion run normally.
    ═══════════════════════════════════════════════════════════════════ */
 
-/* ── 1. Stop ALL animations & transitions globally ─────────────────
-   This is the single biggest CPU win on Pi.  Framer-motion still
-   fires its JavaScript timers but MotionConfig reducedMotion="always"
-   suppresses the actual interpolation; this catches anything else.    */
+/* ── 1. Kill backdrop-filter everywhere ────────────────────────────
+   backdrop-filter: blur() is the single most expensive effect on Pi.
+   Every element with it gets promoted to its own GPU layer and the
+   compositor must re-render it on every frame.  Remove it entirely.  */
 html.lite *,
 html.lite *::before,
 html.lite *::after {
-  animation-duration:       0.001ms !important;
-  animation-delay:          0s      !important;
-  animation-iteration-count:1       !important;
-  transition-duration:      0.001ms !important;
-  transition-delay:         0s      !important;
-}
-
-/* ── 2. Kill GPU compositing layers ────────────────────────────────
-   backdrop-filter and filter push every element onto its own GPU
-   layer.  On a Pi this saturates VRAM and the compositor stalls.     */
-html.lite *,
-html.lite *::before,
-html.lite *::after {
-  backdrop-filter: none      !important;
+  backdrop-filter:         none !important;
   -webkit-backdrop-filter: none !important;
-  filter:          none      !important;
-  will-change:     auto      !important;
-  transform:       none      !important;
-  mix-blend-mode:  normal    !important;
 }
 
-/* ── 3. Framer-motion layout / position overrides ──────────────────
-   Even with reducedMotion="always" framer-motion adds inline
-   transform/opacity/scale styles.  We reset them here so the layout
-   is purely CSS-driven again.                                         */
-html.lite [style*="transform"],
-html.lite [style*="opacity"],
-html.lite [style*="scale"] {
-  transform: none    !important;
-  /* opacity intentionally NOT reset – we want invisible-to-visible
-     transitions to still show content.  Only animation is removed.  */
+/* ── 2. Remove filter (used by .glow brightness effect) ────────────
+   filter: brightness() on .glow forces a full GPU repaint per frame.
+   The .glow CSS animation still runs (the class is still there and
+   the keyframe fires) but without the filter cost it is just a no-op
+   paint – cheap.  The ring colour/border on the card still shows     */
+html.lite * {
+  filter: none !important;
 }
 
-/* ── 4. Glass / blur panels → solid white surface ──────────────────
-   .glass and .glass-nb use backdrop-filter which we killed above.
-   Give them a clean opaque background so they remain readable.        */
+/* ── 3. Clear will-change promotions ───────────────────────────────
+   will-change: transform/opacity pre-promotes elements to GPU layers
+   before any animation even starts.  On Pi that burns VRAM for every
+   card on screen.  Reset to auto so promotion only happens when the
+   browser actually needs it (i.e. during an active animation).       */
+html.lite * {
+  will-change: auto !important;
+}
+
+/* ── 4. Remove mix-blend-mode ──────────────────────────────────────
+   mix-blend-mode: color (used by .pulse-red::after overlay) requires
+   an extra compositing pass.  The pulse animation itself still runs
+   but the colour-blend layer is removed; the element is still visible
+   and animated, just without the blend overhead.                     */
+html.lite * {
+  mix-blend-mode: normal !important;
+}
+
+/* ── 5. Glass / blur panels → solid opaque surface ─────────────────
+   .glass and .glass-nb rely entirely on backdrop-filter (killed above)
+   for their frosted look.  Without the filter they show transparent,
+   so give them a solid background that keeps the UI readable.        */
 html.lite .glass,
 html.lite .glass-nb,
 html.lite .glass-nb-dark {
-  background:    #ffffff !important;
-  border:        1px solid rgba(0,0,0,0.10) !important;
-  box-shadow:    0 1px 4px rgba(0,0,0,0.08) !important;
-}
-
-/* ── 5. Translucent Tailwind utility classes → opaque ──────────────
-   bg-white/10 … bg-white/90, bg-black/10 … bg-black/90 etc.
-   The pattern [class*="bg-white/"] doesn't catch inline vars so we
-   also target common specific values used across the codebase.        */
-html.lite [class*="bg-white/"],
-html.lite [class*="bg-black/"] {
-  background-color: rgba(255,255,255,0.96) !important;
-}
-html.lite [class*="border-white/"] {
-  border-color: rgba(0,0,0,0.12) !important;
-}
-html.lite [class*="ring-white/"] {
-  --tw-ring-color: rgba(0,0,0,0.15) !important;
-}
-
-/* ── 6. Flash / glow / pulse animations ───────────────────────────
-   flash.css defines .glow and .pulse-red which rely on CSS animations
-   and CSS filter.  In lite mode we show a static coloured ring
-   instead so urgency is still communicated without the GPU cost.      */
-html.lite .glow {
-  outline: 3px solid #f59e0b !important;   /* amber – "priority" */
-  outline-offset: -2px        !important;
-}
-html.lite .pulse-red,
-html.lite .flash-red {
-  outline: 3px solid #ef4444 !important;   /* red – "overdue"    */
-  outline-offset: -2px        !important;
-}
-html.lite .pulse-red::after,
-html.lite .flash-red::after {
-  display: none !important;
-}
-
-/* ── 7. Animate-ping (update dot) ─────────────────────────────────
-   Tailwind's animate-ping is used for the "update available" badge.
-   Replace with a static dot.                                          */
-html.lite .animate-ping {
-  animation: none    !important;
-  opacity:   1       !important;
-  transform: none    !important;
-}
-html.lite .animate-spin {
-  animation: none    !important;
-}
-html.lite .animate-pulse {
-  animation: none    !important;
-  opacity:   1       !important;
-}
-html.lite .animate-bounce {
-  animation: none    !important;
-}
-
-/* ── 8. Box-shadow flattening ──────────────────────────────────────
-   Multi-layer box shadows trigger extra GPU compositing passes.
-   In lite mode we use a single crisp 1-pixel border instead.         */
-html.lite [class*="shadow-"] {
-  box-shadow: 0 1px 3px rgba(0,0,0,0.10) !important;
-}
-
-/* ── 9. Sticky headers → static ───────────────────────────────────
-   Sticky positioning forces the browser to recomposite on every
-   scroll event, which is expensive on slow hardware.                  */
-html.lite .sticky,
-html.lite [class*="sticky"] {
-  position: static !important;
-  top:      auto   !important;
-  left:     auto   !important;
-  right:    auto   !important;
-}
-
-/* ── 9a. KEEP fixed UI elements fixed ─────────────────────────────
-   Settings button, FABs, modal overlays, toasts must stay in place.  */
-html.lite .fixed,
-html.lite [class*="fixed"] {
-  position: fixed !important;
-}
-
-/* ── 10. Add-case card de-sticky / de-zoom ─────────────────────────
-   The "Add Case" bubble has a scale/zoom entrance that causes forced
-   layout on Pi.  Lock it to a plain inline card.                      */
-html.lite .add-case-card,
-html.lite [data-add-case] {
-  position:   static    !important;
-  transform:  none      !important;
-  scale:      1         !important;
-  max-width:  260px     !important;
-  padding:    8px 16px  !important;
-  background: #ffffff   !important;
+  background: rgba(255,255,255,0.95) !important;
   border:     1px solid rgba(0,0,0,0.10) !important;
-  border-radius: 12px   !important;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
 }
 
-/* ── 11. Smooth-scroll → instant ──────────────────────────────────*/
-html.lite {
-  scroll-behavior: auto !important;
+/* ── 6. Translucent Tailwind bg utilities → near-opaque ────────────
+   Classes like bg-white/10, bg-black/50 create semi-transparent
+   layers that the compositor must alpha-blend on every repaint.
+   Bumping them to near-opaque eliminates the blend cost while keeping
+   the visual appearance close to the original.                       */
+html.lite [class*="bg-white/"] {
+  background-color: rgba(255,255,255,0.95) !important;
+}
+html.lite [class*="bg-black/"] {
+  background-color: rgba(0,0,0,0.85) !important;
 }
 
-/* ── 12. Scrollbar – thin, no GPU paint ───────────────────────────*/
+/* ── 7. backdrop-blur Tailwind utilities ───────────────────────────
+   Catches backdrop-blur-sm, backdrop-blur-md, etc. applied directly
+   as Tailwind classes rather than through .glass.                    */
+html.lite [class*="backdrop-blur"] {
+  backdrop-filter:         none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ── 8. Thin scrollbar ─────────────────────────────────────────────
+   Minor paint saving: thinner scrollbar = less area to composite.   */
 html.lite {
   scrollbar-width: thin;
   scrollbar-color: rgba(0,0,0,0.2) transparent;
@@ -222,30 +122,6 @@ html.lite {
 html.lite ::-webkit-scrollbar       { width: 6px; height: 6px; }
 html.lite ::-webkit-scrollbar-track { background: transparent; }
 html.lite ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.20); border-radius: 3px; }
-
-/* ── 13. framer-motion LayoutGroup – stop layout animations ────────
-   framer-motion adds [data-framer-*] attributes. We don't target
-   those directly but MotionConfig reducedMotion="always" + the
-   transform:none above together eliminate the motion.                 */
-html.lite [data-projection-id] {
-  transform: none !important;
-}
-
-/* ── 14. Overlay / modal backdrops ─────────────────────────────────
-   Modal backdrops use bg-black/50 backdrop-blur-sm.  In lite mode:
-   backdrop is a solid semi-transparent layer, no blur.               */
-html.lite [class*="backdrop-blur"] {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-/* ── 15. Opacity classes ───────────────────────────────────────────
-   Framer-motion sets opacity: 0 on initial render and animates to 1.
-   With reducedMotion="always" it jumps immediately, but CSS can still
-   catch elements left at 0 if a component bails early.               */
-html.lite [class*="opacity-0"]:not([aria-hidden="true"]) {
-  opacity: 1 !important;
-}
   `;
 
   const el = document.createElement("style");
@@ -253,41 +129,6 @@ html.lite [class*="opacity-0"]:not([aria-hidden="true"]) {
   el.textContent = css;
   document.head.appendChild(el);
 }
-
-function removeLiteCSS() {
-  document.getElementById(STYLE_ID)?.remove();
-}
-
-/* ──────────────── rAF throttle (≤ 20 fps) ───────────────────────── */
-// Framer-motion drives every layout animation through rAF.  Capping
-// it at 20 fps cuts its CPU share by ~67 % on a 60 Hz display.
-// We restore the real rAF when Lite Mode is off.
-let _originalRAF = null;
-let _patchCount   = 0;  // guard against double-patch
-
-function patchRAF() {
-  if (_patchCount > 0) { _patchCount++; return; }
-  _originalRAF = window.requestAnimationFrame;
-  // 50 ms ≈ 20 fps
-  window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 50);
-  _patchCount = 1;
-}
-
-function unpatchRAF() {
-  _patchCount = Math.max(0, _patchCount - 1);
-  if (_patchCount === 0 && _originalRAF) {
-    window.requestAnimationFrame = _originalRAF;
-    _originalRAF = null;
-  }
-}
-
-/* ──────────────── pulse-clock interval ──────────────────────────── */
-// animationEngine.js runs setInterval(tick, 1500) to drive CSS
-// --pulse-clock.  In Lite Mode we don't need sub-second precision –
-// we just keep the variable frozen so the static outlines above work.
-// We don't touch the interval because animationEngine.js manages it;
-// our CSS animation-duration: 0.001ms override already stops it from
-// consuming paint time.
 
 /* ─────────────────────────── Provider ───────────────────────────── */
 export function LiteModeProvider({ children }) {
@@ -299,31 +140,22 @@ export function LiteModeProvider({ children }) {
     }
   });
 
-  /* Apply / remove effects whenever `lite` changes */
+  /* Apply / remove class whenever `lite` changes */
   useEffect(() => {
     if (lite) {
       injectLiteCSS();
       document.documentElement.classList.add("lite");
-      patchRAF();
     } else {
       document.documentElement.classList.remove("lite");
-      unpatchRAF();
-      // Leave the CSS sheet injected – it's harmless without the class
-      // and avoids a flash when toggling back on.
+      // Leave the CSS sheet injected – harmless without the class,
+      // and avoids a flash on next toggle.
     }
     try {
       localStorage.setItem("lite-ui", JSON.stringify(lite));
     } catch {
-      /* ignore – storage may be unavailable in private mode */
+      /* storage unavailable in private mode – ignore */
     }
   }, [lite]);
-
-  /* Cleanup on unmount */
-  useEffect(() => {
-    return () => {
-      if (lite) unpatchRAF();
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = useCallback(() => setLite((v) => !v), []);
 
@@ -342,12 +174,12 @@ export function LiteModeProvider({ children }) {
   return (
     <LiteCtx.Provider value={{ lite, toggle }}>
       {/*
-        reducedMotion="always" tells every <motion.*> to skip its
-        spring / tween and jump straight to the final value.
-        When lite is false we pass "user" – meaning framer-motion
-        respects the OS "prefers-reduced-motion" media query normally.
+        In Lite Mode we leave reducedMotion as "user" so framer-motion
+        runs all springs and tweens at full speed.  The GPU cost
+        savings come entirely from the CSS overrides above, not from
+        disabling JS animation.
       */}
-      <MotionConfig reducedMotion={lite ? "always" : "user"}>
+      <MotionConfig reducedMotion="user">
         {children}
       </MotionConfig>
     </LiteCtx.Provider>
@@ -356,7 +188,6 @@ export function LiteModeProvider({ children }) {
 
 /* ──────────────────── Mini toast helper ─────────────────────────── */
 function showToast(nowOn) {
-  // If a toast already exists, remove it first
   document.getElementById("lite-toast")?.remove();
 
   const t = document.createElement("div");
