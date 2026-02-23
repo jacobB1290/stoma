@@ -5,23 +5,36 @@ import React, {
   useCallback,
   useLayoutEffect,
   useContext,
+  lazy,
+  Suspense,
 } from "react";
 import { createPortal } from "react-dom";
 import { DataProvider, useMut } from "./context/DataContext";
 import { UserProvider, UserCtx } from "./context/UserContext";
-import UserSetupModal from "./components/UserSetupModal";
-import SettingsModal from "./components/SettingsModal";
-import Board from "./components/Board";
-import Editor from "./components/Editor";
-import SystemManagementScreen from "./components/SystemManagementScreen";
 import { FlashProvider } from "./FlashContext";
 import clsx from "clsx";
-
+import UserSetupModal from "./components/UserSetupModal";
+import Board from "./components/Board";
 import "./theme-white.css";
 import "./theme-dark.css";
 import "./theme-pink.css";
 import "./styles/glass.css";
 import "./flash.css";
+
+// Lazy-load heavy panels – code-split into separate chunks so the initial
+// JS bundle is smaller and the app shell loads faster.
+const Editor               = lazy(() => import("./components/Editor"));
+const SettingsModal        = lazy(() => import("./components/SettingsModal"));
+const SystemManagementScreen = lazy(() => import("./components/SystemManagementScreen"));
+
+// Lightweight spinner shown while a lazy chunk is being fetched
+function PanelLoader() {
+  return (
+    <div className="flex items-center justify-center w-full h-full min-h-[200px]">
+      <div className="w-8 h-8 rounded-full border-2 border-white/30 border-t-white/80 animate-spin" />
+    </div>
+  );
+}
 
 /* =============================
    Week Navigation Component
@@ -668,14 +681,16 @@ export default function App() {
             onPrevWeek={handlePrevWeek}
           />
 
-          <SettingsModal
-            open={settingsOpen}
-            onClose={() => setSettingsOpen(false)}
-            theme={theme}
-            setTheme={setTheme}
-            showInfoBar={showInfoBar}
-            setShowInfoBar={setShowInfoBar}
-          />
+          <Suspense fallback={null}>
+            <SettingsModal
+              open={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
+              theme={theme}
+              setTheme={setTheme}
+              showInfoBar={showInfoBar}
+              setShowInfoBar={setShowInfoBar}
+            />
+          </Suspense>
 
           <UserSetupModal />
         </DataProvider>
@@ -1294,11 +1309,13 @@ function Inner({
 
       {/* Main content */}
       {view === "manage" ? (
-        facultySystemManagerEnabled && manageView === "system" ? (
-          <SystemManagementScreen />
-        ) : (
-          <Editor data={rows} deptDefault="Digital" showInfoBar={showInfoBar} />
-        )
+        <Suspense fallback={<PanelLoader />}>
+          {facultySystemManagerEnabled && manageView === "system" ? (
+            <SystemManagementScreen />
+          ) : (
+            <Editor data={rows} deptDefault="Digital" showInfoBar={showInfoBar} />
+          )}
+        </Suspense>
       ) : (
         <Board
           data={rows}

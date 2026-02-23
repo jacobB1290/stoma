@@ -1,4 +1,11 @@
 /* src/index.css */
+
+/* ── Tailwind base, components, utilities ─────────────────────────── */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── App-level global styles ─────────────────────────────────────── */
 html,
 body {
   margin: 0;
