@@ -17,6 +17,7 @@ import {
   animate,
   useReducedMotion,
 } from "framer-motion";
+import { preloadAllHistoryData } from "./AllHistoryModal";
 import { useMut } from "../context/DataContext";
 import { UserCtx } from "../context/UserContext";
 import CaseTable from "./CaseTable";
@@ -27,7 +28,6 @@ import { APP_VERSION } from "../constants";
 const AllHistoryModal = lazy(() => import("./AllHistoryModal"));
 const DeleteCompletedModal = lazy(() => import("./DeleteCompletedModal"));
 const UpdateModal = lazy(() => import("./UpdateModal"));
-import { preloadAllHistoryData } from "./AllHistoryModal";
 const COLLAPSE_THRESHOLD = 0.5;
 const EXPAND_THRESHOLD = 0.5;
 const COMPLETION_THRESHOLD = 0.8;

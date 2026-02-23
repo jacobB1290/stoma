@@ -187,7 +187,7 @@ export function LiteModeProvider({ children }) {
         document.body.appendChild(t);
 
         // Force reflow then show
-        t.offsetHeight;
+        void t.offsetHeight; // force reflow
         t.style.opacity = "1";
 
         setTimeout(() => (t.style.opacity = "0"), 1500);

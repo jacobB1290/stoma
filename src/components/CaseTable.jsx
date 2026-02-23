@@ -1,12 +1,3 @@
-// CaseTable.jsx - Optimized with progressive loading that doesn't block UI
-
-// ============ PROGRESSIVE LOADING CONFIG ============
-// Edit these values to tune loading performance vs animation smoothness
-const INITIAL_BATCH = 20; // Rows shown instantly on page switch
-const BATCH_SIZE = 100; // Rows added per batch
-const BATCH_DELAY = 500; // Milliseconds between batches
-// ====================================================
-
 import React, {
   useState,
   useCallback,
@@ -21,6 +12,16 @@ import ArchiveModal from "./ArchiveModal";
 import DeleteCompletedModal from "./DeleteCompletedModal";
 import { db, archiveCases } from "../services/caseService";
 import { useMut } from "../context/DataContext";
+
+
+// CaseTable.jsx - Optimized with progressive loading that doesn't block UI
+
+// ============ PROGRESSIVE LOADING CONFIG ============
+// Edit these values to tune loading performance vs animation smoothness
+const INITIAL_BATCH = 20; // Rows shown instantly on page switch
+const BATCH_SIZE = 100; // Rows added per batch
+const BATCH_DELAY = 500; // Milliseconds between batches
+// ====================================================
 
 /* ---------------- Minimal Status Dots (no framer-motion) ---------------- */
 const StatusDot = memo(({ type, pulse, pulseDelay }) => {
