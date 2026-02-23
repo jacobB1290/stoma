@@ -4,16 +4,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { v4 as uuid } from "uuid";
 
-/* Supabase creds (env first, then hard-coded fallback) */
-export const URL =
-  process.env.REACT_APP_SUPABASE_URL ??
-  "https://SUPABASE_PROJECT_REF_REMOVED.supabase.co";
-
-export const KEY =
-  process.env.REACT_APP_SUPABASE_ANON_KEY ??
-  "SUPABASE_ANON_KEY_PART1_REMOVED" +
-    "SUPABASE_ANON_KEY_PART2_REMOVED" +
-    "SUPABASE_ANON_KEY_PART3_REMOVED";
+/* Supabase creds — set via environment variables only.
+   In Vercel: Project Settings → Environment Variables.
+   Locally: create a .env file (never commit it). */
+export const URL = process.env.REACT_APP_SUPABASE_URL ?? "";
+export const KEY = process.env.REACT_APP_SUPABASE_ANON_KEY ?? "";
 
 export const db = createClient(URL, KEY, { auth: { persistSession: false } });
 

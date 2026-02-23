@@ -7,13 +7,11 @@ import "./flash.css"; // existing
 import "./index.css"; // ← new
 import { configureLLM } from "./qa/LLMChatService";
 
-// ============================================
-// PASTE YOUR OPENAI API KEY HERE
-// ============================================
+// API key is read from the REACT_APP_OPENAI_API_KEY environment variable.
+// Set it in Vercel → Project Settings → Environment Variables,
+// or in a local .env file (never commit .env to git).
 configureLLM({
-  apiKey:
-    "REACT_APP_OPENAI_API_KEY_REMOVED_FROM_HISTORY",
+  apiKey: process.env.REACT_APP_OPENAI_API_KEY || "",
 });
-// ============================================
 
 createRoot(document.getElementById("root")).render(<App />);
