@@ -129,7 +129,7 @@ export default function ArchiveModal({ isOpen, onClose, searchQuery = "" }) {
 
   const handlePermanentDelete = async (caseId) => {
     if (
-      !confirm(
+      !window.confirm(
         "Are you sure you want to permanently delete this case? This action cannot be undone."
       )
     ) {

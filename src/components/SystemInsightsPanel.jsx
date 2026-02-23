@@ -977,8 +977,6 @@ const ThoughtChainModal = ({ isOpen, onClose, events }) => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
   const getEventIcon = (type) => {
     switch (type) {
       case EVENT_TYPES.SESSION_START:
@@ -1262,6 +1260,8 @@ const ThoughtChainModal = ({ isOpen, onClose, events }) => {
       success: sessionEnd?.success,
     };
   }, [events]);
+
+  if (!isOpen) return null;
 
   return (
     <div
