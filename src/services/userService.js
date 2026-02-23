@@ -118,7 +118,7 @@ function getCookie(name) {
 // ============================================
 
 const DB_NAME = "AppUserStore";
-const DB_VERSION = 1;
+const DB_VERSION = 2;          // bumped: added deviceId key
 const STORE_NAME = "userData";
 
 let cachedIndexedDBName = null;
@@ -144,10 +144,11 @@ function openDB() {
     };
 
     request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "key" });
+      const idb = event.target.result;
+      if (!idb.objectStoreNames.contains(STORE_NAME)) {
+        idb.createObjectStore(STORE_NAME, { keyPath: "key" });
       }
+      // v2: no schema change needed, the store already supports any key
     };
   });
 }
@@ -166,9 +167,9 @@ async function saveToIndexedDB(name) {
 
 async function loadFromIndexedDB() {
   try {
-    const db = await openDB();
+    const idb = await openDB();
     return new Promise((resolve) => {
-      const transaction = db.transaction(STORE_NAME, "readonly");
+      const transaction = idb.transaction(STORE_NAME, "readonly");
       const store = transaction.objectStore(STORE_NAME);
       const request = store.get("userName");
 
@@ -178,9 +179,7 @@ async function loadFromIndexedDB() {
         resolve(result);
       };
 
-      request.onerror = () => {
-        resolve(null);
-      };
+      request.onerror = () => { resolve(null); };
     });
   } catch (e) {
     console.warn("[IndexedDB] Load failed:", e);
@@ -188,12 +187,97 @@ async function loadFromIndexedDB() {
   }
 }
 
+// ============================================================================
+// DEVICE ID — stable per browser install
+// Stored in IndexedDB so it survives Chrome profile switches / localStorage
+// clears. Used to look up the user's name from Supabase when all local
+// storage is empty (the "wrong Google profile" scenario).
+// ============================================================================
+
+let cachedDeviceId = null;
+
+export async function getOrCreateDeviceId() {
+  if (cachedDeviceId) return cachedDeviceId;
+
+  try {
+    const idb = await openDB();
+
+    const existing = await new Promise((resolve) => {
+      const tx  = idb.transaction(STORE_NAME, "readonly");
+      const req = tx.objectStore(STORE_NAME).get("deviceId");
+      req.onsuccess = () => resolve(req.result?.value || null);
+      req.onerror  = () => resolve(null);
+    });
+
+    if (existing) {
+      cachedDeviceId = existing;
+      return existing;
+    }
+
+    const newId = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const tx = idb.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).put({ key: "deviceId", value: newId });
+
+    cachedDeviceId = newId;
+    console.log("[DeviceId] Created new device ID:", newId);
+    return newId;
+  } catch (e) {
+    console.warn("[DeviceId] Could not persist device ID:", e);
+    if (!cachedDeviceId) cachedDeviceId = `tmp-${Date.now()}`;
+    return cachedDeviceId;
+  }
+}
+
+/**
+ * Helper — write a userName cookie that lasts 2 years.
+ */
+function setLongCookie(name) {
+  try {
+    const expires = new Date();
+    expires.setFullYear(expires.getFullYear() + 2);
+    document.cookie =
+      `userName=${encodeURIComponent(name)};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
+  } catch { /* ignore */ }
+}
+
+/**
+ * Ask Supabase: "what user_name did this device last log in as?"
+ * Returns the name string, or null if not found / error.
+ */
+export async function lookupNameByDeviceId() {
+  try {
+    const deviceId = await getOrCreateDeviceId();
+    if (!deviceId || deviceId.startsWith("tmp-")) return null;
+
+    const { data, error } = await db
+      .from("active_devices")
+      .select("user_name")
+      .eq("device_id", deviceId)
+      .order("last_seen", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data?.user_name) return null;
+
+    console.log("[DeviceId] Restored name from Supabase:", data.user_name);
+    return data.user_name;
+  } catch (e) {
+    console.warn("[DeviceId] Supabase lookup failed:", e);
+    return null;
+  }
+}
+
 async function clearIndexedDB() {
   try {
-    const db = await openDB();
-    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const idb = await openDB();
+    const transaction = idb.transaction(STORE_NAME, "readwrite");
     const store = transaction.objectStore(STORE_NAME);
     store.delete("userName");
+    // NOTE: deviceId is intentionally kept so the device can still be
+    // recognised by Supabase after the user logs out / switches profiles.
   } catch (e) {
     console.warn("[IndexedDB] Clear failed:", e);
   }
@@ -207,44 +291,46 @@ let initPromise = null;
 
 export function initUserStorage() {
   if (!initPromise) {
-    initPromise = loadFromIndexedDB().then((indexedDBName) => {
-      // If localStorage is empty but IndexedDB has a name, restore it
-      const localName = localStorage.getItem("userName");
+    initPromise = (async () => {
+      const indexedDBName = await loadFromIndexedDB();
+      const localName     = localStorage.getItem("userName");
+      const cookieName    = getCookie("userName");
+
       if (!localName && indexedDBName) {
+        // ── Restore from IndexedDB (e.g. localStorage cleared) ─────────
         console.log("[Storage] Restoring name from IndexedDB:", indexedDBName);
-        try {
-          localStorage.setItem("userName", indexedDBName);
-        } catch (e) {
-          // Ignore
+        try { localStorage.setItem("userName", indexedDBName); } catch { /* ignore */ }
+        setLongCookie(indexedDBName);
+
+      } else if (!localName && !indexedDBName && cookieName) {
+        // ── Restore from cookie ─────────────────────────────────────────
+        console.log("[Storage] Restoring name from cookie:", cookieName);
+        try { localStorage.setItem("userName", cookieName); } catch { /* ignore */ }
+        await saveToIndexedDB(cookieName);
+
+      } else if (!localName && !indexedDBName && !cookieName) {
+        // ── All local storage empty → try Supabase device-ID lookup ────
+        // This covers the Chrome-profile-switch scenario.
+        const supabaseName = await lookupNameByDeviceId();
+        if (supabaseName) {
+          console.log("[Storage] Restored name from Supabase device lookup:", supabaseName);
+          try { localStorage.setItem("userName", supabaseName); } catch { /* ignore */ }
+          await saveToIndexedDB(supabaseName);
+          setLongCookie(supabaseName);
         }
-        // Also restore cookie
-        try {
-          const expires = new Date();
-          expires.setFullYear(expires.getFullYear() + 1);
-          document.cookie = `userName=${encodeURIComponent(
-            indexedDBName
-          )};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
-        } catch (e) {
-          // Ignore
-        }
-      }
-      // If localStorage has a name but IndexedDB doesn't, sync to IndexedDB
-      else if (localName && !indexedDBName) {
+
+      } else if (localName && !indexedDBName) {
+        // ── Sync localStorage → IndexedDB ───────────────────────────────
         console.log("[Storage] Syncing existing name to IndexedDB:", localName);
-        saveToIndexedDB(localName);
-        // Also ensure cookie is set
-        try {
-          const expires = new Date();
-          expires.setFullYear(expires.getFullYear() + 1);
-          document.cookie = `userName=${encodeURIComponent(
-            localName
-          )};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
-        } catch (e) {
-          // Ignore
-        }
+        await saveToIndexedDB(localName);
+        setLongCookie(localName);
       }
+
+      // Ensure device ID is initialised (creates it if first run)
+      await getOrCreateDeviceId();
+
       return true;
-    });
+    })();
   }
   return initPromise;
 }
@@ -319,10 +405,13 @@ export async function reportActive(reason = "unknown") {
   log(`Reporting active - reason: ${reason}`);
 
   try {
+    const deviceId = await getOrCreateDeviceId();
+
     const basePayload = {
-      user_name: userName,
+      user_name:   userName,
       app_version: APP_VERSION,
-      last_seen: new Date().toISOString(),
+      last_seen:   new Date().toISOString(),
+      device_id:   deviceId,
     };
 
     const settingsKeys = [
