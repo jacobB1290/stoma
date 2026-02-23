@@ -1,0 +1,1172 @@
+/* nodebox/src/theme-dark.css - OPTIMIZED v25 (Balanced Boost) */
+
+html.theme-dark {
+  color-scheme: dark;
+
+  /* ───────── CHARCOAL FOUNDATION (Anchored to #212121) ───────── */
+  --d-bg: #212121;
+  --d-bg-2: #272727;
+
+  --d-surface: #2d2d2d;
+  --d-surface-2: #333333;
+  --d-surface-3: #3d3d3d;
+
+  --d-surface-solid: #292929;
+  --d-surface-solid-2: #313131;
+  --d-surface-solid-3: #3a3a3a;
+
+  --d-text: #ffffff;
+  --d-text-muted: #d4d4d4;
+  --d-text-subtle: #a3a3a3;
+
+  --d-border: #424242;
+  --d-border-strong: #555555;
+
+  /* ───────── TEAL ACCENT ───────── */
+  --d-accent: #1cc7b6;
+  --d-accent-hover: #3ddecf;
+  --d-accent-press: #148f82;
+  --d-accent-ink: #f0fdfa;
+  --d-focus: #3ddecf73;
+
+  /* ───────── CASE CARD TINTS ───────── */
+  --d-card-teal: #263837;
+  --d-card-teal-border: #345452;
+
+  --d-card-purple: #2e2839;
+  --d-card-purple-border: #463a5a;
+
+  --d-card-blue: #28303d;
+  --d-card-blue-border: #3a4557;
+
+  --d-card-pink: #382430;
+  --d-card-pink-border: #543446;
+
+  /* ───────── STATUS COLORS ───────── */
+  --d-priority-ring: #f87171;
+  --d-priority-ink: #fca5a5;
+  --d-priority-dot: #f87171;
+
+  --d-rush-ring: #fb923c;
+  --d-rush-ink: #fdba74;
+  --d-rush-dot: #fb923c;
+
+  --d-hold-text: #fcd34d;
+
+  /* ───────── New Account ───────── */
+  --d-newacct-ring: #f472b6;
+  --d-newacct-ink: #fbcfe8;
+  --d-newacct-dot: #ec4899;
+
+  /* ───────── New Account sheen tuning ───────── */
+  --newaccount-sheen-opacity: 0.35;
+  --newaccount-sheen-blend: screen;
+  --newaccount-sheen-blur: 12px;
+  --newaccount-sheen-speed: 9s;
+
+  --d-overdue-bg: #3a2222;
+  --d-overdue-border: #5c3333;
+
+  --d-hold-bg: #3a3320;
+  --d-hold-border: #5c4f28;
+
+  /* ───────── SHADOWS ───────── */
+  --d-shadow-1: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --d-shadow-2: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --d-shadow-3: 0 8px 24px rgba(0, 0, 0, 0.55);
+
+  --glass-bg: var(--d-surface);
+  --glass-bg-dark: var(--d-surface-2);
+  --glass-br: var(--d-border);
+
+  --shadow-sm: var(--d-shadow-1);
+  --shadow-md: var(--d-shadow-2);
+  --shadow-lg: var(--d-shadow-3);
+
+  --primary: var(--d-accent);
+  --primary-hover: var(--d-accent-hover);
+}
+
+/* ───────── BOOST MODE OVERRIDES (~30-35% lightness) ───────── */
+html.theme-dark.theme-dark-boost {
+  --d-bg: #3b3b3b;
+  --d-bg-2: #424242;
+
+  --d-surface: #484848;
+  --d-surface-2: #4f4f4f;
+  --d-surface-3: #595959;
+
+  --d-surface-solid: #444444;
+  --d-surface-solid-2: #4a4a4a;
+  --d-surface-solid-3: #535353;
+
+  --d-text: #ffffff;
+  --d-text-muted: #ececec;
+  --d-text-subtle: #c0c0c0;
+
+  --d-border: #626262;
+  --d-border-strong: #787878;
+
+  /* Boosted card tints */
+  --d-card-teal: #364d4b;
+  --d-card-teal-border: #486360;
+
+  --d-card-purple: #433a50;
+  --d-card-purple-border: #584d68;
+
+  --d-card-blue: #3a4354;
+  --d-card-blue-border: #4d586c;
+
+  --d-card-pink: #4d3542;
+  --d-card-pink-border: #644658;
+
+  /* Boosted status backgrounds */
+  --d-overdue-bg: #4f3232;
+  --d-overdue-border: #6a4545;
+
+  --d-hold-bg: #4f4630;
+  --d-hold-border: #6a5f40;
+
+  /* Balanced shadows */
+  --d-shadow-1: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --d-shadow-2: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --d-shadow-3: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* ───────── GLOBAL BACKGROUND ───────── */
+html.theme-dark,
+html.theme-dark body,
+html.theme-dark #root,
+html.theme-dark .min-h-screen {
+  background-color: var(--d-bg) !important;
+  color: var(--d-text) !important;
+}
+
+html.theme-dark body {
+  background: linear-gradient(
+    145deg,
+    var(--d-surface-solid) 0%,
+    var(--d-bg) 100%
+  ) !important;
+  background-attachment: fixed;
+}
+
+/* ───────── GLOBAL HOVER OVERRIDE ───────── */
+html.theme-dark .hover\:bg-gray-50:hover,
+html.theme-dark .hover\:bg-slate-50:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+html.theme-dark .hover\:bg-gray-100:hover,
+html.theme-dark .hover\:bg-slate-100:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.theme-dark .hover\:bg-gray-200:hover,
+html.theme-dark .hover\:bg-slate-200:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.theme-dark .hover\:bg-gray-300:hover,
+html.theme-dark .hover\:bg-slate-300:hover {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+html.theme-dark .hover\:bg-white:hover,
+html.theme-dark .hover\:bg-white\/5:hover,
+html.theme-dark .hover\:bg-white\/10:hover,
+html.theme-dark .hover\:bg-white\/20:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.theme-dark .hover\:bg-black\/5:hover,
+html.theme-dark .hover\:bg-black\/10:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ───────── SETTINGS MODAL - DARK MODE SPECIFIC FIX ───────── */
+
+/* Target the modal container with glass-nb class */
+html.theme-dark .glass-nb {
+  background-color: var(--d-surface) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+/* Card accordion headers - remove the glow on hover */
+html.theme-dark .glass-nb .glass button:hover,
+html.theme-dark .glass-nb .rounded-xl.glass button:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* ActionBtn hover fix - the default variant */
+html.theme-dark .glass-nb button.bg-white\/50:hover,
+html.theme-dark .glass-nb .bg-white\/50:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Glass cards inside the modal */
+html.theme-dark .glass-nb .glass,
+html.theme-dark .glass-nb .rounded-xl.glass {
+  background-color: var(--d-surface-2) !important;
+  border-color: var(--d-border) !important;
+}
+
+/* Expanded card content area */
+html.theme-dark .glass-nb .glass .border-t.border-gray-100,
+html.theme-dark .glass-nb .rounded-xl.glass .border-t.border-gray-100 {
+  border-color: var(--d-border) !important;
+  background-color: transparent !important;
+}
+
+/* Inner toggle and info backgrounds */
+html.theme-dark .glass-nb .bg-gray-50,
+html.theme-dark .glass-nb .bg-gray-100 {
+  background-color: var(--d-surface-solid) !important;
+}
+
+/* Theme selector buttons - unselected state */
+html.theme-dark .glass-nb button.border-gray-200.bg-white\/50 {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: var(--d-border) !important;
+}
+
+html.theme-dark .glass-nb button.border-gray-200.bg-white\/50:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--d-border-strong) !important;
+}
+
+/* Theme selector buttons - selected state */
+html.theme-dark .glass-nb button.border-teal-600.bg-teal-50 {
+  background-color: rgba(28, 199, 182, 0.15) !important;
+  border-color: var(--d-accent) !important;
+}
+
+/* Close button hover */
+html.theme-dark .glass-nb button.hover\:bg-white\/10:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Boost Dark Mode toggle container */
+html.theme-dark .glass-nb .bg-gray-100.rounded-lg.border.border-gray-200\/50 {
+  background-color: var(--d-surface-solid) !important;
+  border-color: var(--d-border) !important;
+}
+
+/* ───────── THEME SELECTOR DOTS - PRESERVE ORIGINAL COLORS ───────── */
+/* White theme dot - must stay white/light gray */
+html.theme-dark .theme-dot-white,
+html.theme-dark [data-theme-dot="white"] {
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%) !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Blue theme dot */
+html.theme-dark .theme-dot-blue,
+html.theme-dark [data-theme-dot="blue"] {
+  background: linear-gradient(135deg, #103e48 0%, #16525f 100%) !important;
+  border: none !important;
+}
+
+/* Pink theme dot */
+html.theme-dark .theme-dot-pink,
+html.theme-dark [data-theme-dot="pink"] {
+  background: linear-gradient(135deg, #fbcfe8 0%, #f472b6 100%) !important;
+  border: none !important;
+}
+
+/* Dark theme dot */
+html.theme-dark .theme-dot-dark,
+html.theme-dark [data-theme-dot="dark"] {
+  background: linear-gradient(135deg, #64748b 0%, #1e293b 100%) !important;
+  border-color: #475569 !important;
+}
+
+/* ───────── SETTINGS MODAL SPECIFIC (FIXED HOVERS) ───────── */
+
+/* 1. Prevent inheritance of bright background colors */
+html.theme-dark [role="dialog"] *:hover,
+html.theme-dark [aria-modal="true"] *:hover {
+  background-color: inherit;
+}
+
+/* 2. Specific targeting for accordion headers and buttons inside modal */
+html.theme-dark [role="dialog"] summary:hover,
+html.theme-dark [role="dialog"] [role="button"]:hover,
+html.theme-dark
+  [role="dialog"]
+  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not([role="switch"]):hover,
+html.theme-dark [aria-modal="true"] summary:hover,
+html.theme-dark [aria-modal="true"] [role="button"]:hover,
+html.theme-dark
+  [aria-modal="true"]
+  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not([role="switch"]):hover {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* 3. Handle Tailwind utility overrides inside the modal */
+html.theme-dark [role="dialog"] .hover\:bg-gray-50:hover,
+html.theme-dark [role="dialog"] .hover\:bg-gray-100:hover,
+html.theme-dark [role="dialog"] .hover\:bg-slate-50:hover,
+html.theme-dark [role="dialog"] .hover\:bg-slate-100:hover {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* 4. BOOST MODE - Mix of light overlay with slight reduction */
+html.theme-dark.theme-dark-boost [role="dialog"] summary:hover,
+html.theme-dark.theme-dark-boost [role="dialog"] [role="button"]:hover,
+html.theme-dark.theme-dark-boost
+  [role="dialog"]
+  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not([role="switch"]):hover {
+  background-color: rgba(255, 255, 255, 0.035) !important;
+}
+
+/* Accordion expanded content background */
+html.theme-dark [role="dialog"] [class*="content"],
+html.theme-dark [role="dialog"] [class*="Content"],
+html.theme-dark [role="dialog"] [class*="panel"],
+html.theme-dark [role="dialog"] [class*="Panel"],
+html.theme-dark [aria-modal="true"] [class*="content"],
+html.theme-dark [aria-modal="true"] [class*="Content"],
+html.theme-dark [aria-modal="true"] [class*="panel"],
+html.theme-dark [aria-modal="true"] [class*="Panel"] {
+  background-color: var(--d-surface) !important;
+}
+
+/* Generic interactive element hovers */
+html.theme-dark [role="menuitem"]:hover,
+html.theme-dark [role="option"]:hover,
+html.theme-dark [role="listitem"]:hover,
+html.theme-dark [role="row"]:hover,
+html.theme-dark li:hover,
+html.theme-dark tr:hover {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* Button hovers (Global but excluding teal) */
+html.theme-dark
+  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(.bg-teal-700):hover,
+html.theme-dark
+  [role="button"]:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(
+    .bg-teal-700
+  ):hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Accent button hovers (Teal/Primary) - Keep these bright */
+html.theme-dark
+  :is(button, a, [role="button"]):is(
+    .bg-\[\#16525F\],
+    .bg-teal-600,
+    .bg-teal-700
+  ):hover {
+  background-color: var(--d-accent-hover) !important;
+}
+
+/* ───────── BOOST MODE HOVER OVERRIDES ───────── */
+html.theme-dark.theme-dark-boost [role="menuitem"]:hover,
+html.theme-dark.theme-dark-boost [role="option"]:hover,
+html.theme-dark.theme-dark-boost [role="listitem"]:hover,
+html.theme-dark.theme-dark-boost [role="row"]:hover,
+html.theme-dark.theme-dark-boost li:hover,
+html.theme-dark.theme-dark-boost tr:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+html.theme-dark.theme-dark-boost
+  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(.bg-teal-700):hover,
+html.theme-dark.theme-dark-boost
+  [role="button"]:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(
+    .bg-teal-700
+  ):hover {
+  background-color: rgba(255, 255, 255, 0.055);
+}
+
+html.theme-dark.theme-dark-boost .hover\:bg-gray-50:hover,
+html.theme-dark.theme-dark-boost .hover\:bg-slate-50:hover,
+html.theme-dark.theme-dark-boost .hover\:bg-gray-100:hover,
+html.theme-dark.theme-dark-boost .hover\:bg-slate-100:hover {
+  background-color: rgba(255, 255, 255, 0.055) !important;
+}
+
+html.theme-dark.theme-dark-boost .hover\:bg-gray-200:hover,
+html.theme-dark.theme-dark-boost .hover\:bg-slate-200:hover {
+  background-color: rgba(255, 255, 255, 0.09) !important;
+}
+
+/* ───────── STAGE HEADER READABILITY ───────── */
+html.theme-dark
+  :is(
+    .text-blue-800,
+    .text-blue-900,
+    .text-indigo-800,
+    .text-indigo-900,
+    .text-purple-800,
+    .text-purple-900,
+    .text-violet-800,
+    .text-violet-900,
+    .text-green-800,
+    .text-green-900,
+    .text-emerald-800,
+    .text-emerald-900,
+    .text-teal-800,
+    .text-teal-900
+  ) {
+  color: var(--d-text) !important;
+}
+
+/* Stage header stats chip + icon tile */
+html.theme-dark .bg-gradient-to-r .bg-white\/30 {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+html.theme-dark .bg-gradient-to-r .border-white\/50 {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+html.theme-dark .bg-gradient-to-r .bg-white\/50 {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Settings modal hover fix for specific Tailwind classes */
+html.theme-dark [role="dialog"] .hover\:bg-white\/30:hover,
+html.theme-dark [aria-modal="true"] .hover\:bg-white\/30:hover,
+html.theme-dark [role="dialog"] .hover\:bg-white\/40:hover,
+html.theme-dark [aria-modal="true"] .hover\:bg-white\/40:hover,
+html.theme-dark [role="dialog"] .hover\:bg-white\/50:hover,
+html.theme-dark [aria-modal="true"] .hover\:bg-white\/50:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+html.theme-dark [role="dialog"] .hover\:bg-black\/5:hover,
+html.theme-dark [aria-modal="true"] .hover\:bg-black\/5:hover,
+html.theme-dark [role="dialog"] .hover\:bg-black\/10:hover,
+html.theme-dark [aria-modal="true"] .hover\:bg-black\/10:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* ───────── FOCUS RING ───────── */
+html.theme-dark
+  :is(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--d-focus);
+  border-radius: 10px;
+}
+
+/* ───────── TEXT REMAPS ───────── */
+html.theme-dark
+  :is(
+    .text-black,
+    .text-black\/50,
+    .text-black\/60,
+    .text-black\/70,
+    .text-slate-900,
+    .text-slate-800,
+    .text-slate-700,
+    .text-gray-900,
+    .text-gray-800,
+    .text-gray-700
+  ) {
+  color: var(--d-text);
+}
+
+html.theme-dark
+  :is(.text-slate-600, .text-slate-500, .text-gray-600, .text-gray-500) {
+  color: var(--d-text-muted);
+}
+
+html.theme-dark :is(.text-slate-400, .text-gray-400, .text-gray-300) {
+  color: var(--d-text-subtle);
+}
+
+html.theme-dark
+  :is(
+    svg.text-black,
+    svg.text-black\/50,
+    svg.text-gray-900,
+    svg.text-slate-900
+  ) {
+  color: var(--d-text);
+}
+
+html.theme-dark .text-white,
+html.theme-dark [class*="text-white"] {
+  color: #ffffff !important;
+}
+
+/* ───────── BACKGROUND REMAPS ───────── */
+/* Exclude theme dots from background remaps */
+html.theme-dark
+  :is(
+    .bg-white,
+    .bg-white\/90,
+    .bg-white\/80,
+    .bg-white\/70,
+    .bg-white\/60,
+    .bg-white\/50
+  ):not(.theme-dot-white):not([data-theme-dot]) {
+  background-color: var(--d-surface-3);
+}
+
+html.theme-dark
+  :is(.bg-gray-50, .bg-slate-50):not(.theme-dot-white):not([data-theme-dot]) {
+  background-color: var(--d-surface);
+}
+html.theme-dark
+  :is(.bg-gray-100, .bg-slate-100):not(.theme-dot-white):not([data-theme-dot]) {
+  background-color: var(--d-surface-solid);
+}
+html.theme-dark
+  :is(.bg-gray-200, .bg-slate-200):not(.theme-dot-white):not([data-theme-dot]) {
+  background-color: var(--d-surface-2);
+}
+html.theme-dark
+  :is(.bg-gray-300, .bg-slate-300):not(.theme-dot-white):not([data-theme-dot]) {
+  background-color: var(--d-surface-3);
+}
+
+html.theme-dark .bg-gray-800,
+html.theme-dark .bg-slate-800,
+html.theme-dark .bg-gray-700,
+html.theme-dark .bg-slate-700 {
+  background-color: var(--d-border);
+}
+
+/* borders */
+html.theme-dark
+  :is(
+    .border-gray-100,
+    .border-gray-200,
+    .border-gray-300,
+    .border-slate-100,
+    .border-slate-200,
+    .border-slate-300
+  ) {
+  border-color: var(--d-border);
+}
+
+html.theme-dark :is(.border-gray-400, .border-slate-400) {
+  border-color: var(--d-border-strong);
+}
+
+/* lines */
+html.theme-dark
+  :is(.h-px.bg-black\/20, .h-px.bg-black\/10, .h-px.bg-white\/20) {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ───────── HEADER BAR ───────── */
+html.theme-dark #root > div > header {
+  background: rgba(33, 33, 33, 0.95);
+  border-bottom: 1px solid var(--d-border);
+  box-shadow: var(--d-shadow-2);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+html.theme-dark.theme-dark-boost #root > div > header {
+  background: rgba(59, 59, 59, 0.95);
+}
+
+html.theme-dark #root > div > header * {
+  color: var(--d-text);
+}
+
+html.theme-dark :is(.text-\[\#103E48\], .text-\[\#16525F\]) {
+  color: var(--d-text);
+}
+
+/* ───────── GLASS SYSTEM ───────── */
+html.theme-dark :is(.glass, .glass-nb, .glass-nb-dark) {
+  border-color: var(--d-border);
+}
+
+html.theme-dark .glass-panel {
+  background: var(--d-surface-2);
+  border: 1px solid var(--d-border);
+  box-shadow: var(--d-shadow-2);
+}
+
+html.theme-dark .glass-card {
+  background: var(--d-surface);
+  border: 1px solid var(--d-border);
+  box-shadow: var(--d-shadow-1);
+}
+
+html.theme-dark .glass-card-dark {
+  background: var(--d-surface-2);
+  border: 1px solid var(--d-border);
+  box-shadow: var(--d-shadow-1);
+  color: var(--d-text);
+}
+
+html.theme-dark .glass-notification {
+  background: var(--d-surface-2);
+  border: 1px solid var(--d-border);
+  color: var(--d-text);
+}
+
+/* form controls */
+html.theme-dark :is(.form-input, .form-select, input, select, textarea) {
+  background-color: var(--d-surface-solid);
+  color: var(--d-text);
+  border-color: var(--d-border);
+}
+
+html.theme-dark :is(input, textarea)::placeholder {
+  color: rgba(212, 212, 212, 0.6);
+}
+
+/* ───────── MODAL / DIALOG / INFO PANELS ───────── */
+html.theme-dark [role="dialog"],
+html.theme-dark [aria-modal="true"],
+html.theme-dark .modal,
+html.theme-dark .dialog {
+  background-color: var(--d-surface);
+  color: var(--d-text);
+  border: 1px solid var(--d-border);
+}
+
+/* Info cards inside modals - exclude theme dots */
+html.theme-dark
+  [role="dialog"]
+  .bg-gray-50:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark
+  [role="dialog"]
+  .bg-slate-50:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark
+  [role="dialog"]
+  .bg-gray-100:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark
+  [role="dialog"]
+  .bg-slate-100:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark
+  [aria-modal="true"]
+  .bg-gray-50:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark
+  [aria-modal="true"]
+  .bg-slate-50:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark
+  [aria-modal="true"]
+  .bg-gray-100:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark
+  [aria-modal="true"]
+  .bg-slate-100:not(.theme-dot-white):not([data-theme-dot]) {
+  background-color: var(--d-surface-solid);
+  color: var(--d-text);
+  border: 1px solid var(--d-border);
+}
+
+/* InsightCard translucent backgrounds used in Efficiency modal */
+html.theme-dark .bg-red-50\/50 {
+  background-color: rgba(248, 113, 113, 0.1) !important;
+}
+html.theme-dark .bg-amber-50\/50 {
+  background-color: rgba(251, 191, 36, 0.1) !important;
+}
+html.theme-dark .bg-blue-50\/50 {
+  background-color: rgba(147, 197, 253, 0.1) !important;
+}
+
+/* Activity history items */
+html.theme-dark .bg-blue-50 {
+  background-color: #28303d;
+}
+html.theme-dark .bg-indigo-50 {
+  background-color: #2e2839;
+}
+html.theme-dark .bg-purple-50 {
+  background-color: #352839;
+}
+html.theme-dark .bg-green-50 {
+  background-color: #263830;
+}
+html.theme-dark .bg-teal-50 {
+  background-color: #263837;
+}
+html.theme-dark .bg-red-50 {
+  background-color: #3a2222;
+}
+html.theme-dark .bg-orange-50 {
+  background-color: #3a2d1e;
+}
+html.theme-dark .bg-yellow-50 {
+  background-color: #3a351e;
+}
+
+html.theme-dark
+  :is(
+    .bg-blue-50,
+    .bg-indigo-50,
+    .bg-purple-50,
+    .bg-green-50,
+    .bg-teal-50,
+    .bg-red-50,
+    .bg-orange-50,
+    .bg-yellow-50
+  ) {
+  color: var(--d-text);
+}
+
+/* Colored text */
+html.theme-dark .text-blue-600,
+html.theme-dark .text-blue-500 {
+  color: #93c5fd;
+}
+html.theme-dark .text-indigo-600,
+html.theme-dark .text-indigo-500 {
+  color: #a5b4fc;
+}
+html.theme-dark .text-purple-600,
+html.theme-dark .text-purple-500 {
+  color: #c4b5fd;
+}
+html.theme-dark .text-green-600,
+html.theme-dark .text-green-500 {
+  color: #86efac;
+}
+html.theme-dark .text-teal-600,
+html.theme-dark .text-teal-500 {
+  color: #5eead4;
+}
+
+/* Border colors */
+html.theme-dark .border-blue-200 {
+  border-color: #3b5998;
+}
+html.theme-dark .border-indigo-200 {
+  border-color: #4338ca;
+}
+html.theme-dark .border-purple-200 {
+  border-color: #6b21a8;
+}
+html.theme-dark .border-green-200 {
+  border-color: #166534;
+}
+
+/* ───────── BUTTONS ───────── */
+html.theme-dark
+  :is(button, a, [role="button"]):is(
+    .bg-\[\#16525F\],
+    .bg-teal-600,
+    .bg-teal-700
+  ) {
+  background-color: var(--d-accent);
+  border: 1px solid #1cc7b64d;
+  color: var(--d-accent-ink);
+  box-shadow: var(--d-shadow-1);
+}
+
+/* secondary buttons */
+html.theme-dark
+  :is(
+    .bg-gray-200.text-gray-700,
+    .bg-gray-100.text-gray-700,
+    .bg-gray-50.text-gray-700
+  ) {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--d-text);
+  border: 1px solid var(--d-border);
+}
+
+/* pills/tabs */
+html.theme-dark
+  :is(
+    .rounded-full.bg-gray-100,
+    .rounded-full.bg-gray-200,
+    .rounded-xl.bg-gray-100,
+    .rounded-xl.bg-gray-200,
+    .rounded-lg.bg-gray-100,
+    .rounded-lg.bg-gray-200
+  ) {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* ───────── BOARD COLUMNS ───────── */
+html.theme-dark .bg-\[\#16525F\]:not(button):not(a):not([role="button"]) {
+  background: var(--d-surface-solid);
+  border: 1px solid var(--d-border);
+  box-shadow: var(--d-shadow-2);
+}
+
+html.theme-dark .bg-yellow-100 {
+  background: var(--d-surface-2);
+  border: 1px solid var(--d-border-strong);
+  box-shadow: var(--d-shadow-2);
+}
+
+html.theme-dark .bg-red-700 {
+  background: var(--d-overdue-bg);
+  border: 1px solid var(--d-overdue-border);
+  box-shadow: var(--d-shadow-2);
+}
+
+html.theme-dark .bg-amber-700 {
+  background: var(--d-hold-bg);
+  border: 1px solid var(--d-hold-border);
+  box-shadow: var(--d-shadow-2);
+}
+
+/* ───────── CASE CARDS ───────── */
+html.theme-dark .bg-\[\#4D8490\] {
+  background-color: var(--d-card-teal);
+  border: 1px solid var(--d-card-teal-border);
+  box-shadow: var(--d-shadow-1);
+}
+
+html.theme-dark .bg-\[\#6F5BA8\] {
+  background-color: var(--d-card-purple);
+  border: 1px solid var(--d-card-purple-border);
+  box-shadow: var(--d-shadow-1);
+}
+
+html.theme-dark .bg-\[\#55679B\] {
+  background-color: var(--d-card-blue);
+  border: 1px solid var(--d-card-blue-border);
+  box-shadow: var(--d-shadow-1);
+}
+
+html.theme-dark .bg-\[\#C75A9E\] {
+  background-color: var(--d-card-pink);
+  border: 1px solid var(--d-card-pink-border);
+  box-shadow: var(--d-shadow-1);
+}
+
+/* ───────── PRIORITY/RUSH RINGS ───────── */
+html.theme-dark .ring-red-500,
+html.theme-dark .ring-red-400,
+html.theme-dark [class*="ring-red"] {
+  --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0
+    var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+  --tw-ring-shadow: var(--tw-ring-inset) 0 0 0
+    calc(2px + var(--tw-ring-offset-width)) var(--d-priority-ring);
+  box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow),
+    var(--tw-shadow, 0 0 #0000);
+}
+
+html.theme-dark .ring-orange-400,
+html.theme-dark .ring-orange-500,
+html.theme-dark [class*="ring-orange"] {
+  --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0
+    var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+  --tw-ring-shadow: var(--tw-ring-inset) 0 0 0
+    calc(2px + var(--tw-ring-offset-width)) var(--d-rush-ring);
+  box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow),
+    var(--tw-shadow, 0 0 #0000);
+}
+
+html.theme-dark .pulse-red {
+  --pulse-color: #ef4444d9;
+}
+
+/* ───────── DROPDOWNS/MENUS ───────── */
+html.theme-dark :is(.shadow-xl, .shadow-2xl) {
+  box-shadow: var(--d-shadow-3);
+}
+
+html.theme-dark
+  :is(
+    [role="menu"],
+    [data-radix-popper-content-wrapper] [role="menu"],
+    .menu,
+    .popover
+  ) {
+  background: var(--d-surface-2);
+  border: 1px solid var(--d-border);
+  color: var(--d-text);
+}
+
+/* colored text */
+html.theme-dark :is(.text-red-600, .text-red-500) {
+  color: var(--d-priority-ink);
+}
+html.theme-dark :is(.text-orange-600, .text-orange-500) {
+  color: var(--d-rush-ink);
+}
+html.theme-dark
+  :is(.text-yellow-600, .text-yellow-500, .text-amber-600, .text-amber-500) {
+  color: var(--d-hold-text);
+}
+
+/* dots */
+html.theme-dark :is(.bg-red-500, .bg-red-600) {
+  background-color: var(--d-priority-dot);
+}
+html.theme-dark :is(.bg-orange-500, .bg-orange-600) {
+  background-color: var(--d-rush-dot);
+}
+html.theme-dark :is(.bg-yellow-500, .bg-amber-500) {
+  background-color: var(--d-hold-text);
+}
+
+/* ───────── MODALS ───────── */
+html.theme-dark .fixed.inset-0.bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+html.theme-dark .fixed.inset-0.bg-black\/30 {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+html.theme-dark :is(button svg, [aria-label="Close"] svg) {
+  color: var(--d-text);
+}
+
+/* ───────── ANALYTICS/PROGRESS ───────── */
+html.theme-dark :is(.bg-slate-800, .bg-slate-900, .bg-gray-900) {
+  background-color: var(--d-surface-solid);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+html.theme-dark :is(.bg-slate-200\/30, .bg-slate-100\/30, .bg-gray-200\/30) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+html.theme-dark :is(.bg-slate-200\/60, .bg-gray-200\/60) {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+html.theme-dark :is(.bg-white\/20, .bg-white\/30) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ───────── GRADIENTS ───────── */
+html.theme-dark
+  :is(
+    .from-gray-50,
+    .from-gray-100,
+    .from-gray-200,
+    .from-slate-50,
+    .from-slate-100,
+    .from-slate-200
+  ) {
+  --tw-gradient-from: var(--d-bg-2);
+  --tw-gradient-to: transparent;
+}
+
+html.theme-dark
+  :is(
+    .to-gray-100,
+    .to-gray-200,
+    .to-gray-300,
+    .to-slate-100,
+    .to-slate-200,
+    .to-slate-300
+  ) {
+  --tw-gradient-to: var(--d-bg);
+}
+
+/* Stage headers (top banner) */
+html.theme-dark
+  :is(
+    .from-blue-50,
+    .from-blue-100,
+    .from-blue-200,
+    .from-sky-50,
+    .from-sky-100,
+    .from-sky-200,
+    .from-indigo-50,
+    .from-indigo-100,
+    .from-indigo-200,
+    .from-cyan-50,
+    .from-cyan-100,
+    .from-purple-50,
+    .from-purple-100,
+    .from-violet-50,
+    .from-violet-100,
+    .from-green-50,
+    .from-green-100,
+    .from-emerald-50,
+    .from-emerald-100,
+    .from-teal-50,
+    .from-teal-100
+  ) {
+  --tw-gradient-from: var(--d-surface-solid);
+  --tw-gradient-to: transparent;
+}
+
+html.theme-dark
+  :is(
+    .to-blue-50,
+    .to-blue-100,
+    .to-blue-200,
+    .to-sky-50,
+    .to-sky-100,
+    .to-sky-200,
+    .to-indigo-50,
+    .to-indigo-100,
+    .to-indigo-200,
+    .to-cyan-50,
+    .to-cyan-100,
+    .to-purple-100,
+    .to-purple-200,
+    .to-violet-100,
+    .to-violet-200,
+    .to-green-100,
+    .to-green-200,
+    .to-emerald-100,
+    .to-emerald-200,
+    .to-teal-100,
+    .to-teal-200
+  ) {
+  --tw-gradient-to: var(--d-bg);
+}
+
+html.theme-dark
+  .bg-gradient-to-r
+  :is(
+    .bg-blue-100,
+    .bg-blue-50,
+    .bg-sky-100,
+    .bg-sky-50,
+    .bg-indigo-100,
+    .bg-indigo-50,
+    .bg-cyan-100,
+    .bg-cyan-50,
+    .bg-purple-100,
+    .bg-purple-50,
+    .bg-violet-100,
+    .bg-violet-50,
+    .bg-green-100,
+    .bg-green-50,
+    .bg-emerald-100,
+    .bg-emerald-50,
+    .bg-teal-100,
+    .bg-teal-50
+  ) {
+  background-color: var(--d-surface-solid) !important;
+  border-color: var(--d-border) !important;
+}
+
+/* ───────── SETTINGS MODAL CUSTOM CLASS OVERRIDES ───────── */
+
+/* Settings modal container */
+html.theme-dark .settings-modal-container {
+  background-color: var(--d-surface) !important;
+}
+
+/* Card header hover (the accordion trigger) */
+html.theme-dark .settings-card-header:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Action button (default variant) */
+html.theme-dark .settings-action-btn {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: var(--d-border) !important;
+  color: var(--d-text) !important;
+}
+
+html.theme-dark .settings-action-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Close button */
+html.theme-dark .settings-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Boost mode adjustments */
+html.theme-dark.theme-dark-boost .settings-card-header:hover {
+  background-color: rgba(255, 255, 255, 0.045) !important;
+}
+
+html.theme-dark.theme-dark-boost .settings-action-btn {
+  background-color: rgba(255, 255, 255, 0.09) !important;
+}
+
+html.theme-dark.theme-dark-boost .settings-action-btn:hover {
+  background-color: rgba(255, 255, 255, 0.13) !important;
+}
+
+html.theme-dark.theme-dark-boost .settings-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Boost mode glass adjustments */
+html.theme-dark.theme-dark-boost .glass-nb {
+  background-color: var(--d-surface) !important;
+}
+
+html.theme-dark.theme-dark-boost .glass-nb .glass,
+html.theme-dark.theme-dark-boost .glass-nb .rounded-xl.glass {
+  background-color: var(--d-surface-2) !important;
+}
+
+html.theme-dark.theme-dark-boost
+  .glass-nb
+  .bg-gray-50:not(.theme-dot-white):not([data-theme-dot]),
+html.theme-dark.theme-dark-boost
+  .glass-nb
+  .bg-gray-100:not(.theme-dot-white):not([data-theme-dot]) {
+  background-color: var(--d-surface-solid) !important;
+}
+
+/* Boost mode theme selector buttons */
+html.theme-dark.theme-dark-boost .glass-nb button.border-gray-200.bg-white\/50 {
+  background-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+html.theme-dark.theme-dark-boost
+  .glass-nb
+  button.border-gray-200.bg-white\/50:hover {
+  background-color: rgba(255, 255, 255, 0.11) !important;
+}
+
+html.theme-dark.theme-dark-boost .glass-nb button.border-teal-600.bg-teal-50 {
+  background-color: rgba(28, 199, 182, 0.17) !important;
+}
+
+/* ───────── New Account utility overrides ───────── */
+html.theme-dark .bg-pink-500 {
+  background-color: var(--d-newacct-dot) !important;
+}
+
+html.theme-dark :is(.text-pink-500, .text-pink-600, .text-pink-700) {
+  color: var(--d-newacct-ink) !important;
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEW ACCOUNT SHEEN - DARK THEME OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html.theme-dark {
+  --newaccount-sheen-opacity: 0.45;
+  --newaccount-sheen-blur: 8px;
+  --newaccount-sheen-speed: 3s;
+  --newaccount-glow-opacity: 0.12;
+  --newaccount-color-primary: 244, 114, 182;
+  --newaccount-color-secondary: 251, 207, 232;
+}
+
+html.theme-dark .new-account-sheen {
+  box-shadow: 0 0 0 1px rgba(244, 114, 182, 0.3),
+    0 4px 24px -4px rgba(236, 72, 153, 0.4),
+    0 0 35px -8px rgba(244, 114, 182, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+html.theme-dark .new-account-sheen::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.02) 15%,
+    rgba(255, 255, 255, 0.06) 35%,
+    rgba(255, 255, 255, var(--newaccount-sheen-opacity, 0.45)) 50%,
+    rgba(255, 255, 255, 0.06) 65%,
+    rgba(255, 255, 255, 0.02) 85%,
+    transparent 100%
+  );
+}
+
+html.theme-dark .new-account-sheen::after {
+  background: radial-gradient(
+    ellipse 150% 100% at 50% 50%,
+    rgba(244, 114, 182, var(--newaccount-glow-opacity, 0.12)) 0%,
+    rgba(236, 72, 153, 0.05) 40%,
+    transparent 70%
+  );
+}
+
+/* Boost mode - slightly brighter sheen */
+html.theme-dark.theme-dark-boost {
+  --newaccount-sheen-opacity: 0.5;
+  --newaccount-glow-opacity: 0.14;
+}

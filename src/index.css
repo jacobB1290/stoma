@@ -1,0 +1,15 @@
+/* src/index.css */
+html,
+body {
+  margin: 0;
+  padding: 0;
+
+  /* fallback to viewport height */
+  height: 100vh;
+  /* Safari will use this instead when available */
+  height: -webkit-fill-available;
+
+  /* your gradient */
+  background: linear-gradient(to bottom right, #103e48 0%, #16525f 100%)
+    no-repeat;
+}

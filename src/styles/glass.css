@@ -1,0 +1,30 @@
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.3); /* card tint */
+  --glass-bg-dark: rgba(255, 255, 255, 0.26); /* header tint you asked for */
+  --glass-br: rgba(255, 255, 255, 0.45);
+}
+
+/* with border */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-br);
+  backdrop-filter: blur(14px) saturate(160%);
+  transition: background 0.18s;
+}
+.glass:hover {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+/* no border (sheet, bars) – light */
+.glass-nb {
+  background: var(--glass-bg);
+  backdrop-filter: blur(14px) saturate(160%);
+  transition: background 0.18s;
+}
+
+/* no border – **darker** tone for history header + date row */
+.glass-nb-dark {
+  background: var(--glass-bg-dark);
+  backdrop-filter: blur(14px) saturate(160%);
+  transition: background 0.18s;
+}
