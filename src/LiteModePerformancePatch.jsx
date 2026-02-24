@@ -15,6 +15,9 @@
  * Framer-motion springs, AnimatePresence, layout animations, the
  * glow/pulse-red flash effects, and all CSS transitions run at full
  * speed exactly as on a normal machine.
+ *
+ * Text colour fix: any element whose translucent background is made
+ * opaque-light gets forced dark text so nothing becomes white-on-white.
  */
 
 import React, {
@@ -46,8 +49,7 @@ function injectLiteCSS() {
 
 /* ── 1. Kill backdrop-filter everywhere ────────────────────────────
    backdrop-filter: blur() is the single most expensive effect on Pi.
-   Every element with it gets promoted to its own GPU layer and the
-   compositor must re-render it on every frame.  Remove it entirely.  */
+   Every element with it gets promoted to its own GPU layer.          */
 html.lite *,
 html.lite *::before,
 html.lite *::after {
@@ -55,66 +57,78 @@ html.lite *::after {
   -webkit-backdrop-filter: none !important;
 }
 
-/* ── 2. Remove filter (used by .glow brightness effect) ────────────
-   filter: brightness() on .glow forces a full GPU repaint per frame.
-   The .glow CSS animation still runs (the class is still there and
-   the keyframe fires) but without the filter cost it is just a no-op
-   paint – cheap.  The ring colour/border on the card still shows     */
+/* ── 2. Remove filter ──────────────────────────────────────────────
+   filter: brightness() on .glow forces a full GPU repaint per frame. */
 html.lite * {
   filter: none !important;
 }
 
 /* ── 3. Clear will-change promotions ───────────────────────────────
-   will-change: transform/opacity pre-promotes elements to GPU layers
-   before any animation even starts.  On Pi that burns VRAM for every
-   card on screen.  Reset to auto so promotion only happens when the
-   browser actually needs it (i.e. during an active animation).       */
+   will-change pre-promotes elements to GPU layers before any
+   animation even starts, burning VRAM for every visible card.        */
 html.lite * {
   will-change: auto !important;
 }
 
 /* ── 4. Remove mix-blend-mode ──────────────────────────────────────
-   mix-blend-mode: color (used by .pulse-red::after overlay) requires
-   an extra compositing pass.  The pulse animation itself still runs
-   but the colour-blend layer is removed; the element is still visible
-   and animated, just without the blend overhead.                     */
+   mix-blend-mode: color (pulse-red::after) requires an extra pass.   */
 html.lite * {
   mix-blend-mode: normal !important;
 }
 
-/* ── 5. Glass / blur panels → solid opaque surface ─────────────────
-   .glass and .glass-nb rely entirely on backdrop-filter (killed above)
-   for their frosted look.  Without the filter they show transparent,
-   so give them a solid background that keeps the UI readable.        */
+/* ── 5. Glass / blur panels → solid surface ────────────────────────
+   .glass and .glass-nb rely on backdrop-filter (killed above).
+   Give them a solid background so they remain readable.
+   Use a light-neutral that works on both dark and light app themes.  */
 html.lite .glass,
 html.lite .glass-nb,
 html.lite .glass-nb-dark {
-  background: rgba(255,255,255,0.95) !important;
+  background: rgba(240,244,248,0.98) !important;
   border:     1px solid rgba(0,0,0,0.10) !important;
+  color:      #0f172a !important;
 }
 
-/* ── 6. Translucent Tailwind bg utilities → near-opaque ────────────
-   Classes like bg-white/10, bg-black/50 create semi-transparent
-   layers that the compositor must alpha-blend on every repaint.
-   Bumping them to near-opaque eliminates the blend cost while keeping
-   the visual appearance close to the original.                       */
-html.lite [class*="bg-white/"] {
-  background-color: rgba(255,255,255,0.95) !important;
-}
-html.lite [class*="bg-black/"] {
-  background-color: rgba(0,0,0,0.85) !important;
-}
-
-/* ── 7. backdrop-blur Tailwind utilities ───────────────────────────
-   Catches backdrop-blur-sm, backdrop-blur-md, etc. applied directly
-   as Tailwind classes rather than through .glass.                    */
+/* ── 6. backdrop-blur Tailwind utilities ───────────────────────────
+   Catches backdrop-blur-sm, backdrop-blur-md, etc.                   */
 html.lite [class*="backdrop-blur"] {
   backdrop-filter:         none !important;
   -webkit-backdrop-filter: none !important;
 }
 
-/* ── 8. Thin scrollbar ─────────────────────────────────────────────
-   Minor paint saving: thinner scrollbar = less area to composite.   */
+/* ── 7. Translucent bg-white/* → light opaque + DARK text ──────────
+   bg-white/10 … bg-white/90 create semi-transparent layers that need
+   alpha compositing.  We make them near-opaque AND force dark text so
+   nothing becomes white-on-white (e.g. RevealButton, nav pills,
+   settings pill which all combine bg-white/* with text-white).       */
+html.lite [class*="bg-white/"] {
+  background-color: rgba(240,244,248,0.97) !important;
+  color:            #1e293b               !important;
+}
+/* Ensure any nested text-white spans also go dark */
+html.lite [class*="bg-white/"] *,
+html.lite [class*="bg-white/"] *::before,
+html.lite [class*="bg-white/"] *::after {
+  color: inherit !important;
+}
+
+/* ── 8. Translucent bg-black/* → dark opaque + LIGHT text ──────────
+   bg-black/* overlays should stay dark and keep their white text.    */
+html.lite [class*="bg-black/"] {
+  background-color: rgba(15,23,42,0.90) !important;
+  color:            #f1f5f9              !important;
+}
+
+/* ── 9. Row cards on dark column backgrounds keep white text ────────
+   Case row cards (bg-[#4D8490], bg-[#6F5BA8] etc.) are solid dark
+   hex colours – our rules above don't touch them – but explicitly
+   confirm their text stays white so rule 7's child cascade can't
+   accidentally reach them via an ancestor with bg-white/*.            */
+html.lite .glass *:not([class*="bg-white/"]):not([class*="bg-black/"]),
+html.lite .glass-nb *:not([class*="bg-white/"]):not([class*="bg-black/"]) {
+  color: #1e293b !important;
+}
+
+/* ── 10. Thin scrollbar ────────────────────────────────────────────*/
 html.lite {
   scrollbar-width: thin;
   scrollbar-color: rgba(0,0,0,0.2) transparent;
@@ -147,8 +161,6 @@ export function LiteModeProvider({ children }) {
       document.documentElement.classList.add("lite");
     } else {
       document.documentElement.classList.remove("lite");
-      // Leave the CSS sheet injected – harmless without the class,
-      // and avoids a flash on next toggle.
     }
     try {
       localStorage.setItem("lite-ui", JSON.stringify(lite));
@@ -175,9 +187,7 @@ export function LiteModeProvider({ children }) {
     <LiteCtx.Provider value={{ lite, toggle }}>
       {/*
         In Lite Mode we leave reducedMotion as "user" so framer-motion
-        runs all springs and tweens at full speed.  The GPU cost
-        savings come entirely from the CSS overrides above, not from
-        disabling JS animation.
+        runs all springs and tweens at full speed.
       */}
       <MotionConfig reducedMotion="user">
         {children}
