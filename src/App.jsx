@@ -1113,12 +1113,12 @@ function Inner({
   return (
     <div
       className={clsx(
-        "flex flex-col min-h-screen w-screen flex-1 transition-colors",
+        "flex flex-col h-[100dvh] w-screen overflow-hidden transition-colors",
         isLightTheme ? "text-gray-900" : "text-white"
       )}
     >
       {/* Header */}
-      <header className="flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-40">
+      <header className="flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-[75] sticky top-0">
         <SettingsPill
           onClick={() => setSettingsOpen(true)}
           className="absolute left-4 top-1/2 -translate-y-1/2"
