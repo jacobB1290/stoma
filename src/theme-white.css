@@ -607,11 +607,17 @@ html.theme-white :is(.pulse-red, .flash-red)::after {
 }
 
 html.theme-white .glow {
-  /* Use live --pulse var instead of restarting @keyframes animation.
-     box-shadow interpolates between rest and peak values based on --pulse. */
+  /* Keep element box-shadow for board card ring effect */
   box-shadow: var(--w-row-shadow, none),
     0 0 0 calc(1px + 1px * var(--pulse, 0)) rgba(22, 82, 95, calc(0.15 + 0.25 * var(--pulse, 0))),
     0 0 calc(12px * var(--pulse, 0)) rgba(22, 82, 95, calc(0.15 * var(--pulse, 0)));
+}
+
+html.theme-white .glow::before {
+  /* Override base white glow with teal-tinted version */
+  box-shadow:
+    0 0 0 2px rgba(22, 82, 95, calc(0.55 * var(--pulse, 0))),
+    0 0 10px 4px rgba(22, 82, 95, calc(0.25 * var(--pulse, 0)));
 }
 
 html.theme-white .pulse-red {

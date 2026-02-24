@@ -611,13 +611,22 @@ html.theme-pink
 }
 
 html.theme-pink :is(.pulse-red, .flash-red)::after {
-  animation: row-pulse-lite 1.5s ease-in-out infinite;
+  /* Use live --pulse var — no @keyframes restart on remount */
+  animation: none;
+  opacity: calc(0.5 * var(--pulse, 0));
   background: var(--w-priority-flash) !important;
   mix-blend-mode: multiply;
 }
 
 html.theme-pink .glow {
-  animation: row-glow-lite 2s ease-in-out infinite;
+  /* Override base ::before with pink-tinted version — no @keyframes */
+  animation: none;
+}
+
+html.theme-pink .glow::before {
+  box-shadow:
+    0 0 0 2px rgba(157, 75, 108, calc(0.55 * var(--pulse, 0))),
+    0 0 10px 4px rgba(157, 75, 108, calc(0.30 * var(--pulse, 0)));
 }
 
 html.theme-pink .pulse-red {

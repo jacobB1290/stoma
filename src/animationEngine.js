@@ -284,11 +284,8 @@ export function RowShell({
 
   /* overlay pulse */
   const flashClass = flashBlue ? "glow" : flashRed ? "pulse-red" : "";
-  const baseStyle = flashClass
-    ? {
-        animationDelay: "var(--pulse-clock)",
-        ...(flashRed && { "--pulse-color": "#ff1e1e" }),
-      }
+  const baseStyle = flashRed
+    ? { "--pulse-color": "#ff1e1e" }
     : {};
 
   /* New account specific styles - disabled when workflow pending */

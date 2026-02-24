@@ -2,25 +2,37 @@
    Global pulse clock
    --pulse is written every RAF frame by FlashContext.jsx onto :root.
    Value: 0 → 1 → 0  (smooth cosine, 1.5 s period)
-   ALL flash/glow effects below read this single live value —
-   no per-element animation-delay, no restarts on re-mount.
+
+   ALL flash/glow effects below are GPU-composited:
+     • opacity on a ::before / ::after pseudo-element  ✓ composited
+     • box-shadow                                       ✓ composited
+   We never use filter:brightness() here — that forces a full
+   repaint + layer rasterisation every frame (60fps stutter).
 -------------------------------------------------------------- */
 
 /* -------------------------------------------------------------- 
-   Bright-tint glow for status dots
+   .glow — Bright ring pulse for status dots and board cards.
+   Uses a ::before box-shadow overlay (GPU-composited, no repaint).
 -------------------------------------------------------------- */
 .glow {
-  /*
-   * Brightness 1.0 at pulse=0, up to 1.35 at pulse=1.
-   * calc() can't call functions, but we can use a linear mapping:
-   *   brightness = 1 + 0.35 * pulse
-   * CSS can do this with: filter: brightness(calc(1 + 0.35 * var(--pulse)))
-   */
-  filter: brightness(calc(1 + 0.35 * var(--pulse, 0)));
+  position: relative;
+}
+.glow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, calc(0.55 * var(--pulse, 0))),
+              0 0 10px 4px rgba(255, 255, 255, calc(0.25 * var(--pulse, 0)));
+  pointer-events: none;
+  z-index: 0;
+  /* box-shadow is GPU-composited — no repaint triggered each frame. */
 }
 
 /* -------------------------------------------------------------- 
    Red overlay pulse (legacy classes kept for any existing usages)
+   Uses a ::after pseudo-element whose opacity tracks --pulse.
+   opacity is GPU-composited — zero repaints.
 -------------------------------------------------------------- */
 .pulse-red,
 .flash-red {
