@@ -6,10 +6,26 @@
 @tailwind utilities;
 
 /* ── App-level global styles ─────────────────────────────────────── */
-html,
+html {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* Default theme gradient – JS will override this when theme changes.
+     Using background-size: 100% 100% ensures the gradient fills the
+     entire html element including the iOS safe-area gutters so there
+     are never any white bars behind the status bar or home indicator. */
+  background: linear-gradient(to bottom right, #103e48 0%, #16525f 100%)
+    no-repeat fixed;
+  background-size: 100% 100%;
+}
+
 body {
   margin: 0;
   padding: 0;
+  /* Transparent so the html gradient shows through the safe-area insets */
+  background: transparent;
+  min-height: 100%;
+  min-height: -webkit-fill-available;
 
   /* Prevent iOS from auto-scaling text on rotation */
   -webkit-text-size-adjust: 100%;
@@ -22,13 +38,21 @@ body {
   /* Suppress the gray tap flash on iOS interactive elements */
   -webkit-tap-highlight-color: transparent;
 
-  /* Full-height: dvh for iOS 15.4+ (accounts for collapsing browser chrome),
-     -webkit-fill-available for older Safari, 100vh as the base fallback */
-  height: 100vh;
-  height: -webkit-fill-available;
-  height: 100dvh;
+  /* Push content away from the iOS status bar (black-translucent overlays
+     the content) and the home indicator at the bottom.  Without these the
+     header sits under/behind the status bar and the bottom of the screen
+     is clipped by the home-indicator safe zone. */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  box-sizing: border-box;
+}
 
-  /* your gradient */
-  background: linear-gradient(to bottom right, #103e48 0%, #16525f 100%)
-    no-repeat;
+#root {
+  /* Fill the available space inside the safe-area-padded body */
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
