@@ -1,27 +1,23 @@
 // src/FlashContext.jsx
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useSyncExternalStore,
-} from "react";
+//
+// The pulse clock writes --pulse and --pulse-clock directly onto :root
+// every animation frame. All flash/glow CSS rules read those vars at paint
+// time — no React state, no context propagation, no re-renders.
+//
+// useFlashPhase() is kept as a no-op export so any future caller compiles,
+// but it intentionally returns nothing useful — consuming components should
+// read the CSS var directly or use a non-React approach.
+
+import React, { createContext, useContext, useEffect } from "react";
 
 /* One global 1.5 s cycle. */
 const CYCLE_MS = 1500;
 
-let phase = 0; // 0‥1 repeating
-const subs = new Set();
-
-function broadcast() {
-  subs.forEach((fn) => fn());
-}
-
 let rafId = null;
 let rafRunning = false;
 
-// Smooth sine-based easing: 0 → 1 → 0 over one full cycle
+// Smooth cosine easing: 0 → 1 → 0 over one full cycle
 function easedPulse(t) {
-  // t is 0..1 (phase). Returns 0..1..0 smoothly.
   return 0.5 - 0.5 * Math.cos(t * 2 * Math.PI);
 }
 
@@ -29,28 +25,23 @@ function startRAF() {
   if (rafRunning) return;
   rafRunning = true;
   const loop = (t) => {
-    phase = (t % CYCLE_MS) / CYCLE_MS;
-    // Write the live pulse value directly onto :root as a CSS custom property.
-    // This means every .flash-overdue / .glow element in the entire tree reads
-    // the *same* value at the *same* time — no per-element animation-delay
-    // offsets, no restarts when components re-mount.
-    const pulse = easedPulse(phase); // 0..1..0, smooth cosine
+    const phase = (t % CYCLE_MS) / CYCLE_MS;
+    const pulse = easedPulse(phase);
+    // --pulse  : 0→1→0 smooth cosine, consumed by flash.css / theme-white.css
+    //            via calc(... * var(--pulse)) — no @keyframes, no per-element delays.
     document.documentElement.style.setProperty("--pulse", pulse.toFixed(4));
-    // Also keep --pulse-clock (negative-seconds offset) for any legacy @keyframes
-    // in theme-white.css / animationEngine that use animation-delay: var(--pulse-clock).
-    // Writing this every frame instead of every 1500ms makes the delay offset
-    // current-accurate and prevents the jarring reset that happened with setInterval.
+    // --pulse-clock: negative-seconds offset kept for any legacy @keyframes that
+    //                still use animation-delay: var(--pulse-clock, 0s).
     document.documentElement.style.setProperty(
       "--pulse-clock",
       `${-(phase * 1.5).toFixed(4)}s`
     );
-    broadcast();
     if (rafRunning) rafId = requestAnimationFrame(loop);
   };
   rafId = requestAnimationFrame(loop);
 }
 
-function stopRAFLoop() {
+function stopRAF() {
   rafRunning = false;
   if (rafId != null) {
     cancelAnimationFrame(rafId);
@@ -58,26 +49,19 @@ function stopRAFLoop() {
   }
 }
 
-/* external-store glue */
-function subscribe(cb) {
-  subs.add(cb);
-  return () => subs.delete(cb);
-}
-function getSnapshot() {
-  return phase;
-}
-
-const FlashContext = createContext(0);
+// Stub context — value never changes, never triggers re-renders.
+const FlashContext = createContext(null);
 
 export function FlashProvider({ children }) {
-  const p = useSyncExternalStore(subscribe, getSnapshot);
   useEffect(() => {
     startRAF();
-    return () => stopRAFLoop();
+    return () => stopRAF();
   }, []);
-  return <FlashContext.Provider value={p}>{children}</FlashContext.Provider>;
+  // No value prop that changes — provider wrapper is just for lifecycle.
+  return <FlashContext.Provider value={null}>{children}</FlashContext.Provider>;
 }
 
+/** @deprecated — pulse is driven by CSS vars now, not React state. */
 export function useFlashPhase() {
   return useContext(FlashContext);
 }
