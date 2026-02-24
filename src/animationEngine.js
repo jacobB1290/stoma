@@ -369,26 +369,26 @@ const BUBBLE_SPRING = {
   mass: 0.8,
 };
 
+/* RevealButton variants use only GPU-composited properties (opacity, scale, width).
+   marginLeft is applied via a fixed CSS class — removing it from the animation
+   variants eliminates one layout-triggering property per frame. */
 const revealVar = {
   closed: {
     opacity: 0,
     scale: 0,
     width: 0,
-    marginLeft: 0,
     transition: BUBBLE_SPRING,
   },
   open: {
     opacity: 1,
     scale: 1,
     width: BTN_W,
-    marginLeft: 8,
     transition: BUBBLE_SPRING,
   },
   openSmall: {
     opacity: 1,
     scale: 1,
     width: BTN_W_SMALL,
-    marginLeft: 8,
     transition: BUBBLE_SPRING,
   },
 };
@@ -410,7 +410,8 @@ export function RevealButton({
       className={clsx(
         "overflow-hidden rounded px-3 py-1 text-sm font-semibold inline-block",
         frosted,
-        small && "px-1 py-0.5"
+        small && "px-1 py-0.5",
+        open && "ml-2"
       )}
       style={{ originX: 0, originY: 0.5 }}
       onClick={onClick}

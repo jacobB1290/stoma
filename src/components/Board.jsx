@@ -5,7 +5,6 @@ import React, {
   useMemo,
   useCallback,
   useRef,
-  useReducer,
 } from "react";
 import { LayoutGroup, motion, AnimatePresence } from "motion/react";
 import DayCol from "./DayCol";
