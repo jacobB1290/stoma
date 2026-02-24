@@ -8,6 +8,7 @@
 .glass {
   background: var(--glass-bg);
   border: 1px solid var(--glass-br);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
   backdrop-filter: blur(14px) saturate(160%);
   transition: background 0.18s;
 }
@@ -18,6 +19,7 @@
 /* no border (sheet, bars) – light */
 .glass-nb {
   background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
   backdrop-filter: blur(14px) saturate(160%);
   transition: background 0.18s;
 }
@@ -25,6 +27,7 @@
 /* no border – **darker** tone for history header + date row */
 .glass-nb-dark {
   background: var(--glass-bg-dark);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
   backdrop-filter: blur(14px) saturate(160%);
   transition: background 0.18s;
 }

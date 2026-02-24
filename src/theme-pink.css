@@ -363,7 +363,9 @@ html.theme-pink
   :is(.bg-\[\#4D8490\], .bg-\[\#55679B\], .bg-\[\#C75A9E\], .bg-\[\#6F5BA8\]) {
   color: var(--w-text);
   border: 1px solid var(--w-border);
-  filter: drop-shadow(var(--w-row-shadow));
+  /* box-shadow instead of filter:drop-shadow — avoids Safari GPU compositing
+     layer churn that causes shadows to flicker during Framer Motion animations */
+  box-shadow: var(--w-row-shadow);
 }
 
 html.theme-pink .bg-\[\#4D8490\] {
@@ -596,13 +598,15 @@ html.theme-pink
   }
 }
 
+/* box-shadow pulse — replaces filter:brightness() to avoid Safari GPU
+   compositing-layer churn that makes shadows flicker on Apple devices */
 @keyframes row-glow-lite {
   0%,
   100% {
-    filter: brightness(1);
+    box-shadow: var(--w-row-shadow), 0 0 0 1px #9d4b6c26;
   }
   50% {
-    filter: brightness(1.15);
+    box-shadow: 0 8px 24px #4a1a2d2e, 0 0 0 2px #9d4b6c40, 0 0 12px #9d4b6c26;
   }
 }
 
@@ -614,15 +618,16 @@ html.theme-pink :is(.pulse-red, .flash-red)::after {
 
 html.theme-pink .glow {
   animation: row-glow-lite 2s ease-in-out infinite;
-  box-shadow: 0 0 0 1px #9d4b6c26, 0 6px 14px #4a1a2d1f;
 }
 
 html.theme-pink .pulse-red {
-  filter: brightness(1.02) saturate(1.05);
+  /* filter:brightness removed — the ::after overlay handles the visual pulse
+     without promoting a new GPU compositing layer on Safari */
 }
 
 html.theme-pink .case-row.dragging {
-  filter: drop-shadow(0 12px 24px #4a1a2d2e);
+  /* box-shadow instead of filter:drop-shadow — prevents Safari shadow flicker */
+  box-shadow: 0 12px 24px #4a1a2d2e;
 }
 
 /* ───────── scrollbar ───────── */
