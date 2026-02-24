@@ -14,7 +14,7 @@ import {
   SPRING,
   TWEEN,
 } from "../animationEngine";
-import { AnimatePresence, motion, useMotionValue } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue } from "motion/react";
 import CaseHistory from "./CaseHistory";
 import { useMut } from "../context/DataContext";
 import clsx from "clsx";

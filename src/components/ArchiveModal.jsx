@@ -6,7 +6,7 @@ import React, {
   useCallback,
   startTransition,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { db, restoreCase, logCase } from "../services/caseService";
 import CaseHistory from "./CaseHistory";

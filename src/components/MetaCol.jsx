@@ -6,7 +6,7 @@ import {
   RevealButton,
   SPRING,
 } from "../animationEngine";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion } from "motion/react";
 import CaseHistory from "./CaseHistory";
 import clsx from "clsx";
 import { db, logCase } from "../services/caseService";

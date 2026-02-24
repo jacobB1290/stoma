@@ -1,6 +1,6 @@
 // /src/components/EfficiencyModalUI.js
 import React, { useMemo, useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { formatDuration as formatDurationUtil } from "../utils/stageTimeCalculations";
 import { CONFIG } from "../utils/efficiencyCalculations";

@@ -5,7 +5,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { SPRING } from "../animationEngine";
 import { db } from "../services/caseService";
 import { fetchActiveUsers } from "../services/userService";

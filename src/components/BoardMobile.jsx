@@ -9,7 +9,7 @@ import React, {
   useRef,
   useLayoutEffect,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import clsx from "clsx";
 import CaseHistory from "./CaseHistory";
 import { iso } from "../utils/date";

@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { db, parseNoteTime } from "../services/caseService";
-import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
+import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 import { useMut } from "../context/DataContext";
 import { getWorkflowStatus } from "../utils/workflowDetection";
 import clsx from "clsx";

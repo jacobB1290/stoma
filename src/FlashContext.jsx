@@ -16,18 +16,27 @@ function broadcast() {
   subs.forEach((fn) => fn());
 }
 
+let rafId = null;
+let rafRunning = false;
+
 function startRAF() {
-  let running = true;
+  if (rafRunning) return;
+  rafRunning = true;
   const loop = (t) => {
     phase = (t % CYCLE_MS) / CYCLE_MS;
     broadcast();
-    if (running) requestAnimationFrame(loop);
+    if (rafRunning) rafId = requestAnimationFrame(loop);
   };
-  requestAnimationFrame(loop);
-  return () => (running = false);
+  rafId = requestAnimationFrame(loop);
 }
 
-const stopRAF = startRAF();
+function stopRAFLoop() {
+  rafRunning = false;
+  if (rafId != null) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+}
 
 /* external-store glue */
 function subscribe(cb) {
@@ -42,7 +51,10 @@ const FlashContext = createContext(0);
 
 export function FlashProvider({ children }) {
   const p = useSyncExternalStore(subscribe, getSnapshot);
-  useEffect(() => stopRAF, []);
+  useEffect(() => {
+    startRAF();
+    return () => stopRAFLoop();
+  }, []);
   return <FlashContext.Provider value={p}>{children}</FlashContext.Provider>;
 }
 

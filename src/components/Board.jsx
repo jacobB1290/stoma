@@ -7,7 +7,7 @@ import React, {
   useRef,
   useReducer,
 } from "react";
-import { LayoutGroup, motion, AnimatePresence } from "framer-motion";
+import { LayoutGroup, motion, AnimatePresence } from "motion/react";
 import DayCol from "./DayCol";
 import MetaCol from "./MetaCol";
 import BoardMobile from "./BoardMobile";

@@ -16,7 +16,7 @@ import {
   useTransform,
   animate,
   useReducedMotion,
-} from "framer-motion";
+} from "motion/react";
 import { preloadAllHistoryData } from "./AllHistoryModal";
 import { useMut } from "../context/DataContext";
 import { UserCtx } from "../context/UserContext";

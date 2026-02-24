@@ -1,6 +1,6 @@
 // src/components/CaseManagementModal.jsx
 import React, { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { useMut } from "../context/DataContext";
 import { db } from "../services/caseService";

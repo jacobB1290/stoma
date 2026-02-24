@@ -14,7 +14,7 @@ import {
   useSpring,
   useTransform,
   useMotionValue,
-} from "framer-motion";
+} from "motion/react";
 import { parseLocalDate, DAY_MS } from "../utils/date";
 import clsx from "clsx";
 import { useMut } from "../context/DataContext";

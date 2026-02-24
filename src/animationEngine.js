@@ -1,6 +1,6 @@
 // src/animationEngine.js
 import React from "react";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import clsx from "clsx";
 import { parseLocalDate } from "./utils/date";
 
@@ -25,7 +25,7 @@ if (typeof window !== "undefined" && !window.__pulseClockInit) {
       `${-(Date.now() % CYCLE) / 1000}s`
     );
   tick();
-  setInterval(tick, CYCLE);
+  window.__pulseClockInterval = setInterval(tick, CYCLE);
 }
 
 /* helper */
@@ -46,7 +46,6 @@ export function ColumnShell({ children, isToday, metaColor }) {
     <motion.div
       {...layout}
       className={clsx("flex-1 flex flex-col p-4 rounded-lg", bg)}
-      style={{ willChange: "transform" }}
     >
       {children}
     </motion.div>
@@ -350,7 +349,7 @@ export function RowShell({
         "overflow-hidden",
         className
       )}
-      style={{ willChange: "transform", ...baseStyle, ...newAccountStyle, ...workflowPendingStyle }}
+      style={{ ...baseStyle, ...newAccountStyle, ...workflowPendingStyle }}
       onClick={onClick}
     >
       {isNewAccount && !workflowPending && <NewAccountSheen />}

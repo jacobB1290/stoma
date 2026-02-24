@@ -1,6 +1,6 @@
 // components/CalculationProgress.jsx
 import React, { useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 
 const CalculationProgress = ({ progress, isVisible }) => {
   useEffect(() => {

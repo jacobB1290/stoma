@@ -53,13 +53,9 @@
     <!-- ── PWA Manifest ─────────────────────────────────────────── -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
 
-    <!-- ── Preconnect to critical third-party origins ──────────── -->
-    <!--  Speeds up the first request to Supabase & OpenAI by     -->
-    <!--  resolving DNS + completing TLS before JS even loads.    -->
-    <link rel="preconnect" href="https://totqejdgvgxfonaebyla.supabase.co" crossorigin />
-    <link rel="dns-prefetch" href="https://totqejdgvgxfonaebyla.supabase.co" />
-    <link rel="preconnect" href="https://api.openai.com" crossorigin />
-    <link rel="dns-prefetch" href="https://api.openai.com" />
+    <!-- ── Preconnect hints ─────────────────────────────────────── -->
+    <!-- Supabase & OpenAI URLs are injected at runtime via env    -->
+    <!-- vars — do NOT hardcode them here.                         -->
 
     <!-- ── Page title ───────────────────────────────────────────── -->
     <title>Stomaboard</title>

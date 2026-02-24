@@ -5,7 +5,7 @@ import React, {
   useLayoutEffect,
   useCallback,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
 import CaseHistory from "./CaseHistory";

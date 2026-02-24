@@ -544,6 +544,8 @@ function handleBeforeUnload() {
 // ============================================
 // PUBLIC API
 // ============================================
+let heartbeatListenersAttached = false;
+
 export function startHeartbeat() {
   log("=== STARTING HEARTBEAT SYSTEM ===");
 
@@ -552,17 +554,23 @@ export function startHeartbeat() {
 
   startHeartbeatTimer();
 
-  document.addEventListener("visibilitychange", handleVisibilityChange);
-  window.addEventListener("focus", handleFocus);
-  window.addEventListener("blur", handleBlur);
-  window.addEventListener("beforeunload", handleBeforeUnload);
+  // Guard: only attach listeners once to prevent accumulation
+  if (!heartbeatListenersAttached) {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
-  window.addEventListener("mousedown", handleActivity);
-  window.addEventListener("keydown", handleActivity);
-  window.addEventListener("scroll", handleActivity, { passive: true });
-  window.addEventListener("touchstart", handleActivity, { passive: true });
+    window.addEventListener("mousedown", handleActivity);
+    window.addEventListener("keydown", handleActivity);
+    window.addEventListener("scroll", handleActivity, { passive: true });
+    window.addEventListener("touchstart", handleActivity, { passive: true });
 
-  log("All event listeners attached");
+    heartbeatListenersAttached = true;
+    log("All event listeners attached");
+  } else {
+    log("Event listeners already attached, skipping");
+  }
 }
 
 export function stopHeartbeat() {
@@ -584,6 +592,7 @@ export function stopHeartbeat() {
   window.removeEventListener("scroll", handleActivity);
   window.removeEventListener("touchstart", handleActivity);
 
+  heartbeatListenersAttached = false;
   log("All event listeners removed");
 }
 
