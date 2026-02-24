@@ -11,10 +11,22 @@ body {
   margin: 0;
   padding: 0;
 
-  /* fallback to viewport height */
+  /* Prevent iOS from auto-scaling text on rotation */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+
+  /* Smoother font rendering on Apple hardware */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Suppress the gray tap flash on iOS interactive elements */
+  -webkit-tap-highlight-color: transparent;
+
+  /* Full-height: dvh for iOS 15.4+ (accounts for collapsing browser chrome),
+     -webkit-fill-available for older Safari, 100vh as the base fallback */
   height: 100vh;
-  /* Safari will use this instead when available */
   height: -webkit-fill-available;
+  height: 100dvh;
 
   /* your gradient */
   background: linear-gradient(to bottom right, #103e48 0%, #16525f 100%)

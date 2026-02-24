@@ -46,6 +46,7 @@ export function ColumnShell({ children, isToday, metaColor }) {
     <motion.div
       {...layout}
       className={clsx("flex-1 flex flex-col p-4 rounded-lg", bg)}
+      style={{ willChange: "transform" }}
     >
       {children}
     </motion.div>
@@ -91,6 +92,9 @@ function NewAccountSheen() {
           filter: "blur(25px)",
           pointerEvents: "none",
           zIndex: 1,
+          willChange: "transform",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -115,6 +119,9 @@ function NewAccountSheen() {
           filter: "blur(25px)",
           pointerEvents: "none",
           zIndex: 1,
+          willChange: "transform",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -139,6 +146,9 @@ function NewAccountSheen() {
           filter: "blur(20px)",
           pointerEvents: "none",
           zIndex: 1,
+          willChange: "transform, opacity",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -162,6 +172,9 @@ function NewAccountSheen() {
           filter: "blur(25px)",
           pointerEvents: "none",
           zIndex: 1,
+          willChange: "transform, opacity",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -184,6 +197,9 @@ function NewAccountSheen() {
           filter: "blur(3px)",
           pointerEvents: "none",
           zIndex: 3,
+          willChange: "transform, opacity",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -207,6 +223,9 @@ function NewAccountSheen() {
           filter: "blur(2px)",
           pointerEvents: "none",
           zIndex: 4,
+          willChange: "transform, opacity",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <div
@@ -331,7 +350,7 @@ export function RowShell({
         "overflow-hidden",
         className
       )}
-      style={{ ...baseStyle, ...newAccountStyle, ...workflowPendingStyle }}
+      style={{ willChange: "transform", ...baseStyle, ...newAccountStyle, ...workflowPendingStyle }}
       onClick={onClick}
     >
       {isNewAccount && !workflowPending && <NewAccountSheen />}
