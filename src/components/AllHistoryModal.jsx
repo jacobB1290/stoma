@@ -87,7 +87,7 @@ const split = (s = "") => {
 
 /* ───────── action processing helpers (matching CaseHistory) ───────── */
 const formatDateShort = (dateStr) => {
-  const [year, month, day] = dateStr.split("T")[0].split("-");
+  const [, month, day] = dateStr.split("T")[0].split("-");
   return `${parseInt(month)}-${parseInt(day)}`;
 };
 

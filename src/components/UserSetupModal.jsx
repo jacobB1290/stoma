@@ -116,12 +116,6 @@ export default function UserSetupModal() {
     return knownNames.some((n) => n.toLowerCase() === v);
   }
 
-  /** Return the canonical form of a known name, or null. */
-  function resolveKnown(value) {
-    const v = value.trim().toLowerCase();
-    return knownNames.find((n) => n.toLowerCase() === v) || null;
-  }
-
   // ── Autocomplete + settings lookup as user types ──────────────────────────
   useEffect(() => {
     if (!name.trim()) {

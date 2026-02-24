@@ -12,7 +12,6 @@ import {
   RevealButton,
   guard,
   SPRING,
-  TWEEN,
 } from "../animationEngine";
 import { AnimatePresence, motion, useMotionValue } from "motion/react";
 import CaseHistory from "./CaseHistory";
@@ -33,9 +32,6 @@ const split = (s = "") => {
   return [id, rest.join(" ")];
 };
 
-const ROW_H = 40;
-const OPEN_ADD = 14;
-
 const ChainLinkIcon = ({ className = "" }) => (
   <svg
     className={className}
@@ -52,8 +48,6 @@ const ChainLinkIcon = ({ className = "" }) => (
     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
   </svg>
 );
-
-const ICON_SLOT_W = 18;
 
 const StageDivider = ({ label, isToday, delay = 0 }) => (
   <motion.div

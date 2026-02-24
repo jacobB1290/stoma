@@ -8,7 +8,6 @@ import React, {
   useState,
   useRef,
   memo,
-  startTransition,
 } from "react";
 import clsx from "clsx";
 import { db } from "../services/caseService";
@@ -257,7 +256,6 @@ const PipelineFlowVisualization = memo(function PipelineFlowVisualization({
       if (fromIndex >= STAGES.length - 1) return;
 
       const id = particleIdRef.current++;
-      const fromStage = STAGES[fromIndex];
       const toStage = STAGES[fromIndex + 1];
       const toIsBottleneck = toStage === bottleneckStage;
 
@@ -1891,7 +1889,7 @@ export default function SystemManagementScreen() {
 
   // Projections
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState({
+  const [_progress, setProgress] = useState({
     design: 0,
     production: 0,
     finishing: 0,

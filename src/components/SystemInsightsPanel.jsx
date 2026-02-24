@@ -20,7 +20,6 @@ import {
   STATUS_TYPES,
   EVENT_TYPES,
   setEventLogCallback,
-  getEventLog,
 } from "../qa/LLMChatService";
 import { useMut } from "../context/DataContext";
 import { db } from "../services/caseService";

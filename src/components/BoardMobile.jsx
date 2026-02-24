@@ -101,9 +101,6 @@ function SummaryBar({ totalCases, overdueCount, priorityCount, todayCount }) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function MetaCells({ overdue, hold, onSelect, selectedKey }) {
-  const overdueLevel = getHeatLevel(overdue.length);
-  const holdLevel = getHeatLevel(hold.length);
-
   return (
     <div className="flex gap-2 px-3 py-2">
       {/* Overdue button - uses bg-red-700 for theme compatibility */}

@@ -642,7 +642,7 @@ export default function Board({
 
   /* Department efficiency (non-stage) */
   const [deptEfficiency, setDeptEfficiency] = useState(null);
-  const [deptLoading, setDeptLoading] = useState(false);
+  const [_deptLoading, setDeptLoading] = useState(false);
 
   useEffect(() => {
     if (stage || !activeDept) {
