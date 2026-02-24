@@ -352,7 +352,9 @@ html.theme-white
   :is(.bg-\[\#4D8490\], .bg-\[\#55679B\], .bg-\[\#C75A9E\], .bg-\[\#6F5BA8\]) {
   color: var(--w-text);
   border: 1px solid var(--w-border);
-  filter: drop-shadow(var(--w-row-shadow));
+  /* box-shadow instead of filter:drop-shadow — avoids Safari GPU compositing
+     layer churn that causes shadows to flicker during Framer Motion animations */
+  box-shadow: var(--w-row-shadow);
 }
 
 html.theme-white .bg-\[\#4D8490\] {
@@ -585,13 +587,15 @@ html.theme-white
   }
 }
 
+/* box-shadow pulse — replaces filter:brightness() to avoid Safari GPU
+   compositing-layer churn that makes shadows flicker on Apple devices */
 @keyframes row-glow-lite {
   0%,
   100% {
-    filter: brightness(1);
+    box-shadow: var(--w-row-shadow), 0 0 0 1px #16525f26;
   }
   50% {
-    filter: brightness(1.15);
+    box-shadow: 0 8px 24px #0f172a2e, 0 0 0 2px #16525f40, 0 0 12px #16525f26;
   }
 }
 
@@ -605,15 +609,16 @@ html.theme-white :is(.pulse-red, .flash-red)::after {
 html.theme-white .glow {
   animation: row-glow-lite 1.5s ease-in-out infinite;
   animation-delay: var(--pulse-clock, 0s);
-  box-shadow: 0 0 0 1px #16525f26, 0 6px 14px #0f172a1f;
 }
 
 html.theme-white .pulse-red {
-  filter: brightness(1.02) saturate(1.05);
+  /* filter:brightness removed — the ::after overlay handles the visual pulse
+     without promoting a new GPU compositing layer on Safari */
 }
 
 html.theme-white .case-row.dragging {
-  filter: drop-shadow(0 12px 24px #0f172a2e);
+  /* box-shadow instead of filter:drop-shadow — prevents Safari shadow flicker */
+  box-shadow: 0 12px 24px #0f172a2e;
 }
 
 /* ───────── scrollbar ───────── */
