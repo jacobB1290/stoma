@@ -95,6 +95,18 @@ const splitCase = (cn = "") => {
 
 const normDept = (d) => (!d ? "Unknown" : d === "General" ? "Digital" : d);
 
+/**
+ * Returns the due hour (local, 0–23) for a case.
+ * If the stored due string encodes a non-midnight hour in its time component,
+ * that value is used directly (written there by parseNoteTime at save time).
+ * Otherwise falls back to the legacy defaults: noon for priority, 5 pm for normal.
+ */
+const getDueHour = (dueDateStr, isPriority) => {
+  const timePart = dueDateStr ? dueDateStr.split("T")[1] : null;
+  const storedHour = timePart ? parseInt(timePart.split(":")[0], 10) : 0;
+  return storedHour > 0 ? storedHour : isPriority ? 12 : 17;
+};
+
 /* ══════════════════════════════════════════════ */
 /*  Action classification                         */
 /* ══════════════════════════════════════════════ */
@@ -107,6 +119,7 @@ const ACTION_TYPE_MAP = {
   hold: "hold",
   "due changed": "edit",
   "due date changed": "edit",
+  "due time changed": "edit",
   "note changed": "note",
   "note added": "note",
   "note removed": "note",
@@ -493,7 +506,7 @@ const CountdownTimer = React.memo(({ dueDate, isPriority }) => {
     const now = new Date();
     const [y, m, d] = dueDate.split("T")[0].split("-");
     const due = new Date(y, m - 1, d);
-    due.setHours(isPriority ? 12 : 17, 0, 0, 0);
+    due.setHours(getDueHour(dueDate, isPriority), 0, 0, 0);
     const diff = due - now;
     const abs = Math.abs(diff);
     const dd = Math.floor(abs / 864e5);
@@ -774,7 +787,7 @@ const computeLateness = (completedAt, dueStr, isPriority = false) => {
   const done = new Date(completedAt);
   const [y, m, d] = dueStr.split("T")[0].split("-").map(Number);
   const due = new Date(y, m - 1, d);
-  due.setHours(isPriority ? 12 : 17, 0, 0, 0);
+  due.setHours(getDueHour(dueStr, isPriority), 0, 0, 0);
   const diff = done - due;
   if (diff <= 0) return null;
   const totalH = diff / 36e5;
@@ -1416,7 +1429,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       if (doneEntry) {
         const doneDate = new Date(doneEntry.created_at);
         const dueDate = new Date(dueY, dueM - 1, dueD);
-        dueDate.setHours(rawCase.priority ? 12 : 17, 0, 0, 0);
+        dueDate.setHours(getDueHour(rawCase.due, rawCase.priority), 0, 0, 0);
         const diff = doneDate - dueDate;
         if (diff < 0) {
           const abs = Math.abs(diff);
@@ -1756,7 +1769,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         const done = new Date(lastDoneTs);
         const [y, m, d] = last.due.split("T")[0].split("-").map(Number);
         const due = new Date(y, m - 1, d);
-        due.setHours(last.priority ? 12 : 17, 0, 0, 0);
+        due.setHours(getDueHour(last.due, last.priority), 0, 0, 0);
         const diff = done - due;
         if (diff < 0) {
           const abs = Math.abs(diff);
