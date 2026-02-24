@@ -182,7 +182,7 @@ function ConfirmationDialog({ isOpen, onConfirm, onCancel, caseNumber }) {
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[10001] w-full max-w-sm mx-4"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[10001] w-[calc(100vw-2rem)] max-w-sm"
           >
             <div className="bg-white rounded-2xl shadow-xl ring-1 ring-black/5 overflow-hidden">
               <div className="p-5">
