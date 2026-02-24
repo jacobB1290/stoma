@@ -13,9 +13,9 @@
  * so the new SW script will differ from the cached copy.
  */
 
-const APP_SHELL_CACHE   = 'stomaboard-shell-v1';
-const STATIC_ASSET_CACHE = 'stomaboard-static-v1';
-const RUNTIME_CACHE     = 'stomaboard-runtime-v1';
+const APP_SHELL_CACHE   = 'stomaboard-shell-v2';
+const STATIC_ASSET_CACHE = 'stomaboard-static-v2';
+const RUNTIME_CACHE     = 'stomaboard-runtime-v2';
 
 // URLs that should NEVER be cached (live API traffic)
 const NEVER_CACHE = [
