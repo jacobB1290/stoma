@@ -5,9 +5,8 @@ import React, {
   useMemo,
   useCallback,
   useRef,
-  useReducer,
 } from "react";
-import { LayoutGroup, motion, AnimatePresence } from "framer-motion";
+import { LayoutGroup, motion, AnimatePresence } from "motion/react";
 import DayCol from "./DayCol";
 import MetaCol from "./MetaCol";
 import BoardMobile from "./BoardMobile";
@@ -643,7 +642,7 @@ export default function Board({
 
   /* Department efficiency (non-stage) */
   const [deptEfficiency, setDeptEfficiency] = useState(null);
-  const [deptLoading, setDeptLoading] = useState(false);
+  const [_deptLoading, setDeptLoading] = useState(false);
 
   useEffect(() => {
     if (stage || !activeDept) {

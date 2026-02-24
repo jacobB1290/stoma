@@ -5,15 +5,11 @@
 import React, {
   useState,
   useMemo,
-  useCallback,
-  useRef,
-  useLayoutEffect,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import clsx from "clsx";
 import CaseHistory from "./CaseHistory";
 import { iso } from "../utils/date";
-import { RowShell, RevealButton, SPRING } from "../animationEngine";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    CONSTANTS
@@ -105,9 +101,6 @@ function SummaryBar({ totalCases, overdueCount, priorityCount, todayCount }) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function MetaCells({ overdue, hold, onSelect, selectedKey }) {
-  const overdueLevel = getHeatLevel(overdue.length);
-  const holdLevel = getHeatLevel(hold.length);
-
   return (
     <div className="flex gap-2 px-3 py-2">
       {/* Overdue button - uses bg-red-700 for theme compatibility */}
@@ -493,15 +486,16 @@ function CaseRowMobile({
         </motion.svg>
       </div>
 
-      {/* Expanded actions */}
+      {/* Expanded actions — layout prop drives height via GPU transform (FLIP),
+          avoiding JS-driven height:0→auto which triggers layout every frame. */}
       <AnimatePresence>
         {isExpanded && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            layout
           >
             <div className="flex flex-wrap gap-1.5 px-3 py-2.5 bg-black/15 border-t border-white/10">
               {/* Info button */}

@@ -27,7 +27,7 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { MotionConfig } from "framer-motion";
+import { MotionConfig } from "motion/react";
 
 /* ─────────────────────────── Context ─────────────────────────────── */
 const LiteCtx = createContext({ lite: false, toggle: () => {} });

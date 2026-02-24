@@ -4,7 +4,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { useUser } from "../context/UserContext";
 import {
   fetchSettingsForName,
@@ -114,12 +114,6 @@ export default function UserSetupModal() {
   function matchesKnownName(value) {
     const v = value.trim().toLowerCase();
     return knownNames.some((n) => n.toLowerCase() === v);
-  }
-
-  /** Return the canonical form of a known name, or null. */
-  function resolveKnown(value) {
-    const v = value.trim().toLowerCase();
-    return knownNames.find((n) => n.toLowerCase() === v) || null;
   }
 
   // ── Autocomplete + settings lookup as user types ──────────────────────────

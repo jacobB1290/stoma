@@ -581,7 +581,10 @@ function AppShell() {
     document.body.classList.remove(...allBgClasses);
   }, [theme]);
 
-  useEffect(() => scheduleMidnightRefresh(), []);
+  useEffect(() => {
+    const timerId = scheduleMidnightRefresh();
+    return () => clearTimeout(timerId);
+  }, []);
 
   useEffect(() => localStorage.setItem("lastView", view), [view]);
 
@@ -664,7 +667,7 @@ function AppShell() {
     const now = new Date();
     const ms =
       new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
-    setTimeout(() => window.location.reload(), ms);
+    return setTimeout(() => window.location.reload(), ms);
   }
 
   // Week navigation handlers

@@ -11,7 +11,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import {
   askLLM,
   resetLLMChat,
@@ -20,7 +20,6 @@ import {
   STATUS_TYPES,
   EVENT_TYPES,
   setEventLogCallback,
-  getEventLog,
 } from "../qa/LLMChatService";
 import { useMut } from "../context/DataContext";
 import { db } from "../services/caseService";

@@ -124,7 +124,7 @@ const wereCoActive = (a, b, completionDates) => {
   }
 
   // ── Scenario 2: exactly one completed ──
-  const [earlier, later] = aT <= bT ? [a, b] : [b, a];
+  const [earlier] = aT <= bT ? [a, b] : [b, a];
   const laterCreated = Math.max(aT, bT);
 
   // The still-active case was created first → overlap guaranteed

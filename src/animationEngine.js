@@ -1,6 +1,6 @@
 // src/animationEngine.js
 import React from "react";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import clsx from "clsx";
 import { parseLocalDate } from "./utils/date";
 
@@ -25,7 +25,7 @@ if (typeof window !== "undefined" && !window.__pulseClockInit) {
       `${-(Date.now() % CYCLE) / 1000}s`
     );
   tick();
-  setInterval(tick, CYCLE);
+  window.__pulseClockInterval = setInterval(tick, CYCLE);
 }
 
 /* helper */
@@ -46,7 +46,6 @@ export function ColumnShell({ children, isToday, metaColor }) {
     <motion.div
       {...layout}
       className={clsx("flex-1 flex flex-col p-4 rounded-lg", bg)}
-      style={{ willChange: "transform" }}
     >
       {children}
     </motion.div>
@@ -350,7 +349,7 @@ export function RowShell({
         "overflow-hidden",
         className
       )}
-      style={{ willChange: "transform", ...baseStyle, ...newAccountStyle, ...workflowPendingStyle }}
+      style={{ ...baseStyle, ...newAccountStyle, ...workflowPendingStyle }}
       onClick={onClick}
     >
       {isNewAccount && !workflowPending && <NewAccountSheen />}
@@ -370,26 +369,26 @@ const BUBBLE_SPRING = {
   mass: 0.8,
 };
 
+/* RevealButton variants use only GPU-composited properties (opacity, scale, width).
+   marginLeft is applied via a fixed CSS class — removing it from the animation
+   variants eliminates one layout-triggering property per frame. */
 const revealVar = {
   closed: {
     opacity: 0,
     scale: 0,
     width: 0,
-    marginLeft: 0,
     transition: BUBBLE_SPRING,
   },
   open: {
     opacity: 1,
     scale: 1,
     width: BTN_W,
-    marginLeft: 8,
     transition: BUBBLE_SPRING,
   },
   openSmall: {
     opacity: 1,
     scale: 1,
     width: BTN_W_SMALL,
-    marginLeft: 8,
     transition: BUBBLE_SPRING,
   },
 };
@@ -411,7 +410,8 @@ export function RevealButton({
       className={clsx(
         "overflow-hidden rounded px-3 py-1 text-sm font-semibold inline-block",
         frosted,
-        small && "px-1 py-0.5"
+        small && "px-1 py-0.5",
+        open && "ml-2"
       )}
       style={{ originX: 0, originY: 0.5 }}
       onClick={onClick}

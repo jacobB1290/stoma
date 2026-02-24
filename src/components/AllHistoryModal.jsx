@@ -10,7 +10,7 @@ import React, {
   lazy,
   Suspense,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { db } from "../services/caseService";
 
@@ -87,7 +87,7 @@ const split = (s = "") => {
 
 /* ───────── action processing helpers (matching CaseHistory) ───────── */
 const formatDateShort = (dateStr) => {
-  const [year, month, day] = dateStr.split("T")[0].split("-");
+  const [, month, day] = dateStr.split("T")[0].split("-");
   return `${parseInt(month)}-${parseInt(day)}`;
 };
 

@@ -6,7 +6,6 @@ import React, {
   useMemo,
   lazy,
   Suspense,
-  useContext,
 } from "react";
 import {
   motion,
@@ -16,19 +15,17 @@ import {
   useTransform,
   animate,
   useReducedMotion,
-} from "framer-motion";
+} from "motion/react";
 import { preloadAllHistoryData } from "./AllHistoryModal";
 import { useMut } from "../context/DataContext";
-import { UserCtx } from "../context/UserContext";
 import CaseTable from "./CaseTable";
 import clsx from "clsx";
 import "../styles.css";
-import { checkForDuplicates, db } from "../services/caseService";
+import { checkForDuplicates } from "../services/caseService";
 import { APP_VERSION } from "../constants";
 const AllHistoryModal = lazy(() => import("./AllHistoryModal"));
 const DeleteCompletedModal = lazy(() => import("./DeleteCompletedModal"));
 const UpdateModal = lazy(() => import("./UpdateModal"));
-const COLLAPSE_THRESHOLD = 0.5;
 const EXPAND_THRESHOLD = 0.5;
 const COMPLETION_THRESHOLD = 0.8;
 const INTERACTION_THRESHOLD = 0.8;
@@ -208,7 +205,6 @@ const ModalPlaceholder = () => null;
 
 export default function Editor({ data, deptDefault }) {
   const shouldReduceMotion = useReducedMotion();
-  const { name: userName } = useContext(UserCtx);
   const {
     addOrUpdate,
     toggleComplete,
@@ -249,7 +245,7 @@ export default function Editor({ data, deptDefault }) {
   // Focus tracking state
   const [focusedInput, setFocusedInput] = useState(null);
   const [focusedFilter, setFocusedFilter] = useState(null);
-  const [previousFocusedInput, setPreviousFocusedInput] = useState(null);
+  const [_previousFocusedInput, setPreviousFocusedInput] = useState(null);
 
   // Original values for edit mode
   const [originalValues, setOriginalValues] = useState(null);
@@ -257,7 +253,7 @@ export default function Editor({ data, deptDefault }) {
   // Duplicate detection state
   const [duplicates, setDuplicates] = useState([]);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
-  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
+  const [_isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
   const duplicateCheckTimeoutRef = useRef(null);
   const [notificationPosition, setNotificationPosition] = useState({
     top: 0,
@@ -303,7 +299,7 @@ export default function Editor({ data, deptDefault }) {
   const [isMobile, setIsMobile] = useState(false);
   const [historyPreloaded, setHistoryPreloaded] = useState(false);
   const [formLayout, setFormLayout] = useState("desktop");
-  const [canFitOnRight, setCanFitOnRight] = useState(true);
+  const [_canFitOnRight, setCanFitOnRight] = useState(true);
 
   const forceOpen = search.trim().length > 0;
 
@@ -1120,7 +1116,7 @@ export default function Editor({ data, deptDefault }) {
     });
   }, [animationProgress, rawProgress, shouldReduceMotion, lockAddCaseCard]);
 
-  const forceCollapseAnimation = useCallback(() => {
+  const _forceCollapseAnimation = useCallback(() => {
     if (shouldReduceMotion || lockAddCaseCard) {
       if (!lockAddCaseCard) {
         setIsCollapsed(true);

@@ -433,7 +433,6 @@ async function loadFullDatabase(forceRefresh = false) {
 
   const allCases = casesResult.data || [];
   const allHistory = historyResult.data || [];
-  const now_date = new Date();
 
   // Process cases with computed fields
   const processedCases = allCases.map((c) => {
@@ -2552,16 +2551,13 @@ class LLMChatService {
         // Step 3: Send to API
         updateStatus(STATUS_TYPES.THINKING, "AI is thinking...");
 
-        const apiCallStart = Date.now();
         let response = await callResponsesAPI(input, TOOLS);
-        const apiCallTime = Date.now() - apiCallStart;
 
         let finalMessage = "";
         let showUI = true;
         let iterations = 0;
         let displayApproved = false;
         let totalToolCalls = 0;
-        let iterationStartTime = Date.now();
 
         while (iterations < LLM_CONFIG.MAX_ITERATIONS && !displayApproved) {
           iterations++;
@@ -2631,7 +2627,6 @@ class LLMChatService {
           // Collect info for this iteration's log entry
           const iterationToolsCalled = [];
           const iterationToolResults = [];
-          let modelDecision = "";
 
           if (toolCalls.length > 0) {
             const toolResults = [];
@@ -2650,9 +2645,6 @@ class LLMChatService {
             }
 
             const toolNames = limitedToolCalls.map((tc) => tc.name);
-            modelDecision = `Calling ${
-              toolNames.length
-            } tool(s): ${toolNames.join(", ")}`;
 
             // Update status based on tool type
             if (toolNames.includes("display_to_user")) {

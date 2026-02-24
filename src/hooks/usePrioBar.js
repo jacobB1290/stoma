@@ -1,4 +1,4 @@
-import { useMotionValue, useSpring } from "framer-motion";
+import { useMotionValue, useSpring } from "motion/react";
 import { useEffect, useRef } from "react";
 
 /**
