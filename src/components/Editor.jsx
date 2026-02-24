@@ -1145,7 +1145,13 @@ export default function Editor({ data, deptDefault }) {
           ua
         ) || window.innerWidth < 768;
       setIsMobile(mobile);
-      setNavbarHeight(mobile ? 56 : 64);
+      // Measure actual rendered header height; fall back to device-type defaults
+      const headerEl = document.querySelector("header");
+      if (headerEl) {
+        setNavbarHeight(headerEl.getBoundingClientRect().height);
+      } else {
+        setNavbarHeight(mobile ? 56 : 64);
+      }
     };
     detectDevice();
     window.addEventListener("resize", detectDevice);
