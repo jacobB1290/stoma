@@ -13,7 +13,6 @@ import DeleteCompletedModal from "./DeleteCompletedModal";
 import { db, archiveCases } from "../services/caseService";
 import { useMut } from "../context/DataContext";
 
-
 // CaseTable.jsx - Optimized with progressive loading that doesn't block UI
 
 // ============ PROGRESSIVE LOADING CONFIG ============
@@ -446,8 +445,6 @@ export default memo(function CaseTable({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const { workflowMap } = useMut();
-
-  
 
   const formatDate = useCallback((dateStr) => {
     const [, month, day] = dateStr.split("T")[0].split("-");

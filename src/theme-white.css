@@ -600,24 +600,17 @@ html.theme-white
 }
 
 html.theme-white :is(.pulse-red, .flash-red)::after {
-  /* Use live --pulse var instead of restarting @keyframes animation */
-  opacity: calc(0.5 * var(--pulse, 0));
+  animation: row-pulse-lite 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
   background: var(--w-priority-flash) !important;
   mix-blend-mode: multiply;
 }
 
 html.theme-white .glow {
-  /* Keep element box-shadow for board card ring effect */
-  box-shadow: var(--w-row-shadow, none),
-    0 0 0 calc(1px + 1px * var(--pulse, 0)) rgba(22, 82, 95, calc(0.15 + 0.25 * var(--pulse, 0))),
-    0 0 calc(12px * var(--pulse, 0)) rgba(22, 82, 95, calc(0.15 * var(--pulse, 0)));
-}
-
-html.theme-white .glow::before {
-  /* Override base white glow with teal-tinted version */
-  box-shadow:
-    0 0 0 2px rgba(22, 82, 95, calc(0.55 * var(--pulse, 0))),
-    0 0 10px 4px rgba(22, 82, 95, calc(0.25 * var(--pulse, 0)));
+  /* Override base glow animation with teal-tinted version for white theme.
+     animation-delay inherits --pulse-clock from :root, set by FlashContext. */
+  animation: row-glow-lite 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 html.theme-white .pulse-red {

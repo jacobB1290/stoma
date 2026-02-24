@@ -1,39 +1,38 @@
 /* --------------------------------------------------------------
    Global pulse clock
-   --pulse is written every RAF frame by FlashContext.jsx onto :root.
-   Value: 0 → 1 → 0  (smooth cosine, 1.5 s period)
+   --pulse-clock is written every RAF frame by FlashContext.jsx onto :root.
+   Value: negative-seconds offset (e.g. -0.75s) that syncs all @keyframes
+   animations to the same phase — identical to the Board page.
 
-   ALL flash/glow effects below are GPU-composited:
-     • opacity on a ::before / ::after pseudo-element  ✓ composited
-     • box-shadow                                       ✓ composited
-   We never use filter:brightness() here — that forces a full
-   repaint + layer rasterisation every frame (60fps stutter).
+   Elements inherit --pulse-clock from :root automatically.
+   No per-element delay needed; all flashing elements pulse in lockstep.
 -------------------------------------------------------------- */
 
 /* -------------------------------------------------------------- 
-   .glow — Bright ring pulse for status dots and board cards.
-   Uses a ::before box-shadow overlay (GPU-composited, no repaint).
+   .glow — blue/white glow for board cards and status dots.
+   Uses @keyframes + animation-delay: var(--pulse-clock) so it
+   stays phase-locked to the global FlashContext clock.
 -------------------------------------------------------------- */
+@keyframes row-glow {
+  0%, 100% { box-shadow: 0 0 0 0px rgba(255,255,255,0),   0 0 0px  0px rgba(255,255,255,0); }
+  50%       { box-shadow: 0 0 0 2px rgba(255,255,255,0.55), 0 0 10px 4px rgba(255,255,255,0.25); }
+}
+
 .glow {
   position: relative;
-}
-.glow::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, calc(0.55 * var(--pulse, 0))),
-              0 0 10px 4px rgba(255, 255, 255, calc(0.25 * var(--pulse, 0)));
-  pointer-events: none;
-  z-index: 0;
-  /* box-shadow is GPU-composited — no repaint triggered each frame. */
+  animation: row-glow 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 /* -------------------------------------------------------------- 
-   Red overlay pulse (legacy classes kept for any existing usages)
-   Uses a ::after pseudo-element whose opacity tracks --pulse.
-   opacity is GPU-composited — zero repaints.
+   Red overlay pulse — board card priority / overdue flash.
+   ::after pseudo-element so it doesn't affect child layout.
 -------------------------------------------------------------- */
+@keyframes row-pulse-red {
+  0%, 100% { opacity: 0; }
+  50%       { opacity: 0.95; }
+}
+
 .pulse-red,
 .flash-red {
   position: relative;
@@ -46,37 +45,43 @@
   border-radius: inherit;
   background: var(--pulse-color, #ff1e1e);
   mix-blend-mode: color;
-  opacity: calc(0.95 * var(--pulse, 0));
   pointer-events: none;
+  animation: row-pulse-red 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 /* -------------------------------------------------------------- 
    Generic gentle flash utility
 -------------------------------------------------------------- */
+@keyframes gentle-flash {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
 .animate-pulse {
-  /* 1 at rest, dims to 0.4 at peak pulse */
-  opacity: calc(1 - 0.6 * var(--pulse, 0));
+  animation: gentle-flash 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 /* -------------------------------------------------------------- 
    Critical (high-priority) update flash - RED
 -------------------------------------------------------------- */
 .flash-critical {
-  opacity: calc(1 - 0.65 * var(--pulse, 0));
+  animation: gentle-flash 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 /* -------------------------------------------------------------- 
    Hold days flash
 -------------------------------------------------------------- */
 .flash-hold-days {
-  opacity: calc(1 - 0.6 * var(--pulse, 0));
+  animation: gentle-flash 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 /* -------------------------------------------------------------- 
    New Account (iridescent bubble sheen)
-   This one keeps its own keyframe animation — it's a slow decorative
-   rotation/hue-shift, not a sync-critical pulse, so it's fine to
-   be independent.
+   Slow decorative rotation — independent keyframe is fine here.
 -------------------------------------------------------------- */
 @keyframes newAccountIridescence {
   0% {
@@ -127,28 +132,36 @@
   mix-blend-mode: var(--newaccount-sheen-blend, screen);
   filter: blur(var(--newaccount-sheen-blur, 10px));
   transform-origin: 50% 50%;
-  animation: newAccountIridescence var(--newaccount-sheen-speed, 8s) linear
-    infinite;
+  animation: newAccountIridescence var(--newaccount-sheen-speed, 8s) linear infinite;
 }
 
 /* -------------------------------------------------------------- 
    Settings icon flash for high-priority updates
 -------------------------------------------------------------- */
+@keyframes settings-flash-red {
+  0%, 100% {
+    background-color: rgba(255,255,255,0.4);
+    border-color: rgba(255,255,255,0.4);
+  }
+  50% {
+    background-color: rgba(220,38,38,0.2);
+    border-color: rgba(220,38,38,0.5);
+  }
+}
+
 .update-critical button[aria-label="Settings"] {
-  background-color: color-mix(
-    in srgb,
-    rgba(220, 38, 38, 0.2) calc(var(--pulse, 0) * 100%),
-    rgba(255, 255, 255, 0.4)
-  );
-  border-color: color-mix(
-    in srgb,
-    rgba(220, 38, 38, 0.5) calc(var(--pulse, 0) * 100%),
-    rgba(255, 255, 255, 0.4)
-  );
+  animation: settings-flash-red 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
+}
+
+@keyframes settings-icon-fade {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
 }
 
 .update-critical button[aria-label="Settings"] > span:first-child {
-  opacity: calc(1 - 0.65 * var(--pulse, 0));
+  animation: settings-icon-fade 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 /* -------------------------------------------------------------- 
@@ -157,16 +170,20 @@
 .update-pending button[aria-label="Settings"],
 .update-pending .flash-system,
 .update-pending .flash-update {
-  opacity: calc(1 - 0.6 * var(--pulse, 0));
+  animation: gentle-flash 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 /* -------------------------------------------------------------- 
    Overdue section header flash
-   Brightens the dark-red background using an inset box-shadow
-   tinted white — same technique as before but driven by --pulse
-   instead of a restarting @keyframes animation.
 -------------------------------------------------------------- */
+@keyframes overdue-flash {
+  0%, 100% { box-shadow: inset 0 0 0 100px rgba(255,255,255,0);    }
+  50%       { box-shadow: inset 0 0 0 100px rgba(255,255,255,0.22); }
+}
+
 .flash-overdue {
   background-color: var(--overdue-bg, #7f1d1d);
-  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, calc(0.22 * var(--pulse, 0)));
+  animation: overdue-flash 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
