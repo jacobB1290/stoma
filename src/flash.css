@@ -1,31 +1,27 @@
 /* --------------------------------------------------------------
-   1.5-second master pulse clock (value injected into --pulse-clock)
+   Global pulse clock
+   --pulse is written every RAF frame by FlashContext.jsx onto :root.
+   Value: 0 → 1 → 0  (smooth cosine, 1.5 s period)
+   ALL flash/glow effects below read this single live value —
+   no per-element animation-delay, no restarts on re-mount.
 -------------------------------------------------------------- */
-/* Bright-tint pulse (priority 09:45-11:59) */
-@keyframes row-glow {
-  0%,
-  100% {
-    filter: brightness(1);
-  }
-  50% {
-    filter: brightness(1.35);
-  }
-}
+
+/* -------------------------------------------------------------- 
+   Bright-tint glow for status dots
+-------------------------------------------------------------- */
 .glow {
-  animation: row-glow 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  /*
+   * Brightness 1.0 at pulse=0, up to 1.35 at pulse=1.
+   * calc() can't call functions, but we can use a linear mapping:
+   *   brightness = 1 + 0.35 * pulse
+   * CSS can do this with: filter: brightness(calc(1 + 0.35 * var(--pulse)))
+   */
+  filter: brightness(calc(1 + 0.35 * var(--pulse, 0)));
 }
 
-/* Red overlay pulse (priority ≥12:00 + overdue) */
-@keyframes row-pulse-red {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  50% {
-    opacity: 0.95;
-  }
-}
+/* -------------------------------------------------------------- 
+   Red overlay pulse (legacy classes kept for any existing usages)
+-------------------------------------------------------------- */
 .pulse-red,
 .flash-red {
   position: relative;
@@ -38,70 +34,37 @@
   border-radius: inherit;
   background: var(--pulse-color, #ff1e1e);
   mix-blend-mode: color;
-  opacity: 0;
+  opacity: calc(0.95 * var(--pulse, 0));
   pointer-events: none;
-  animation: row-pulse-red 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
 }
 
-/* --------------------------------------------------------------
-   Generic gentle flash (re-usable utility)
+/* -------------------------------------------------------------- 
+   Generic gentle flash utility
 -------------------------------------------------------------- */
-@keyframes gentleFlash {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
 .animate-pulse {
-  animation: gentleFlash 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  /* 1 at rest, dims to 0.4 at peak pulse */
+  opacity: calc(1 - 0.6 * var(--pulse, 0));
 }
 
-/* --------------------------------------------------------------
+/* -------------------------------------------------------------- 
    Critical (high-priority) update flash - RED
 -------------------------------------------------------------- */
-@keyframes flashCritical {
-  0%,
-  100% {
-    opacity: 1;
-    color: inherit;
-  }
-  50% {
-    opacity: 0.35;
-    color: #dc2626;
-  }
-}
 .flash-critical {
-  animation: flashCritical 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  opacity: calc(1 - 0.65 * var(--pulse, 0));
 }
 
-/* --------------------------------------------------------------
-   Critical flash for hold days - synced with pulse clock
+/* -------------------------------------------------------------- 
+   Hold days flash
 -------------------------------------------------------------- */
-@keyframes holdDaysFlash {
-  0%,
-  100% {
-    opacity: 1;
-    color: #f87171;
-  }
-  50% {
-    opacity: 0.4;
-    color: #dc2626;
-  }
-}
-
 .flash-hold-days {
-  animation: holdDaysFlash 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  opacity: calc(1 - 0.6 * var(--pulse, 0));
 }
 
-/* --------------------------------------------------------------
+/* -------------------------------------------------------------- 
    New Account (iridescent bubble sheen)
+   This one keeps its own keyframe animation — it's a slow decorative
+   rotation/hue-shift, not a sync-critical pulse, so it's fine to
+   be independent.
 -------------------------------------------------------------- */
 @keyframes newAccountIridescence {
   0% {
@@ -128,11 +91,8 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  /* Pre-promote to own GPU layer so Safari doesn't re-composite parent
-     shadows every animation frame (fixes flicker on Apple devices) */
   will-change: transform, filter;
 
-  /* iridescent mix: teal/blue/green + pink */
   background: radial-gradient(
       circle at 20% 15%,
       rgba(255, 255, 255, 0.22) 0%,
@@ -159,63 +119,42 @@
     infinite;
 }
 
-/* --------------------------------------------------------------
-   Settings icon red flash for high-priority updates
+/* -------------------------------------------------------------- 
+   Settings icon flash for high-priority updates
 -------------------------------------------------------------- */
-@keyframes settingsFlashRed {
-  0%,
-  100% {
-    background-color: rgba(255, 255, 255, 0.4);
-    border-color: rgba(255, 255, 255, 0.4);
-  }
-  50% {
-    background-color: rgba(220, 38, 38, 0.2);
-    border-color: rgba(220, 38, 38, 0.5);
-  }
-}
-
-/* Apply red flash to settings button when update-critical is active */
 .update-critical button[aria-label="Settings"] {
-  animation: settingsFlashRed 1.5s ease-in-out infinite !important;
-  animation-delay: var(--pulse-clock, 0s);
+  background-color: color-mix(
+    in srgb,
+    rgba(220, 38, 38, 0.2) calc(var(--pulse, 0) * 100%),
+    rgba(255, 255, 255, 0.4)
+  );
+  border-color: color-mix(
+    in srgb,
+    rgba(220, 38, 38, 0.5) calc(var(--pulse, 0) * 100%),
+    rgba(255, 255, 255, 0.4)
+  );
 }
 
-/* Apply red flash to the icon inside the settings button */
 .update-critical button[aria-label="Settings"] > span:first-child {
-  animation: flashCritical 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  opacity: calc(1 - 0.65 * var(--pulse, 0));
 }
 
-/* --------------------------------------------------------------
+/* -------------------------------------------------------------- 
    UPDATE COMMAND flash helpers
-   – fires automatically whenever <html> has .update-pending
 -------------------------------------------------------------- */
 .update-pending button[aria-label="Settings"],
 .update-pending .flash-system,
 .update-pending .flash-update {
-  animation: gentleFlash 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  opacity: calc(1 - 0.6 * var(--pulse, 0));
 }
 
-/* --------------------------------------------------------------
-   Overdue flash animation
+/* -------------------------------------------------------------- 
+   Overdue section header flash
+   Brightens the dark-red background using an inset box-shadow
+   tinted white — same technique as before but driven by --pulse
+   instead of a restarting @keyframes animation.
 -------------------------------------------------------------- */
-/* inset box-shadow simulates brightness without filter — filter:brightness()
-   in keyframes resets any filter:drop-shadow on the same element (Safari bug)
-   and causes compositing-layer churn on Apple devices */
-@keyframes overdueFlash {
-  0%,
-  100% {
-    background-color: var(--overdue-bg, #dc2626);
-    box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0);
-  }
-  50% {
-    background-color: var(--overdue-bg, #dc2626);
-    box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.22);
-  }
-}
-
 .flash-overdue {
-  animation: overdueFlash 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  background-color: var(--overdue-bg, #7f1d1d);
+  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, calc(0.22 * var(--pulse, 0)));
 }

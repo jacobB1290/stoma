@@ -15,18 +15,9 @@ export const FAST_EXIT = {
 export const TWEEN = { type: "tween", ease: "easeOut", duration: 0.25 };
 export const layout = { layout: true, transition: { layout: SPRING } };
 
-/* 1.5-s master clock → CSS var --pulse-clock */
-const CYCLE = 1500;
-if (typeof window !== "undefined" && !window.__pulseClockInit) {
-  window.__pulseClockInit = true;
-  const tick = () =>
-    document.documentElement.style.setProperty(
-      "--pulse-clock",
-      `${-(Date.now() % CYCLE) / 1000}s`
-    );
-  tick();
-  window.__pulseClockInterval = setInterval(tick, CYCLE);
-}
+/* --pulse-clock is now driven by FlashContext's RAF loop (see FlashContext.jsx).
+   This stale setInterval-based clock has been removed to prevent double-writing
+   and to ensure the animation phase is always current-frame-accurate. */
 
 /* helper */
 export const guard = (k, fn) =>

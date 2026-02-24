@@ -600,15 +600,18 @@ html.theme-white
 }
 
 html.theme-white :is(.pulse-red, .flash-red)::after {
-  animation: row-pulse-lite 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  /* Use live --pulse var instead of restarting @keyframes animation */
+  opacity: calc(0.5 * var(--pulse, 0));
   background: var(--w-priority-flash) !important;
   mix-blend-mode: multiply;
 }
 
 html.theme-white .glow {
-  animation: row-glow-lite 1.5s ease-in-out infinite;
-  animation-delay: var(--pulse-clock, 0s);
+  /* Use live --pulse var instead of restarting @keyframes animation.
+     box-shadow interpolates between rest and peak values based on --pulse. */
+  box-shadow: var(--w-row-shadow, none),
+    0 0 0 calc(1px + 1px * var(--pulse, 0)) rgba(22, 82, 95, calc(0.15 + 0.25 * var(--pulse, 0))),
+    0 0 calc(12px * var(--pulse, 0)) rgba(22, 82, 95, calc(0.15 * var(--pulse, 0)));
 }
 
 html.theme-white .pulse-red {

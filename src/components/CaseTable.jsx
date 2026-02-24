@@ -24,7 +24,7 @@ const BATCH_DELAY = 500; // Milliseconds between batches
 // ====================================================
 
 /* ---------------- Minimal Status Dots (no framer-motion) ---------------- */
-const StatusDot = memo(({ type, pulse, pulseDelay }) => {
+const StatusDot = memo(({ type, pulse }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   const config = {
@@ -52,7 +52,6 @@ const StatusDot = memo(({ type, pulse, pulseDelay }) => {
           width: isHovered ? `${label.length * 7 + 16}px` : "8px",
           height: isHovered ? "20px" : "8px",
           borderRadius: isHovered ? "10px" : "9999px",
-          "--pulse-clock": pulseDelay,
         }}
       >
         {isHovered && (
@@ -66,7 +65,7 @@ const StatusDot = memo(({ type, pulse, pulseDelay }) => {
 });
 StatusDot.displayName = "StatusDot";
 
-const StatusDotsContainer = memo(({ statuses, pulse, pulseDelay }) => {
+const StatusDotsContainer = memo(({ statuses, pulse }) => {
   const dots = [];
   if (statuses.priority) dots.push("priority");
   if (statuses.rush) dots.push("rush");
@@ -82,7 +81,6 @@ const StatusDotsContainer = memo(({ statuses, pulse, pulseDelay }) => {
           key={type}
           type={type}
           pulse={pulse}
-          pulseDelay={pulseDelay}
         />
       ))}
     </div>
@@ -115,7 +113,6 @@ const TableRow = ({
   toggleNewAccount,
   removeCase,
   onArchive,
-  pulseDelay,
   workflowPending,
 }) => (
   <tr
@@ -132,7 +129,6 @@ const TableRow = ({
         <StatusDotsContainer
           statuses={row}
           pulse={row.pulse && !workflowPending}
-          pulseDelay={pulseDelay}
         />
         {workflowPending && (
           <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-gray-100 text-[10px] text-gray-500 font-medium">
@@ -207,7 +203,6 @@ const ProgressiveRows = memo(
     toggleNewAccount,
     removeCase,
     onArchive,
-    pulseDelay,
     workflowMap,
   }) => {
     // Track visible count - start with all rows visible (no reset on re-renders)
@@ -256,7 +251,6 @@ const ProgressiveRows = memo(
             toggleNewAccount={toggleNewAccount}
             removeCase={removeCase}
             onArchive={onArchive}
-            pulseDelay={pulseDelay}
             workflowPending={workflowMap?.get(row.id)?.isPending ?? false}
           />
         ))}
@@ -297,7 +291,6 @@ const CollapsibleSection = memo(
     onArchive,
     defaultExpanded = true,
     forceOpen = false,
-    pulseDelay,
     isOverdueSection = false,
     workflowMap,
   }) => {
@@ -348,7 +341,7 @@ const CollapsibleSection = memo(
             )}
             style={
               isOverdueSection
-                ? { "--overdue-bg": "#7f1d1d", "--pulse-clock": pulseDelay }
+                ? { "--overdue-bg": "#7f1d1d" }
                 : undefined
             }
           >
@@ -410,7 +403,6 @@ const CollapsibleSection = memo(
                       toggleNewAccount={toggleNewAccount}
                       removeCase={removeCase}
                       onArchive={onArchive}
-                      pulseDelay={pulseDelay}
                       workflowMap={workflowMap}
                     />
                   </tbody>
@@ -455,7 +447,7 @@ export default memo(function CaseTable({
 
   const { workflowMap } = useMut();
 
-  const pulseDelay = useMemo(() => `-${(Date.now() % 1500) / 1000}s`, []);
+  
 
   const formatDate = useCallback((dateStr) => {
     const [, month, day] = dateStr.split("T")[0].split("-");
@@ -623,7 +615,6 @@ export default memo(function CaseTable({
                         toggleNewAccount={toggleNewAccount}
                         removeCase={removeCase}
                         onArchive={handleArchiveFromMenu}
-                        pulseDelay={pulseDelay}
                         workflowMap={workflowMap}
                       />
                     </tbody>
@@ -652,7 +643,6 @@ export default memo(function CaseTable({
                       onArchive={handleArchiveFromMenu}
                       defaultExpanded={categorizedRows.overdue.length < 10}
                       forceOpen={forceOpen}
-                      pulseDelay={pulseDelay}
                       isOverdueSection={true}
                       workflowMap={workflowMap}
                     />
@@ -679,7 +669,6 @@ export default memo(function CaseTable({
                       onArchive={handleArchiveFromMenu}
                       defaultExpanded={true}
                       forceOpen={forceOpen}
-                      pulseDelay={pulseDelay}
                       workflowMap={workflowMap}
                     />
                   )}
@@ -705,7 +694,6 @@ export default memo(function CaseTable({
                       onArchive={handleArchiveFromMenu}
                       defaultExpanded={true}
                       forceOpen={forceOpen}
-                      pulseDelay={pulseDelay}
                       workflowMap={workflowMap}
                     />
                   )}
@@ -731,7 +719,6 @@ export default memo(function CaseTable({
                       onArchive={handleArchiveFromMenu}
                       defaultExpanded={true}
                       forceOpen={forceOpen}
-                      pulseDelay={pulseDelay}
                       workflowMap={workflowMap}
                     />
                   )}
@@ -772,7 +759,6 @@ export default memo(function CaseTable({
                             toggleNewAccount={toggleNewAccount}
                             removeCase={removeCase}
                             onArchive={handleArchiveFromMenu}
-                            pulseDelay={pulseDelay}
                             workflowMap={workflowMap}
                           />
                         </tbody>
