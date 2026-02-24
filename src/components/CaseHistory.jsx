@@ -6,7 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import { createPortal } from "react-dom";
-import { db } from "../services/caseService";
+import { db, parseNoteTime } from "../services/caseService";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { useMut } from "../context/DataContext";
 import { getWorkflowStatus } from "../utils/workflowDetection";
@@ -97,14 +97,17 @@ const normDept = (d) => (!d ? "Unknown" : d === "General" ? "Digital" : d);
 
 /**
  * Returns the due hour (local, 0–23) for a case.
- * If the stored due string encodes a non-midnight hour in its time component,
- * that value is used directly (written there by parseNoteTime at save time).
- * Otherwise falls back to the legacy defaults: noon for priority, 5 pm for normal.
+ * If a noteHour was parsed from the case note it takes precedence;
+ * otherwise falls back to noon for priority cases and 5 pm for normal.
  */
-const getDueHour = (dueDateStr, isPriority) => {
-  const timePart = dueDateStr ? dueDateStr.split("T")[1] : null;
-  const storedHour = timePart ? parseInt(timePart.split(":")[0], 10) : 0;
-  return storedHour > 0 ? storedHour : isPriority ? 12 : 17;
+const getDueHour = (isPriority, noteHour = null) =>
+  noteHour !== null ? noteHour : isPriority ? 12 : 17;
+
+/** Format a local 0-23 hour as "8:00 AM", "2:00 PM", etc. */
+const fmtHour12 = (h) => {
+  if (h === 0) return "12:00 AM";
+  if (h === 12) return "12:00 PM";
+  return h < 12 ? `${h}:00 AM` : `${h - 12}:00 PM`;
 };
 
 /* ══════════════════════════════════════════════ */
@@ -501,12 +504,12 @@ const ActionIcon = React.memo(
 );
 ActionIcon.displayName = "ActionIcon";
 
-const CountdownTimer = React.memo(({ dueDate, isPriority }) => {
+const CountdownTimer = React.memo(({ dueDate, isPriority, noteHour = null }) => {
   const computeDisplay = useCallback(() => {
     const now = new Date();
     const [y, m, d] = dueDate.split("T")[0].split("-");
     const due = new Date(y, m - 1, d);
-    due.setHours(getDueHour(dueDate, isPriority), 0, 0, 0);
+    due.setHours(getDueHour(isPriority, noteHour), 0, 0, 0);
     const diff = due - now;
     const abs = Math.abs(diff);
     const dd = Math.floor(abs / 864e5);
@@ -523,7 +526,7 @@ const CountdownTimer = React.memo(({ dueDate, isPriority }) => {
       )}`;
     if (diff < 0) display = `-${display}`;
     return display;
-  }, [dueDate, isPriority]);
+  }, [dueDate, isPriority, noteHour]);
 
   const [timeLeft, setTimeLeft] = useState(computeDisplay);
 
@@ -782,12 +785,12 @@ const buildMetalStages = (
   ];
 };
 
-const computeLateness = (completedAt, dueStr, isPriority = false) => {
+const computeLateness = (completedAt, dueStr, isPriority = false, noteHour = null) => {
   if (!completedAt || !dueStr) return null;
   const done = new Date(completedAt);
   const [y, m, d] = dueStr.split("T")[0].split("-").map(Number);
   const due = new Date(y, m - 1, d);
-  due.setHours(getDueHour(dueStr, isPriority), 0, 0, 0);
+  due.setHours(getDueHour(isPriority, noteHour), 0, 0, 0);
   const diff = done - due;
   if (diff <= 0) return null;
   const totalH = diff / 36e5;
@@ -1296,6 +1299,9 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     [caseNumber]
   );
 
+  /** Hour (0-23) parsed from the case note, or null if no time is present. */
+  const noteHour = useMemo(() => parseNoteTime(caseNumber), [caseNumber]);
+
   const isWorkflow = workflowStatus?.isWorkflow;
   const chainCases = useMemo(
     () =>
@@ -1429,7 +1435,10 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       if (doneEntry) {
         const doneDate = new Date(doneEntry.created_at);
         const dueDate = new Date(dueY, dueM - 1, dueD);
-        dueDate.setHours(getDueHour(rawCase.due, rawCase.priority), 0, 0, 0);
+        dueDate.setHours(
+          getDueHour(rawCase.priority, parseNoteTime(rawCase.casenumber)),
+          0, 0, 0
+        );
         const diff = doneDate - dueDate;
         if (diff < 0) {
           const abs = Math.abs(diff);
@@ -1757,7 +1766,8 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     const last = chainCases[chainCases.length - 1];
     if (allDone) {
       const lastDoneTs = chainCompletionDates[last.id];
-      const lateness = computeLateness(lastDoneTs, last.due, last.priority);
+      const lastNoteHour = parseNoteTime(last.casenumber ?? last.caseNumber ?? "");
+      const lateness = computeLateness(lastDoneTs, last.due, last.priority, lastNoteHour);
       if (lateness)
         return {
           label: "Complete",
@@ -1769,7 +1779,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         const done = new Date(lastDoneTs);
         const [y, m, d] = last.due.split("T")[0].split("-").map(Number);
         const due = new Date(y, m - 1, d);
-        due.setHours(getDueHour(last.due, last.priority), 0, 0, 0);
+        due.setHours(getDueHour(last.priority, lastNoteHour), 0, 0, 0);
         const diff = done - due;
         if (diff < 0) {
           const abs = Math.abs(diff);
@@ -1885,6 +1895,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         showCountdown: true,
         countdownDue: caseData.due,
         countdownPriority: caseData.priority,
+        countdownNoteHour: noteHour,
         type: "single",
       };
     return {
@@ -1894,9 +1905,10 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       showCountdown: insights.daysUntilDue <= 1,
       countdownDue: caseData.due,
       countdownPriority: caseData.priority,
+      countdownNoteHour: noteHour,
       type: "single",
     };
-  }, [caseData, insights, showUnified, unifiedStatus, completionTime]);
+  }, [caseData, insights, showUnified, unifiedStatus, completionTime, noteHour]);
 
   return createPortal(
     <AnimatePresence onExitComplete={onClose}>
@@ -2092,6 +2104,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                             isPriority={
                                               statusDisplay.countdownPriority
                                             }
+                                            noteHour={statusDisplay.countdownNoteHour ?? null}
                                           />
                                         </div>
                                       )}
@@ -2384,7 +2397,9 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                             {fmtDateOnly(caseData.due)}
                                           </div>
                                           <div className="text-xs text-gray-500 mt-0.5 sm:mt-1">
-                                            {caseData.priority
+                                            {noteHour !== null
+                                              ? fmtHour12(noteHour)
+                                              : caseData.priority
                                               ? "12:00 PM"
                                               : "5:00 PM"}{" "}
                                             MST
