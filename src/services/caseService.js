@@ -64,10 +64,6 @@ export const parseNoteTime = (casenumber = "") => {
   return null;
 };
 
-/** Converts a parsed hour (0–23 | null) to an ISO time string segment. */
-const noteHourToTimeStr = (hour) =>
-  hour !== null ? `${String(hour).padStart(2, "0")}:00:00` : "00:00:00";
-
 /* ──────────────────────────────────────────────────────────────
       History logger
       ─────────────────────────────────────────────────────────── */
@@ -114,7 +110,7 @@ export const addCase = async ({
       department: department === "Digital" ? "General" : department,
       priority,
       modifiers,
-      due: `${due}T${noteHourToTimeStr(parseNoteTime(caseNumber))}Z`,
+      due: `${due}T00:00:00Z`,
       completed: false,
       archived: false,
     })
@@ -175,9 +171,7 @@ export const updateCase = async (payload) => {
         : prev.department,
     priority: payload.priority != null ? payload.priority : prev.priority,
     modifiers: nextMods,
-    due: `${payload.due ?? prev.due.slice(0, 10)}T${noteHourToTimeStr(
-      parseNoteTime(payload.caseNumber ?? prev.casenumber)
-    )}Z`,
+    due: `${payload.due ?? prev.due.slice(0, 10)}T00:00:00Z`,
   };
 
   const { error } = await db.from("cases").update(nextRow).eq("id", id);
@@ -224,23 +218,10 @@ export const updateCase = async (payload) => {
       `Department changed from ${prev.department} to ${nextRow.department}`
     );
 
-  if (prev.due !== nextRow.due) {
-    const prevDate = prev.due.slice(0, 10);
-    const nextDate = nextRow.due.slice(0, 10);
-    const prevHour = parseInt((prev.due.split("T")[1] || "00").split(":")[0], 10);
-    const nextHour = parseInt((nextRow.due.split("T")[1] || "00").split(":")[0], 10);
-    if (prevDate !== nextDate)
-      logs.push(`Due changed from ${prevDate} to ${nextDate}`);
-    if (prevHour !== nextHour) {
-      const fmtH = (h) =>
-        h === 0 ? "midnight" : h === 12 ? "noon" : h < 12 ? `${h}am` : `${h - 12}pm`;
-      logs.push(
-        nextHour === 0
-          ? "Due time changed to default"
-          : `Due time changed to ${fmtH(nextHour)} from note`
-      );
-    }
-  }
+  if (prev.due !== nextRow.due)
+    logs.push(
+      `Due changed from ${prev.due.slice(0, 10)} to ${nextRow.due.slice(0, 10)}`
+    );
 
   for (const l of logs) await logCase(id, l);
   return { error: null };
