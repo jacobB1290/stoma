@@ -607,6 +607,8 @@ html.theme-white :is(.pulse-red, .flash-red)::after {
 }
 
 html.theme-white .glow {
+  /* Override base glow animation with teal-tinted version for white theme.
+     animation-delay inherits --pulse-clock from :root, set by FlashContext. */
   animation: row-glow-lite 1.5s ease-in-out infinite;
   animation-delay: var(--pulse-clock, 0s);
 }

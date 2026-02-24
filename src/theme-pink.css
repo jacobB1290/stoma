@@ -612,12 +612,16 @@ html.theme-pink
 
 html.theme-pink :is(.pulse-red, .flash-red)::after {
   animation: row-pulse-lite 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
   background: var(--w-priority-flash) !important;
   mix-blend-mode: multiply;
 }
 
 html.theme-pink .glow {
-  animation: row-glow-lite 2s ease-in-out infinite;
+  /* Override base glow animation with pink-tinted version.
+     animation-delay inherits --pulse-clock from :root, set by FlashContext. */
+  animation: row-glow-lite 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
 }
 
 html.theme-pink .pulse-red {

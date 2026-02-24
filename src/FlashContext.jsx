@@ -1,63 +1,40 @@
 // src/FlashContext.jsx
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useSyncExternalStore,
-} from "react";
+//
+// Sets --pulse-clock ONCE on :root at startup, then stops.
+//
+// CSS @keyframes run on their own — the browser compositor drives them
+// at 60fps with zero JavaScript involvement after the initial write.
+// Changing the var every frame was restarting every animation every frame.
+//
+// --pulse-clock: a static negative-seconds offset that phase-aligns all
+//   1.5s @keyframes animations to the current wall-clock time so they
+//   all start in sync, identical to how the Board page works.
 
-/* One global 1.5 s cycle. */
+import React, { createContext, useContext, useEffect } from "react";
+
 const CYCLE_MS = 1500;
 
-let phase = 0; // 0‥1 repeating
-const subs = new Set();
-
-function broadcast() {
-  subs.forEach((fn) => fn());
+// Called once — calculates where we are in the 1.5s cycle right now
+// and writes a static animation-delay offset to :root.
+// After this, CSS @keyframes run entirely on the GPU — no JS needed.
+function applyPulseClock() {
+  const phase = (performance.now() % CYCLE_MS) / CYCLE_MS; // 0..1
+  const offset = -(phase * (CYCLE_MS / 1000)).toFixed(4) + "s";
+  document.documentElement.style.setProperty("--pulse-clock", offset);
 }
 
-let rafId = null;
-let rafRunning = false;
-
-function startRAF() {
-  if (rafRunning) return;
-  rafRunning = true;
-  const loop = (t) => {
-    phase = (t % CYCLE_MS) / CYCLE_MS;
-    broadcast();
-    if (rafRunning) rafId = requestAnimationFrame(loop);
-  };
-  rafId = requestAnimationFrame(loop);
-}
-
-function stopRAFLoop() {
-  rafRunning = false;
-  if (rafId != null) {
-    cancelAnimationFrame(rafId);
-    rafId = null;
-  }
-}
-
-/* external-store glue */
-function subscribe(cb) {
-  subs.add(cb);
-  return () => subs.delete(cb);
-}
-function getSnapshot() {
-  return phase;
-}
-
-const FlashContext = createContext(0);
+// Stub context — never changes, never triggers re-renders.
+const FlashContext = createContext(null);
 
 export function FlashProvider({ children }) {
-  const p = useSyncExternalStore(subscribe, getSnapshot);
   useEffect(() => {
-    startRAF();
-    return () => stopRAFLoop();
+    applyPulseClock();
+    // No RAF loop, no interval — CSS handles it from here.
   }, []);
-  return <FlashContext.Provider value={p}>{children}</FlashContext.Provider>;
+  return <FlashContext.Provider value={null}>{children}</FlashContext.Provider>;
 }
 
+/** @deprecated — pulse is CSS-only now. */
 export function useFlashPhase() {
   return useContext(FlashContext);
 }
