@@ -15,17 +15,6 @@
 // ============================================================================
 
 import { db } from "../services/caseService";
-import * as CaseService from "../services/caseService";
-import * as UserService from "../services/userService";
-
-import {
-  calculateStageStatistics,
-  calculateStageTime,
-} from "../utils/stageTimeCalculations";
-
-import { calculateDepartmentEfficiency } from "../utils/efficiencyCalculations";
-
-import { generateCaseRiskPredictions } from "../utils/caseRiskPredictions";
 
 // ============================================================================
 // CONFIGURATION
