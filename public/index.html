@@ -2,37 +2,61 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+
+    <!-- ── Viewport / PWA display ───────────────────────────────── -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, shrink-to-fit=no"
     />
-    <meta name="theme-color" content="#000000" />
 
-    <!-- TailwindCSS via official CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ── Colour / theme ──────────────────────────────────────── -->
+    <meta name="theme-color" content="#103e48" />
+    <meta name="msapplication-navbutton-color" content="#103e48" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
-    <!--
-      manifest.json provides metadata used when your web app is added to the
-      homescreen on Android. See https://developers.google.com/web/fundamentals/engage-and-retain/web-app-manifest/
-    -->
+    <!-- ── PWA / home-screen / installable ─────────────────────── -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Stomaboard" />
+    <meta name="application-name" content="Stomaboard" />
+
+    <!-- ── SEO / sharing ────────────────────────────────────────── -->
+    <meta name="description" content="Internal staff workflow and case management for Stomaboard." />
+    <meta name="robots" content="noindex, nofollow" />
+
+    <!-- ── Icons ────────────────────────────────────────────────── -->
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
+
+    <!-- ── PWA Manifest ─────────────────────────────────────────── -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <link rel="shortcut icon" href="%PUBLIC_URL%/favicon.ico" />
 
-    <title>React App</title>
+    <!-- ── Preconnect to critical third-party origins ──────────── -->
+    <!--  Speeds up the first request to Supabase & OpenAI by     -->
+    <!--  resolving DNS + completing TLS before JS even loads.    -->
+    <link rel="preconnect" href="https://totqejdgvgxfonaebyla.supabase.co" crossorigin />
+    <link rel="dns-prefetch" href="https://totqejdgvgxfonaebyla.supabase.co" />
+    <link rel="preconnect" href="https://api.openai.com" crossorigin />
+    <link rel="dns-prefetch" href="https://api.openai.com" />
+
+    <!-- ── Page title ───────────────────────────────────────────── -->
+    <title>Stomaboard</title>
   </head>
 
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
     <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
+      This HTML file is a template.  The build step will inject the
+      bundled scripts and stylesheets into the <body> tag automatically.
 
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
-
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
+      Tailwind CSS is processed at build time via PostCSS – the CDN
+      script is intentionally absent.  To start development run:
+        npm start
+      To create a production build run:
+        npm run build
     -->
   </body>
 </html>

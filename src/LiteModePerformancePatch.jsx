@@ -1,8 +1,21 @@
-// Professional Lite UI – Ultra‑Low‑Power Edition  (2025‑07‑22)
-// ▸ Kills ALL motion, GPU effects, and rAF loops
-// ▸ Solid high‑contrast skin
-// ▸ Forces "Add Case Card" to stay small, inline, non‑sticky
-// ▸ Alt + Shift + L toggles Lite mode everywhere
+/**
+ * LiteModePerformancePatch.jsx  –  Stomaboard Lite Mode v3
+ * ─────────────────────────────────────────────────────────
+ * Designed for low-power hardware (Raspberry Pi, cheap Windows PCs).
+ *
+ * Philosophy: animations are FINE – they run on the CPU/JS side and
+ * are cheap.  What kills a Pi is the GPU compositing pipeline:
+ *   • backdrop-filter (blur/saturate)  → forces a separate GPU layer
+ *   • filter (brightness on .glow)     → triggers full repaint + composite
+ *   • mix-blend-mode                   → requires extra compositing pass
+ *   • will-change: transform/opacity   → pre-promotes elements to GPU layers
+ *   • translucent bg-white/* colours  → alpha compositing on every paint
+ *
+ * So Lite Mode ONLY removes those compositor costs.
+ * Framer-motion springs, AnimatePresence, layout animations, the
+ * glow/pulse-red flash effects, and all CSS transitions run at full
+ * speed exactly as on a normal machine.
+ */
 
 import React, {
   createContext,
@@ -13,139 +26,111 @@ import React, {
 } from "react";
 import { MotionConfig } from "framer-motion";
 
+/* ─────────────────────────── Context ─────────────────────────────── */
 const LiteCtx = createContext({ lite: false, toggle: () => {} });
 export const useLiteMode = () => useContext(LiteCtx);
 
-/* ───────────────────────────── CSS injection ──────────────────────────── */
-function injectUltraLiteCSS() {
-  if (document.getElementById("ultra-lite-css")) return;
+/* ─────────────────────── CSS override sheet ──────────────────────── */
+const STYLE_ID = "stomaboard-lite-css-v3";
 
-  const css = String.raw`
-  /*** DESIGN TOKENS ************************************************************/
-  :root {
-    --lite-bg-primary:#fff;
-    --lite-bg-secondary:#f8fafc;
-    --lite-bg-elevated:#fff;
-    --lite-bg-hover:#f8fafc;
-    --lite-bg-active:#e2e8f0;
-  
-    --lite-border-subtle:rgba(0,0,0,0.06);
-    --lite-border-default:rgba(0,0,0,0.09);
-  
-    --lite-text-primary:#0f172a;
-  
-    --lite-shadow-sm:0 1px 2px rgba(0,0,0,0.05);
-  }
-  
-  /*** GLOBAL PERFORMANCE OVERRIDES ********************************************/
-  html.lite,html.lite *{
-    animation:none!important;
-    transition:none!important;
-    transform:none!important;
-    will-change:auto!important;
-    filter:none!important;
-    backdrop-filter:none!important;
-    mix-blend-mode:normal!important;
-  }
-  
-  /*** "ADD CASE CARD" – lock in flow, kill zoom / sticky **********************/
-  html.lite .add-case-card,
-  html.lite [data-add-case]{
-    position:static!important;
-    top:auto!important;
-    left:auto!important;
-    right:auto!important;
-    bottom:auto!important;
-    z-index:auto!important;
-  
-    width:auto!important;
-    max-width:260px!important;
-    height:auto!important;
-    padding:8px 16px!important;
-  
-    transform:none!important;
-    scale:1!important;
-  
-    background:var(--lite-bg-elevated)!important;
-    border:1px solid var(--lite-border-default)!important;
-    border-radius:12px!important;
-    box-shadow:var(--lite-shadow-sm)!important;
-    cursor:pointer;
-  }
-  
-  /*** DE‑STICKY ANYTHING SIMILAR **********************************************/
-  html.lite .sticky,
-  html.lite [class*="sticky"]{
-    position:static!important;
-    top:auto!important;
-    left:auto!important;
-    right:auto!important;
-  }
-  
-  /*** PRESERVE SETTINGS BUTTON POSITION ***************************************/
-  /* Settings button should remain fixed */
-  html.lite .settings-button,
-  html.lite button[aria-label*="settings"],
-  html.lite button[aria-label*="Settings"],
-  html.lite .fixed:has(svg[class*="gear"]),
-  html.lite .fixed:has(svg[class*="settings"]),
-  html.lite .fixed.bottom-4.right-4,
-  html.lite .fixed.bottom-6.right-6 {
-    position:fixed!important;
-    bottom:1.5rem!important;
-    right:1.5rem!important;
-    z-index:50!important;
-  }
-  
-  /*** GLASS ➜ SOLID ************************************************************/
-  html.lite .glass,
-  html.lite .glass-nb,
-  html.lite [class*="backdrop-blur"]{
-    background:var(--lite-bg-elevated)!important;
-    border:1px solid var(--lite-border-default)!important;
-    box-shadow:var(--lite-shadow-sm)!important;
-  }
-  
-  /*** TRANSLUCENT / SHADOW CLASSES ➜ SIMPLE ***********************************/
-  html.lite [class*="bg-white/"],
-  html.lite [class*="bg-black/"],
-  html.lite .shadow,
-  html.lite .shadow-*{
-    background:var(--lite-bg-primary)!important;
-    border:1px solid var(--lite-border-subtle)!important;
-    box-shadow:var(--lite-shadow-sm)!important;
-  }
-  
-  /*** OPACITY RESET ************************************************************/
-  html.lite [class*="opacity-"]{opacity:1!important;}
-  html.lite svg{opacity:1!important;}
-  
-  /*** NO SMOOTH‑SCROLL & THIN BAR **********************************************/
-  html.lite{scroll-behavior:auto!important;scrollbar-width:thin;scrollbar-color:var(--lite-border-default) var(--lite-bg-secondary);}
-  html.lite::-webkit-scrollbar{width:8px;height:8px;}
-  html.lite::-webkit-scrollbar-track{background:var(--lite-bg-secondary);}
-  html.lite::-webkit-scrollbar-thumb{background:var(--lite-border-default);border-radius:4px;}
-    `;
-  const style = document.createElement("style");
-  style.id = "ultra-lite-css";
-  style.appendChild(document.createTextNode(css));
-  document.head.appendChild(style);
+function injectLiteCSS() {
+  if (document.getElementById(STYLE_ID)) return;
+
+  const css = /* css */ `
+/* ═══════════════════════════════════════════════════════════════════
+   STOMABOARD LITE MODE  –  GPU compositor override sheet
+   Applied when <html> carries the class "lite".
+   Target: remove expensive GPU layers only.
+   Animations, transitions, and framer-motion run normally.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Kill backdrop-filter everywhere ────────────────────────────
+   backdrop-filter: blur() is the single most expensive effect on Pi.
+   Every element with it gets promoted to its own GPU layer and the
+   compositor must re-render it on every frame.  Remove it entirely.  */
+html.lite *,
+html.lite *::before,
+html.lite *::after {
+  backdrop-filter:         none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
-/* ───────────── Throttle requestAnimationFrame (10 fps) ──────────────── */
-let originalRAF = null;
-function patchRAF(enable) {
-  if (enable && !originalRAF) {
-    originalRAF = window.requestAnimationFrame;
-    window.requestAnimationFrame = (cb) =>
-      setTimeout(() => cb(performance.now()), 100);
-  } else if (!enable && originalRAF) {
-    window.requestAnimationFrame = originalRAF;
-    originalRAF = null;
-  }
+/* ── 2. Remove filter (used by .glow brightness effect) ────────────
+   filter: brightness() on .glow forces a full GPU repaint per frame.
+   The .glow CSS animation still runs (the class is still there and
+   the keyframe fires) but without the filter cost it is just a no-op
+   paint – cheap.  The ring colour/border on the card still shows     */
+html.lite * {
+  filter: none !important;
 }
 
-/* ─────────────────────────── provider ───────────────────────────────── */
+/* ── 3. Clear will-change promotions ───────────────────────────────
+   will-change: transform/opacity pre-promotes elements to GPU layers
+   before any animation even starts.  On Pi that burns VRAM for every
+   card on screen.  Reset to auto so promotion only happens when the
+   browser actually needs it (i.e. during an active animation).       */
+html.lite * {
+  will-change: auto !important;
+}
+
+/* ── 4. Remove mix-blend-mode ──────────────────────────────────────
+   mix-blend-mode: color (used by .pulse-red::after overlay) requires
+   an extra compositing pass.  The pulse animation itself still runs
+   but the colour-blend layer is removed; the element is still visible
+   and animated, just without the blend overhead.                     */
+html.lite * {
+  mix-blend-mode: normal !important;
+}
+
+/* ── 5. Glass / blur panels → solid opaque surface ─────────────────
+   .glass and .glass-nb rely entirely on backdrop-filter (killed above)
+   for their frosted look.  Without the filter they show transparent,
+   so give them a solid background that keeps the UI readable.        */
+html.lite .glass,
+html.lite .glass-nb,
+html.lite .glass-nb-dark {
+  background: rgba(255,255,255,0.95) !important;
+  border:     1px solid rgba(0,0,0,0.10) !important;
+}
+
+/* ── 6. Translucent Tailwind bg utilities → near-opaque ────────────
+   Classes like bg-white/10, bg-black/50 create semi-transparent
+   layers that the compositor must alpha-blend on every repaint.
+   Bumping them to near-opaque eliminates the blend cost while keeping
+   the visual appearance close to the original.                       */
+html.lite [class*="bg-white/"] {
+  background-color: rgba(255,255,255,0.95) !important;
+}
+html.lite [class*="bg-black/"] {
+  background-color: rgba(0,0,0,0.85) !important;
+}
+
+/* ── 7. backdrop-blur Tailwind utilities ───────────────────────────
+   Catches backdrop-blur-sm, backdrop-blur-md, etc. applied directly
+   as Tailwind classes rather than through .glass.                    */
+html.lite [class*="backdrop-blur"] {
+  backdrop-filter:         none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ── 8. Thin scrollbar ─────────────────────────────────────────────
+   Minor paint saving: thinner scrollbar = less area to composite.   */
+html.lite {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.2) transparent;
+}
+html.lite ::-webkit-scrollbar       { width: 6px; height: 6px; }
+html.lite ::-webkit-scrollbar-track { background: transparent; }
+html.lite ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.20); border-radius: 3px; }
+  `;
+
+  const el = document.createElement("style");
+  el.id = STYLE_ID;
+  el.textContent = css;
+  document.head.appendChild(el);
+}
+
+/* ─────────────────────────── Provider ───────────────────────────── */
 export function LiteModeProvider({ children }) {
   const [lite, setLite] = useState(() => {
     try {
@@ -155,43 +140,31 @@ export function LiteModeProvider({ children }) {
     }
   });
 
+  /* Apply / remove class whenever `lite` changes */
   useEffect(() => {
     if (lite) {
-      injectUltraLiteCSS();
+      injectLiteCSS();
       document.documentElement.classList.add("lite");
-      patchRAF(true);
     } else {
       document.documentElement.classList.remove("lite");
-      patchRAF(false);
+      // Leave the CSS sheet injected – harmless without the class,
+      // and avoids a flash on next toggle.
     }
     try {
       localStorage.setItem("lite-ui", JSON.stringify(lite));
-    } catch {}
+    } catch {
+      /* storage unavailable in private mode – ignore */
+    }
   }, [lite]);
 
   const toggle = useCallback(() => setLite((v) => !v), []);
 
-  /* Alt+Shift+L quick toggle with mini‑toast */
+  /* ── Keyboard shortcut: Alt + Shift + L ── */
   useEffect(() => {
     const onKey = (e) => {
-      if (e.altKey && e.shiftKey && e.key.toLowerCase() === "l") {
-        const isCurrentlyLite =
-          document.documentElement.classList.contains("lite");
+      if (e.altKey && e.shiftKey && (e.key === "l" || e.key === "L")) {
         toggle();
-
-        // Create toast notification
-        const t = document.createElement("div");
-        t.textContent = `Lite Mode ${isCurrentlyLite ? "OFF" : "ON"}`;
-        t.style.cssText =
-          "position:fixed;top:20px;right:20px;padding:8px 16px;background:#3b82f6;color:#fff;border-radius:8px;font-weight:600;z-index:9999;opacity:0;transition:opacity .2s ease;pointer-events:none;";
-        document.body.appendChild(t);
-
-        // Force reflow then show
-        void t.offsetHeight; // force reflow
-        t.style.opacity = "1";
-
-        setTimeout(() => (t.style.opacity = "0"), 1500);
-        setTimeout(() => t.remove(), 2000);
+        showToast(!document.documentElement.classList.contains("lite"));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -200,9 +173,42 @@ export function LiteModeProvider({ children }) {
 
   return (
     <LiteCtx.Provider value={{ lite, toggle }}>
-      <MotionConfig reducedMotion={lite ? "always" : "user"}>
+      {/*
+        In Lite Mode we leave reducedMotion as "user" so framer-motion
+        runs all springs and tweens at full speed.  The GPU cost
+        savings come entirely from the CSS overrides above, not from
+        disabling JS animation.
+      */}
+      <MotionConfig reducedMotion="user">
         {children}
       </MotionConfig>
     </LiteCtx.Provider>
   );
+}
+
+/* ──────────────────── Mini toast helper ─────────────────────────── */
+function showToast(nowOn) {
+  document.getElementById("lite-toast")?.remove();
+
+  const t = document.createElement("div");
+  t.id = "lite-toast";
+  t.textContent = nowOn ? "⚡ Lite Mode ON" : "✦ Lite Mode OFF";
+  t.style.cssText = [
+    "position:fixed",
+    "top:20px",
+    "right:20px",
+    "padding:8px 18px",
+    "background:#1e293b",
+    "color:#f1f5f9",
+    "border:1px solid rgba(255,255,255,0.12)",
+    "border-radius:10px",
+    "font-size:13px",
+    "font-weight:600",
+    "letter-spacing:0.02em",
+    "z-index:99999",
+    "pointer-events:none",
+    "font-family:system-ui,sans-serif",
+  ].join(";");
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2200);
 }
