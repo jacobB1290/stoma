@@ -5,8 +5,6 @@ import React, {
   useCallback,
   useLayoutEffect,
   useContext,
-  lazy,
-  Suspense,
 } from "react";
 import { createPortal } from "react-dom";
 import { DataProvider, useMut } from "./context/DataContext";
@@ -22,20 +20,9 @@ import "./styles/glass.css";
 import "./flash.css";
 import { LiteModeProvider } from "./LiteModePerformancePatch";
 
-// Lazy-load heavy panels – code-split into separate chunks so the initial
-// JS bundle is smaller and the app shell loads faster.
-const Editor               = lazy(() => import("./components/Editor"));
-const SettingsModal        = lazy(() => import("./components/SettingsModal"));
-const SystemManagementScreen = lazy(() => import("./components/SystemManagementScreen"));
-
-// Lightweight spinner shown while a lazy chunk is being fetched
-function PanelLoader() {
-  return (
-    <div className="flex items-center justify-center w-full h-full min-h-[200px]">
-      <div className="w-8 h-8 rounded-full border-2 border-white/30 border-t-white/80 animate-spin" />
-    </div>
-  );
-}
+import Editor from "./components/Editor";
+import SettingsModal from "./components/SettingsModal";
+import SystemManagementScreen from "./components/SystemManagementScreen";
 
 /* =============================
    Week Navigation Component
@@ -711,16 +698,14 @@ function AppShell() {
             onPrevWeek={handlePrevWeek}
           />
 
-          <Suspense fallback={null}>
-            <SettingsModal
-              open={settingsOpen}
-              onClose={() => setSettingsOpen(false)}
-              theme={theme}
-              setTheme={setTheme}
-              showInfoBar={showInfoBar}
-              setShowInfoBar={setShowInfoBar}
-            />
-          </Suspense>
+          <SettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            theme={theme}
+            setTheme={setTheme}
+            showInfoBar={showInfoBar}
+            setShowInfoBar={setShowInfoBar}
+          />
 
         </DataProvider>
       </FlashProvider>
@@ -1338,13 +1323,11 @@ function Inner({
 
       {/* Main content */}
       {view === "manage" ? (
-        <Suspense fallback={<PanelLoader />}>
-          {facultySystemManagerEnabled && manageView === "system" ? (
-            <SystemManagementScreen />
-          ) : (
-            <Editor data={rows} deptDefault="Digital" showInfoBar={showInfoBar} />
-          )}
-        </Suspense>
+        facultySystemManagerEnabled && manageView === "system" ? (
+          <SystemManagementScreen />
+        ) : (
+          <Editor data={rows} deptDefault="Digital" showInfoBar={showInfoBar} />
+        )
       ) : (
         <Board
           data={rows}
