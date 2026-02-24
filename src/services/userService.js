@@ -379,7 +379,6 @@ const DEBUG = true;
 // STATE
 // ============================================
 let heartbeatInterval = null;
-let lastReportTime = 0;
 let activityDebounceTimeout = null;
 let isTabVisible = true;
 
@@ -398,9 +397,6 @@ export async function reportActive(reason = "unknown") {
     log("No user name, skipping report");
     return;
   }
-
-  const now = Date.now();
-  lastReportTime = now;
 
   log(`Reporting active - reason: ${reason}`);
 

@@ -98,14 +98,6 @@ const calculatePercentileValue = (arr, percentile) => {
   return sorted[idx];
 };
 
-const calculateStdDev = (arr, mean) => {
-  if (arr.length < 2) return 0;
-  const variance =
-    arr.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) /
-    (arr.length - 1);
-  return Math.sqrt(variance);
-};
-
 const endOfDueDay = (caseRow) => {
   const base = new Date(caseRow.due);
   base.setUTCHours(23, 59, 59, 999);

@@ -1425,7 +1425,6 @@ COMPONENTS.register({
     const velocity = efficiency.throughput?.overall || 0;
     const predictions = efficiency.predictions;
     const criticalCount = predictions?.urgent?.length || 0;
-    const rating = U.scoreToRating(score);
 
     // Build natural response based on score level
     if (score >= 90) {
@@ -1568,7 +1567,6 @@ COMPONENTS.register({
   async handle(ctx, question) {
     const rb = new ResponseBuilder();
     const efficiency = ctx.getEfficiency();
-    const stage = ctx.getStage();
 
     if (!efficiency) {
       rb.say(
@@ -1744,7 +1742,6 @@ COMPONENTS.register({
   async handle(ctx, question) {
     const rb = new ResponseBuilder();
     const efficiency = ctx.getEfficiency();
-    const stage = ctx.getStage();
 
     if (!efficiency) {
       rb.say(
@@ -1938,7 +1935,6 @@ COMPONENTS.register({
 
   async handle(ctx, question) {
     const rb = new ResponseBuilder();
-    const efficiency = ctx.getEfficiency();
     const stage = ctx.getStage();
     const predictions = ctx.getPredictions();
 
@@ -2152,7 +2148,6 @@ COMPONENTS.register({
   async handle(ctx, question) {
     const rb = new ResponseBuilder();
     const efficiency = ctx.getEfficiency();
-    const stage = ctx.getStage();
 
     if (!efficiency) {
       rb.say(

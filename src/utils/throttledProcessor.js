@@ -8,7 +8,6 @@ export class ThrottledProcessor {
 
   async processArray(items, processor) {
     const results = [];
-    const startTime = Date.now();
     let processedCount = 0;
 
     for (let i = 0; i < items.length; i++) {
