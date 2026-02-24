@@ -487,6 +487,32 @@ function MenuItem({ active, label, meta, onClick }) {
 const Divider = () => <div className="border-t border-gray-200 my-1" />;
 
 export default function App() {
+  return (
+    <UserProvider>
+      <AuthGate />
+    </UserProvider>
+  );
+}
+
+// Renders the login screen until the user has identified themselves.
+// Nothing in the app tree (DataProvider, Supabase subscriptions, etc.)
+// mounts until AuthGate passes — deleting the DOM node in DevTools has
+// no effect because the app simply doesn't exist in the tree yet.
+function AuthGate() {
+  const { needsName } = useContext(UserCtx);
+  if (needsName) return <LoginScreen />;
+  return <AppShell />;
+}
+
+function LoginScreen() {
+  return (
+    <div className="fixed inset-0 bg-gradient-to-br from-[#103E48] to-[#16525F]">
+      <UserSetupModal />
+    </div>
+  );
+}
+
+function AppShell() {
   const [view, setView] = useState(
     localStorage.getItem("lastView") || "digital"
   );
@@ -657,7 +683,6 @@ export default function App() {
 
   return (
     <LiteModeProvider>
-    <UserProvider>
       <FlashProvider>
         <DataProvider activeDept={activeDept}>
           <Inner
@@ -694,10 +719,8 @@ export default function App() {
             />
           </Suspense>
 
-          <UserSetupModal />
         </DataProvider>
       </FlashProvider>
-    </UserProvider>
     </LiteModeProvider>
   );
 }
