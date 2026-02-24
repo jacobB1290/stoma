@@ -82,9 +82,6 @@ function NewAccountSheen() {
           filter: "blur(25px)",
           pointerEvents: "none",
           zIndex: 1,
-          willChange: "transform",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -109,9 +106,6 @@ function NewAccountSheen() {
           filter: "blur(25px)",
           pointerEvents: "none",
           zIndex: 1,
-          willChange: "transform",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -136,9 +130,6 @@ function NewAccountSheen() {
           filter: "blur(20px)",
           pointerEvents: "none",
           zIndex: 1,
-          willChange: "transform, opacity",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -162,9 +153,6 @@ function NewAccountSheen() {
           filter: "blur(25px)",
           pointerEvents: "none",
           zIndex: 1,
-          willChange: "transform, opacity",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -187,9 +175,6 @@ function NewAccountSheen() {
           filter: "blur(3px)",
           pointerEvents: "none",
           zIndex: 3,
-          willChange: "transform, opacity",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <motion.div
@@ -213,9 +198,6 @@ function NewAccountSheen() {
           filter: "blur(2px)",
           pointerEvents: "none",
           zIndex: 4,
-          willChange: "transform, opacity",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
         }}
       />
       <div
@@ -284,8 +266,11 @@ export function RowShell({
 
   /* overlay pulse */
   const flashClass = flashBlue ? "glow" : flashRed ? "pulse-red" : "";
-  const baseStyle = flashRed
-    ? { "--pulse-color": "#ff1e1e" }
+  const baseStyle = flashClass
+    ? {
+        animationDelay: "var(--pulse-clock)",
+        ...(flashRed && { "--pulse-color": "#ff1e1e" }),
+      }
     : {};
 
   /* New account specific styles - disabled when workflow pending */
@@ -357,26 +342,26 @@ const BUBBLE_SPRING = {
   mass: 0.8,
 };
 
-/* RevealButton variants use only GPU-composited properties (opacity, scale, width).
-   marginLeft is applied via a fixed CSS class — removing it from the animation
-   variants eliminates one layout-triggering property per frame. */
 const revealVar = {
   closed: {
     opacity: 0,
     scale: 0,
     width: 0,
+    marginLeft: 0,
     transition: BUBBLE_SPRING,
   },
   open: {
     opacity: 1,
     scale: 1,
     width: BTN_W,
+    marginLeft: 8,
     transition: BUBBLE_SPRING,
   },
   openSmall: {
     opacity: 1,
     scale: 1,
     width: BTN_W_SMALL,
+    marginLeft: 8,
     transition: BUBBLE_SPRING,
   },
 };
@@ -398,8 +383,7 @@ export function RevealButton({
       className={clsx(
         "overflow-hidden rounded px-3 py-1 text-sm font-semibold inline-block",
         frosted,
-        small && "px-1 py-0.5",
-        open && "ml-2"
+        small && "px-1 py-0.5"
       )}
       style={{ originX: 0, originY: 0.5 }}
       onClick={onClick}
