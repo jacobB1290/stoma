@@ -25,6 +25,50 @@ const getCurrentUserName = () => {
 };
 
 /* ──────────────────────────────────────────────────────────────
+      Note-time parser
+      ─────────────────────────────────────────────────────────── */
+
+/**
+ * Extracts a time from the note portion of a casenumber string.
+ * The note is everything after the first whitespace-separated token
+ * (the numeric/alphanumeric case ID).  Handles patterns like:
+ *   8am  8AM  8 am  2pm  2 PM  2:30pm  8:30 AM  14:00
+ * Returns the hour (0–23) or null when no time is found.
+ */
+export const parseNoteTime = (casenumber = "") => {
+  const cleaned = casenumber
+    .replace(/[()]/g, "")
+    .replace(/\s*-\s*/, " ")
+    .trim();
+  const parts = cleaned.split(/\s+/);
+  parts.shift(); // drop the case-number prefix
+  const note = parts.join(" ");
+  if (!note) return null;
+
+  // 12-hour: "8am", "8 am", "8:30am", "8:30 am", "2PM", "2:30 PM"
+  const m12 = note.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (m12) {
+    let hour = parseInt(m12[1], 10);
+    if (m12[3].toLowerCase() === "am") {
+      if (hour === 12) hour = 0; // 12am = midnight
+    } else {
+      if (hour !== 12) hour += 12; // 2pm → 14, 12pm → 12
+    }
+    return hour;
+  }
+
+  // 24-hour: "14:00", "08:30"
+  const m24 = note.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (m24) return parseInt(m24[1], 10);
+
+  return null;
+};
+
+/** Converts a parsed hour (0–23 | null) to an ISO time string segment. */
+const noteHourToTimeStr = (hour) =>
+  hour !== null ? `${String(hour).padStart(2, "0")}:00:00` : "00:00:00";
+
+/* ──────────────────────────────────────────────────────────────
       History logger
       ─────────────────────────────────────────────────────────── */
 export const logCase = async (caseId, action) =>
@@ -70,7 +114,7 @@ export const addCase = async ({
       department: department === "Digital" ? "General" : department,
       priority,
       modifiers,
-      due: `${due}T00:00:00Z`,
+      due: `${due}T${noteHourToTimeStr(parseNoteTime(caseNumber))}Z`,
       completed: false,
       archived: false,
     })
@@ -131,7 +175,9 @@ export const updateCase = async (payload) => {
         : prev.department,
     priority: payload.priority != null ? payload.priority : prev.priority,
     modifiers: nextMods,
-    due: `${payload.due ?? prev.due.slice(0, 10)}T00:00:00Z`,
+    due: `${payload.due ?? prev.due.slice(0, 10)}T${noteHourToTimeStr(
+      parseNoteTime(payload.caseNumber ?? prev.casenumber)
+    )}Z`,
   };
 
   const { error } = await db.from("cases").update(nextRow).eq("id", id);
@@ -178,10 +224,23 @@ export const updateCase = async (payload) => {
       `Department changed from ${prev.department} to ${nextRow.department}`
     );
 
-  if (prev.due !== nextRow.due)
-    logs.push(
-      `Due changed from ${prev.due.slice(0, 10)} to ${nextRow.due.slice(0, 10)}`
-    );
+  if (prev.due !== nextRow.due) {
+    const prevDate = prev.due.slice(0, 10);
+    const nextDate = nextRow.due.slice(0, 10);
+    const prevHour = parseInt((prev.due.split("T")[1] || "00").split(":")[0], 10);
+    const nextHour = parseInt((nextRow.due.split("T")[1] || "00").split(":")[0], 10);
+    if (prevDate !== nextDate)
+      logs.push(`Due changed from ${prevDate} to ${nextDate}`);
+    if (prevHour !== nextHour) {
+      const fmtH = (h) =>
+        h === 0 ? "midnight" : h === 12 ? "noon" : h < 12 ? `${h}am` : `${h - 12}pm`;
+      logs.push(
+        nextHour === 0
+          ? "Due time changed to default"
+          : `Due time changed to ${fmtH(nextHour)} from note`
+      );
+    }
+  }
 
   for (const l of logs) await logCase(id, l);
   return { error: null };
