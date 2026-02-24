@@ -12,6 +12,7 @@ import {
   RevealButton,
   guard,
   SPRING,
+  TWEEN,
 } from "../animationEngine";
 import { AnimatePresence, motion, useMotionValue } from "motion/react";
 import CaseHistory from "./CaseHistory";
@@ -438,6 +439,9 @@ export default function DayCol({
               <motion.div
                 layout
                 transition={SPRING}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: TWEEN }}
                 className={clsx(
                   "mx-auto text-center flex flex-col justify-center",
                   pendingTextCls
@@ -458,6 +462,9 @@ export default function DayCol({
             <motion.div
               layout
               transition={SPRING}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: TWEEN }}
               className="flex-auto flex flex-col"
             >
               {/* Top section: case info + buttons side by side */}
@@ -716,6 +723,9 @@ export default function DayCol({
               <motion.p
                 layout
                 transition={SPRING}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: TWEEN }}
                 className="m-2 text-center text-sm italic text-white/60"
               >
                 no cases
