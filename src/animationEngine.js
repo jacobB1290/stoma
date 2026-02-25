@@ -353,12 +353,7 @@ export function RowShell({
 const BTN_W = 76;
 const BTN_W_SMALL = 32;
 
-const BUBBLE_SPRING = {
-  type: "spring",
-  stiffness: 400,
-  damping: 25,
-  mass: 0.8,
-};
+const BUBBLE_SPRING = SPRING;
 
 /* RevealButton variants use only GPU-composited properties (opacity, scale, width).
    marginLeft is applied via a fixed CSS class — removing it from the animation

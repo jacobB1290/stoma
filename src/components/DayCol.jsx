@@ -18,23 +18,18 @@ import CaseHistory from "./CaseHistory";
 import { useMut } from "../context/DataContext";
 import clsx from "clsx";
 
-const CASE_TEXT_TRANSITION = {
-  type: "spring",
-  stiffness: 520,
-  damping: 34,
-  mass: 0.8,
-};
+const CASE_TEXT_TRANSITION = SPRING;
 
 const ACTION_STACK_VARIANTS = {
   open: {
     transition: {
-      delayChildren: 0.03,
-      staggerChildren: 0.045,
+      delayChildren: 0.05,
+      staggerChildren: 0.07,
     },
   },
   closed: {
     transition: {
-      staggerChildren: 0.03,
+      staggerChildren: 0.06,
       staggerDirection: -1,
     },
   },
@@ -45,13 +40,13 @@ const ACTION_ITEM_VARIANTS = {
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { type: "spring", stiffness: 540, damping: 35, mass: 0.75 },
+    transition: SPRING,
   },
   closed: {
     opacity: 0,
-    y: -6,
-    scale: 0.96,
-    transition: { type: "spring", stiffness: 560, damping: 40, mass: 0.65 },
+    y: -4,
+    scale: 0.97,
+    transition: SPRING,
   },
 };
 
@@ -469,7 +464,7 @@ export default function DayCol({
               initial={{ opacity: 0, x: -4 }}
               animate={{ opacity: 0.4, x: 0 }}
               exit={{ opacity: 0, x: -4 }}
-              transition={{ duration: 0.18 }}
+              transition={SPRING}
               className="absolute left-1.5 top-1/2 -translate-y-1/2 z-10"
             >
               <ChainLinkIcon className="w-3.5 h-3.5" />
@@ -482,9 +477,9 @@ export default function DayCol({
                 key="collapsed"
                 layout
                 transition={SPRING}
-                initial={{ opacity: 0, scale: 0.985, y: 4 }}
+                initial={{ opacity: 0, scale: 0.992, y: 2 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.985, y: -4 }}
+                exit={{ opacity: 0, scale: 0.992, y: -2 }}
                 className={clsx(
                   "mx-auto text-center flex flex-col justify-center",
                   pendingTextCls
@@ -512,9 +507,9 @@ export default function DayCol({
                 key="expanded"
                 layout
                 transition={SPRING}
-                initial={{ opacity: 0, scale: 0.985, y: 4 }}
+                initial={{ opacity: 0, scale: 0.992, y: 2 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.985, y: -4 }}
+                exit={{ opacity: 0, scale: 0.992, y: -2 }}
                 className="flex-auto flex flex-col"
               >
               {/* Top section: case info + buttons side by side */}
@@ -746,7 +741,7 @@ export default function DayCol({
                   initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -3 }}
-                  transition={{ duration: 0.2 }}
+                  transition={SPRING}
                   className="mt-1 -mx-2 -mb-[5px] px-2.5 py-1.5 bg-black/[0.12] border-t border-white/[0.06] rounded-b-[7px]"
                 >
                   <span className="flex items-center gap-1.5 text-[10px] leading-none text-white/55">
