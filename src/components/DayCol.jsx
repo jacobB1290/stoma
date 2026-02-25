@@ -18,6 +18,43 @@ import CaseHistory from "./CaseHistory";
 import { useMut } from "../context/DataContext";
 import clsx from "clsx";
 
+const CASE_TEXT_TRANSITION = {
+  type: "spring",
+  stiffness: 520,
+  damping: 34,
+  mass: 0.8,
+};
+
+const ACTION_STACK_VARIANTS = {
+  open: {
+    transition: {
+      delayChildren: 0.03,
+      staggerChildren: 0.045,
+    },
+  },
+  closed: {
+    transition: {
+      staggerChildren: 0.03,
+      staggerDirection: -1,
+    },
+  },
+};
+
+const ACTION_ITEM_VARIANTS = {
+  open: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { type: "spring", stiffness: 540, damping: 35, mass: 0.75 },
+  },
+  closed: {
+    opacity: 0,
+    y: -6,
+    scale: 0.96,
+    transition: { type: "spring", stiffness: 560, damping: 40, mass: 0.65 },
+  },
+};
+
 const fmt = (d) =>
   d instanceof Date
     ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
@@ -427,39 +464,59 @@ export default function DayCol({
           onClick={() => setActive(open ? null : r.id)}
           workflowPending={isWorkflowPending}
         >
-          {/* ── Collapsed ── */}
-          {!open && (
-            <>
-              {showChainIcon && (
-                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 opacity-40 z-10">
-                  <ChainLinkIcon className="w-3.5 h-3.5" />
-                </span>
-              )}
+          {showChainIcon && !open && (
+            <motion.span
+              initial={{ opacity: 0, x: -4 }}
+              animate={{ opacity: 0.4, x: 0 }}
+              exit={{ opacity: 0, x: -4 }}
+              transition={{ duration: 0.18 }}
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 z-10"
+            >
+              <ChainLinkIcon className="w-3.5 h-3.5" />
+            </motion.span>
+          )}
+
+          <AnimatePresence mode="popLayout" initial={false}>
+            {!open ? (
               <motion.div
+                key="collapsed"
                 layout
                 transition={SPRING}
+                initial={{ opacity: 0, scale: 0.985, y: 4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.985, y: -4 }}
                 className={clsx(
                   "mx-auto text-center flex flex-col justify-center",
                   pendingTextCls
                 )}
               >
-                <span className="leading-none">{num}</span>
+                <motion.span
+                  layoutId={`case-num-${r.id}`}
+                  transition={CASE_TEXT_TRANSITION}
+                  className="leading-none"
+                >
+                  {num}
+                </motion.span>
                 {desc && (
-                  <span className="mt-0.5 text-xs leading-none text-white/80">
+                  <motion.span
+                    layoutId={`case-desc-${r.id}`}
+                    transition={CASE_TEXT_TRANSITION}
+                    className="mt-0.5 text-xs leading-none text-white/80"
+                  >
                     {desc}
-                  </span>
+                  </motion.span>
                 )}
               </motion.div>
-            </>
-          )}
-
-          {/* ── Expanded ── */}
-          {open && (
-            <motion.div
-              layout
-              transition={SPRING}
-              className="flex-auto flex flex-col"
-            >
+            ) : (
+              <motion.div
+                key="expanded"
+                layout
+                transition={SPRING}
+                initial={{ opacity: 0, scale: 0.985, y: 4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.985, y: -4 }}
+                className="flex-auto flex flex-col"
+              >
               {/* Top section: case info + buttons side by side */}
               <div className="flex items-center min-h-[48px]">
                 {/* Left: case info */}
@@ -469,61 +526,81 @@ export default function DayCol({
                     pendingTextCls
                   )}
                 >
-                  <span className="leading-none">{num}</span>
+                  <motion.span
+                    layoutId={`case-num-${r.id}`}
+                    transition={CASE_TEXT_TRANSITION}
+                    className="leading-none"
+                  >
+                    {num}
+                  </motion.span>
                   {desc && (
-                    <span className="mt-0.5 text-xs leading-none text-white/80">
+                    <motion.span
+                      layoutId={`case-desc-${r.id}`}
+                      transition={CASE_TEXT_TRANSITION}
+                      className="mt-0.5 text-xs leading-none text-white/80"
+                    >
                       {desc}
-                    </span>
+                    </motion.span>
                   )}
                 </div>
 
                 {/* Right: buttons */}
                 <div className="ml-auto flex gap-2 pr-1 items-center flex-shrink-0">
-                  <RevealButton
-                    open
-                    label={
-                      <span className="font-serif italic font-bold text-xs px-1">
-                        i
-                      </span>
-                    }
-                    theme="gray"
-                    small
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowHistory(r);
-                    }}
-                  />
+                  <motion.div variants={ACTION_ITEM_VARIANTS}>
+                    <RevealButton
+                      open
+                      label={
+                        <span className="font-serif italic font-bold text-xs px-1">
+                          i
+                        </span>
+                      }
+                      theme="gray"
+                      small
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowHistory(r);
+                      }}
+                    />
+                  </motion.div>
 
-                  <div className="flex flex-col gap-2">
+                  <motion.div
+                    className="flex flex-col gap-2"
+                    variants={ACTION_STACK_VARIANTS}
+                    initial="closed"
+                    animate="open"
+                    exit="closed"
+                  >
                     {isWorkflowPending && showChainIcon && (
-                      <RevealButton
-                        open
-                        label={
-                          <span className="flex items-center gap-1">
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth={2.5}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                              <path d="M4 20L20 4" />
-                            </svg>
-                            Unlink
-                          </span>
-                        }
-                        theme="gray"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          unlinkFromWorkflow(r.id);
-                          setActive(null);
-                        }}
-                      />
+                      <motion.div variants={ACTION_ITEM_VARIANTS}>
+                        <RevealButton
+                          open
+                          label={
+                            <span className="flex items-center gap-1">
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={2.5}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                                <path d="M4 20L20 4" />
+                              </svg>
+                              Unlink
+                            </span>
+                          }
+                          theme="gray"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            unlinkFromWorkflow(r.id);
+                            setActive(null);
+                          }}
+                        />
+                      </motion.div>
                     )}
 
                     {!isWorkflowPending && (
@@ -658,21 +735,29 @@ export default function DayCol({
                         )}
                       </>
                     )}
-                  </div>
+                  </motion.div>
                 </div>
               </div>
 
               {/* Bottom: full-width workflow status bar */}
               {showChainIcon && workflowLabel && (
-                <div className="mt-1 -mx-2 -mb-[5px] px-2.5 py-1.5 bg-black/[0.12] border-t border-white/[0.06] rounded-b-[7px]">
+                <motion.div
+                  layout="position"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -3 }}
+                  transition={{ duration: 0.2 }}
+                  className="mt-1 -mx-2 -mb-[5px] px-2.5 py-1.5 bg-black/[0.12] border-t border-white/[0.06] rounded-b-[7px]"
+                >
                   <span className="flex items-center gap-1.5 text-[10px] leading-none text-white/55">
                     <ChainLinkIcon className="w-3 h-3 flex-shrink-0 opacity-70" />
                     <span>{workflowLabel}</span>
                   </span>
-                </div>
+                </motion.div>
               )}
-            </motion.div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </RowShell>
       );
     });
