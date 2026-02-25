@@ -45,7 +45,10 @@ export function ColumnShell({ children, isToday, metaColor }) {
 
 export const ColumnHeader = ({ text, meta, isToday }) => (
   <motion.h2
-    layout="position"
+    layout
+    initial={{ opacity: 0, y: -4 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: -4 }}
     transition={SPRING}
     className={clsx(
       "mb-3 text-center font-semibold",
@@ -350,12 +353,7 @@ export function RowShell({
 const BTN_W = 76;
 const BTN_W_SMALL = 32;
 
-const BUBBLE_SPRING = {
-  type: "spring",
-  stiffness: 400,
-  damping: 25,
-  mass: 0.8,
-};
+const BUBBLE_SPRING = SPRING;
 
 /* RevealButton variants use only GPU-composited properties (opacity, scale, width).
    marginLeft is applied via a fixed CSS class — removing it from the animation
@@ -394,7 +392,9 @@ export function RevealButton({
   return (
     <motion.button
       variants={revealVar}
+      initial="closed"
       animate={open ? (small ? "openSmall" : "open") : "closed"}
+      exit="closed"
       className={clsx(
         "overflow-hidden rounded px-3 py-1 text-sm font-semibold inline-block",
         frosted,
