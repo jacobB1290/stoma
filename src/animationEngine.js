@@ -52,13 +52,13 @@ export const ColumnHeader = ({ text, meta, isToday }) => (
       meta ? "text-white" : isToday ? "text-black" : "text-white"
     )}
   >
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       <motion.span
         key={text}
-        initial={{ y: -12, opacity: 0, scale: 0.8 }}
-        animate={{ y: 0, opacity: 1, scale: 1 }}
-        exit={{ y: 8, opacity: 0, scale: 0.9, transition: { duration: 0.1 } }}
-        transition={{ type: "spring", stiffness: 900, damping: 9, mass: 0.2 }}
+        initial={{ opacity: 0, y: -5 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 5, transition: { duration: 0.12, ease: "easeIn" } }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
         style={{ display: "block" }}
       >
         {text}
