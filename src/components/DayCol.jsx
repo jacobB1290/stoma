@@ -9,6 +9,7 @@ import {
   ColumnShell,
   ColumnHeader,
   RowShell,
+  RevealButton,
   guard,
   SPRING,
 } from "../animationEngine";
@@ -29,22 +30,6 @@ const split = (s = "") => {
   const [id, ...rest] = txt.split(/\s+/);
   return [id, rest.join(" ")];
 };
-
-/* Simple pill button used in the expanded card view — no Motion animation
-   of its own; the parent motion.div handles the whole-group entrance.    */
-const BtnPill = ({ onClick, children, small = false }) => (
-  <button
-    className={clsx(
-      "rounded px-3 py-1 text-sm font-semibold ml-2 overflow-hidden",
-      "backdrop-blur-md bg-white/35 ring-1 ring-white/30 text-white shadow",
-      "hover:bg-white/40 transition-colors",
-      small && "px-1 py-0.5"
-    )}
-    onClick={onClick}
-  >
-    {children}
-  </button>
-);
 
 const ChainLinkIcon = ({ className = "" }) => (
   <svg
@@ -441,111 +426,93 @@ export default function DayCol({
           onClick={() => setActive(open ? null : r.id)}
           workflowPending={isWorkflowPending}
         >
-          {/* ── Chain icon (collapsed only, absolute) ── */}
-          {!open && showChainIcon && (
-            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 opacity-40 z-10">
-              <ChainLinkIcon className="w-3.5 h-3.5" />
-            </span>
-          )}
-
-          {/* ── Collapsed / Expanded — shared layout via AnimatePresence ── */}
-          <AnimatePresence mode="popLayout" initial={false}>
-            {!open ? (
-              /* ── Collapsed ── */
+          {/* ── Collapsed ── */}
+          {!open && (
+            <>
+              {showChainIcon && (
+                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 opacity-40 z-10">
+                  <ChainLinkIcon className="w-3.5 h-3.5" />
+                </span>
+              )}
               <motion.div
-                key="collapsed"
                 layout
                 transition={SPRING}
-                exit={{ opacity: 0, transition: { duration: 0.05 } }}
                 className={clsx(
                   "mx-auto text-center flex flex-col justify-center",
                   pendingTextCls
                 )}
               >
-                {/* layoutId lets Framer Motion physically animate this span
-                    from its centred position to the left-aligned expanded position */}
-                <motion.span
-                  layoutId={`num-${r.id}`}
-                  className="leading-none"
-                  style={{ display: "block" }}
-                >
-                  {num}
-                </motion.span>
+                <span className="leading-none">{num}</span>
                 {desc && (
-                  <motion.span
-                    layoutId={`desc-${r.id}`}
-                    className="mt-0.5 text-xs leading-none text-white/80"
-                    style={{ display: "block" }}
-                  >
+                  <span className="mt-0.5 text-xs leading-none text-white/80">
                     {desc}
-                  </motion.span>
+                  </span>
                 )}
               </motion.div>
-            ) : (
-              /* ── Expanded ── */
-              <motion.div
-                key="expanded"
-                layout
-                transition={SPRING}
-                className="flex-auto flex flex-col"
-              >
-                {/* Top section: case info + buttons side by side */}
-                <div className="flex items-center min-h-[48px]">
-                  {/* Left: case info — layoutId spans animate from collapsed position */}
-                  <div
-                    className={clsx(
-                      "flex flex-col justify-center flex-1 min-w-0",
-                      pendingTextCls
-                    )}
+            </>
+          )}
+
+          {/* ── Expanded ── */}
+          {open && (
+            <motion.div
+              layout
+              transition={SPRING}
+              className="flex-auto flex flex-col"
+            >
+              {/* Top section: case info + buttons side by side */}
+              <div className="flex items-center min-h-[48px]">
+                {/* Left: case info — fades in so the position change reads as
+                    intentional rather than an accidental jump */}
+                <div
+                  className={clsx(
+                    "flex flex-col justify-center flex-1 min-w-0",
+                    pendingTextCls
+                  )}
+                >
+                  <motion.span
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="leading-none"
+                    style={{ display: "block" }}
                   >
+                    {num}
+                  </motion.span>
+                  {desc && (
                     <motion.span
-                      layoutId={`num-${r.id}`}
-                      className="leading-none"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.15, delay: 0.04, ease: "easeOut" }}
+                      className="mt-0.5 text-xs leading-none text-white/80"
                       style={{ display: "block" }}
                     >
-                      {num}
+                      {desc}
                     </motion.span>
-                    {desc && (
-                      <motion.span
-                        layoutId={`desc-${r.id}`}
-                        className="mt-0.5 text-xs leading-none text-white/80"
-                        style={{ display: "block" }}
-                      >
-                        {desc}
-                      </motion.span>
-                    )}
-                  </div>
+                  )}
+                </div>
 
-                  {/* Right: buttons — single diagonal motion.div, same SPRING as card.
-                      All buttons ride in together so they feel like one unified reveal. */}
-                  <motion.div
-                    className="ml-auto flex gap-2 pr-1 items-center flex-shrink-0"
-                    initial={{ opacity: 0, x: 14, y: -10 }}
-                    animate={{ opacity: 1, x: 0, y: 0 }}
-                    exit={{ opacity: 0, x: 14, y: -10, transition: { duration: 0.08 } }}
-                    transition={SPRING}
-                  >
-                    <BtnPill
-                      small
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowHistory(r);
-                      }}
-                    >
+                {/* Right: buttons — RevealButton spring-bubble reveal */}
+                <div className="ml-auto flex gap-2 pr-1 items-center flex-shrink-0">
+                  <RevealButton
+                    open
+                    label={
                       <span className="font-serif italic font-bold text-xs px-1">
                         i
                       </span>
-                    </BtnPill>
+                    }
+                    theme="gray"
+                    small
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowHistory(r);
+                    }}
+                  />
 
-                    <div className="flex flex-col gap-2">
-                      {isWorkflowPending && showChainIcon ? (
-                        <BtnPill
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            unlinkFromWorkflow(r.id);
-                            setActive(null);
-                          }}
-                        >
+                  <div className="flex flex-col gap-2">
+                    {isWorkflowPending && showChainIcon && (
+                      <RevealButton
+                        open
+                        label={
                           <span className="flex items-center gap-1">
                             <svg
                               width="12"
@@ -563,145 +530,163 @@ export default function DayCol({
                             </svg>
                             Unlink
                           </span>
-                        </BtnPill>
-                      ) : (
-                        <>
-                          {stage && r.department === "General" && !isInQC && (
-                            <>
-                              {stage === "design" && (
-                                <>
-                                  <BtnPill
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateCaseStage(r, "production");
-                                      setActive(null);
-                                    }}
-                                  >
-                                    Next →
-                                  </BtnPill>
-                                  <BtnPill
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateCaseStage(r, "finishing", true);
-                                      setActive(null);
-                                    }}
-                                  >
-                                    Repair
-                                  </BtnPill>
-                                </>
-                              )}
-                              {stage === "production" && (
-                                <>
-                                  <BtnPill
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateCaseStage(r, "design");
-                                      setActive(null);
-                                    }}
-                                  >
-                                    ← Prev
-                                  </BtnPill>
-                                  <BtnPill
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateCaseStage(r, "finishing");
-                                      setActive(null);
-                                    }}
-                                  >
-                                    Next →
-                                  </BtnPill>
-                                </>
-                              )}
-                              {stage === "finishing" && (
-                                <>
-                                  <BtnPill
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateCaseStage(r, "production");
-                                      setActive(null);
-                                    }}
-                                  >
-                                    ← Prev
-                                  </BtnPill>
-                                  <BtnPill
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateCaseStage(r, "qc");
-                                      setActive(null);
-                                    }}
-                                  >
-                                    QC →
-                                  </BtnPill>
-                                </>
-                              )}
-                            </>
-                          )}
-                          {!stage &&
-                            r.department === "General" &&
-                            isInQC &&
-                            !r.completed && (
+                        }
+                        theme="gray"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          unlinkFromWorkflow(r.id);
+                          setActive(null);
+                        }}
+                      />
+                    )}
+
+                    {!isWorkflowPending && (
+                      <>
+                        {stage && r.department === "General" && !isInQC && (
+                          <>
+                            {stage === "design" && (
                               <>
-                                <BtnPill
+                                <RevealButton
+                                  open
+                                  label="Next →"
+                                  theme="blue"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateCaseStage(r, "production");
+                                    setActive(null);
+                                  }}
+                                />
+                                <RevealButton
+                                  open
+                                  label="Repair"
+                                  theme="amber"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateCaseStage(r, "finishing", true);
+                                    setActive(null);
+                                  }}
+                                />
+                              </>
+                            )}
+                            {stage === "production" && (
+                              <>
+                                <RevealButton
+                                  open
+                                  label="← Prev"
+                                  theme="gray"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateCaseStage(r, "design");
+                                    setActive(null);
+                                  }}
+                                />
+                                <RevealButton
+                                  open
+                                  label="Next →"
+                                  theme="blue"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "finishing");
                                     setActive(null);
                                   }}
-                                >
-                                  ← Prev
-                                </BtnPill>
-                                <BtnPill
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleComplete(r.id, r.completed);
-                                    setActive(null);
-                                  }}
-                                >
-                                  Done
-                                </BtnPill>
+                                />
                               </>
                             )}
-                          {r.department === "Metal" && !r.stage2 && (
-                            <BtnPill
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleStage2(r);
-                                setActive(null);
-                              }}
-                            >
-                              Stage{"\u00A0"}2
-                            </BtnPill>
+                            {stage === "finishing" && (
+                              <>
+                                <RevealButton
+                                  open
+                                  label="← Prev"
+                                  theme="gray"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateCaseStage(r, "production");
+                                    setActive(null);
+                                  }}
+                                />
+                                <RevealButton
+                                  open
+                                  label="QC →"
+                                  theme="green"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateCaseStage(r, "qc");
+                                    setActive(null);
+                                  }}
+                                />
+                              </>
+                            )}
+                          </>
+                        )}
+                        {!stage &&
+                          r.department === "General" &&
+                          isInQC &&
+                          !r.completed && (
+                            <>
+                              <RevealButton
+                                open
+                                label="← Prev"
+                                theme="gray"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateCaseStage(r, "finishing");
+                                  setActive(null);
+                                }}
+                              />
+                              <RevealButton
+                                open
+                                label="Done"
+                                theme="green"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleComplete(r.id, r.completed);
+                                  setActive(null);
+                                }}
+                              />
+                            </>
                           )}
-                          {(r.department !== "General" ||
-                            (!stage && !isInQC)) && (
-                            <BtnPill
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleComplete(r.id, r.completed);
-                                setActive(null);
-                              }}
-                            >
-                              Done
-                            </BtnPill>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </motion.div>
-                </div>
-
-                {/* Bottom: full-width workflow status bar */}
-                {showChainIcon && workflowLabel && (
-                  <div className="mt-1 -mx-2 -mb-[5px] px-2.5 py-1.5 bg-black/[0.12] border-t border-white/[0.06] rounded-b-[7px]">
-                    <span className="flex items-center gap-1.5 text-[10px] leading-none text-white/55">
-                      <ChainLinkIcon className="w-3 h-3 flex-shrink-0 opacity-70" />
-                      <span>{workflowLabel}</span>
-                    </span>
+                        {r.department === "Metal" && !r.stage2 && (
+                          <RevealButton
+                            open
+                            label={"Stage\u00A02"}
+                            theme="purple"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleStage2(r);
+                              setActive(null);
+                            }}
+                          />
+                        )}
+                        {(r.department !== "General" ||
+                          (!stage && !isInQC)) && (
+                          <RevealButton
+                            open
+                            label="Done"
+                            theme="green"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleComplete(r.id, r.completed);
+                              setActive(null);
+                            }}
+                          />
+                        )}
+                      </>
+                    )}
                   </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
+                </div>
+              </div>
+
+              {/* Bottom: full-width workflow status bar */}
+              {showChainIcon && workflowLabel && (
+                <div className="mt-1 -mx-2 -mb-[5px] px-2.5 py-1.5 bg-black/[0.12] border-t border-white/[0.06] rounded-b-[7px]">
+                  <span className="flex items-center gap-1.5 text-[10px] leading-none text-white/55">
+                    <ChainLinkIcon className="w-3 h-3 flex-shrink-0 opacity-70" />
+                    <span>{workflowLabel}</span>
+                  </span>
+                </div>
+              )}
+            </motion.div>
+          )}
         </RowShell>
       );
     });

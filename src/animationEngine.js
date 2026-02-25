@@ -45,8 +45,6 @@ export function ColumnShell({ children, isToday, metaColor }) {
 
 export const ColumnHeader = ({ text, meta, isToday }) => (
   <motion.h2
-    layout="position"
-    transition={SPRING}
     className={clsx(
       "mb-3 text-center font-semibold",
       meta ? "text-white" : isToday ? "text-black" : "text-white"
