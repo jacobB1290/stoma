@@ -17,6 +17,7 @@ import { AnimatePresence, motion, useMotionValue } from "motion/react";
 import CaseHistory from "./CaseHistory";
 import { useMut } from "../context/DataContext";
 import clsx from "clsx";
+import { textJump, descJump } from "../utils/motion";
 
 const fmt = (d) =>
   d instanceof Date
@@ -443,11 +444,25 @@ export default function DayCol({
                   pendingTextCls
                 )}
               >
-                <span className="leading-none">{num}</span>
+                <motion.span
+                  initial="hidden"
+                  animate="visible"
+                  variants={textJump}
+                  style={{ display: "block" }}
+                  className="leading-none"
+                >
+                  {num}
+                </motion.span>
                 {desc && (
-                  <span className="mt-0.5 text-xs leading-none text-white/80">
+                  <motion.span
+                    initial="hidden"
+                    animate="visible"
+                    variants={descJump}
+                    style={{ display: "block" }}
+                    className="mt-0.5 text-xs leading-none text-white/80"
+                  >
                     {desc}
-                  </span>
+                  </motion.span>
                 )}
               </motion.div>
             </>
@@ -469,11 +484,25 @@ export default function DayCol({
                     pendingTextCls
                   )}
                 >
-                  <span className="leading-none">{num}</span>
+                  <motion.span
+                    initial="hidden"
+                    animate="visible"
+                    variants={textJump}
+                    style={{ display: "block" }}
+                    className="leading-none"
+                  >
+                    {num}
+                  </motion.span>
                   {desc && (
-                    <span className="mt-0.5 text-xs leading-none text-white/80">
+                    <motion.span
+                      initial="hidden"
+                      animate="visible"
+                      variants={descJump}
+                      style={{ display: "block" }}
+                      className="mt-0.5 text-xs leading-none text-white/80"
+                    >
                       {desc}
-                    </span>
+                    </motion.span>
                   )}
                 </div>
 
@@ -488,6 +517,7 @@ export default function DayCol({
                     }
                     theme="gray"
                     small
+                    delay={0.06}
                     onClick={(e) => {
                       e.stopPropagation();
                       setShowHistory(r);
@@ -518,6 +548,7 @@ export default function DayCol({
                           </span>
                         }
                         theme="gray"
+                        delay={0.12}
                         onClick={(e) => {
                           e.stopPropagation();
                           unlinkFromWorkflow(r.id);
@@ -536,6 +567,7 @@ export default function DayCol({
                                   open
                                   label="Next →"
                                   theme="blue"
+                                  delay={0.12}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "production");
@@ -546,6 +578,7 @@ export default function DayCol({
                                   open
                                   label="Repair"
                                   theme="amber"
+                                  delay={0.18}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "finishing", true);
@@ -560,6 +593,7 @@ export default function DayCol({
                                   open
                                   label="← Prev"
                                   theme="gray"
+                                  delay={0.12}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "design");
@@ -570,6 +604,7 @@ export default function DayCol({
                                   open
                                   label="Next →"
                                   theme="blue"
+                                  delay={0.18}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "finishing");
@@ -584,6 +619,7 @@ export default function DayCol({
                                   open
                                   label="← Prev"
                                   theme="gray"
+                                  delay={0.12}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "production");
@@ -594,6 +630,7 @@ export default function DayCol({
                                   open
                                   label="QC →"
                                   theme="green"
+                                  delay={0.18}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "qc");
@@ -613,6 +650,7 @@ export default function DayCol({
                                 open
                                 label="← Prev"
                                 theme="gray"
+                                delay={0.12}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   updateCaseStage(r, "finishing");
@@ -623,6 +661,7 @@ export default function DayCol({
                                 open
                                 label="Done"
                                 theme="green"
+                                delay={0.18}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   toggleComplete(r.id, r.completed);
@@ -636,6 +675,7 @@ export default function DayCol({
                             open
                             label={"Stage\u00A02"}
                             theme="purple"
+                            delay={0.12}
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleStage2(r);
@@ -649,6 +689,7 @@ export default function DayCol({
                             open
                             label="Done"
                             theme="green"
+                            delay={0.12}
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleComplete(r.id, r.completed);

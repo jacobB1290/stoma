@@ -21,3 +21,31 @@ export const btnVar = {
   hidden: { opacity: 0, scale: 0.8 },
   shown: { opacity: 1, scale: 1 },
 };
+
+/* ── Text jump-in variants ──────────────────────────────────────────────── */
+/* Case numbers: drop from above with a high-frequency bounce            */
+export const textJump = {
+  hidden: { y: -10, opacity: 0, scale: 0.82 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    scale: 1,
+    transition: { type: "spring", stiffness: 900, damping: 10, mass: 0.2 },
+  },
+};
+
+/* Descriptions / sub-labels: softer, slightly delayed sibling           */
+export const descJump = {
+  hidden: { y: -6, opacity: 0 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    transition: {
+      type: "spring",
+      stiffness: 700,
+      damping: 10,
+      mass: 0.25,
+      delay: 0.04,
+    },
+  },
+};

@@ -1,6 +1,6 @@
 // src/animationEngine.js
 import React from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import clsx from "clsx";
 import { parseLocalDate } from "./utils/date";
 
@@ -52,7 +52,18 @@ export const ColumnHeader = ({ text, meta, isToday }) => (
       meta ? "text-white" : isToday ? "text-black" : "text-white"
     )}
   >
-    {text}
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.span
+        key={text}
+        initial={{ y: -12, opacity: 0, scale: 0.8 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 8, opacity: 0, scale: 0.9, transition: { duration: 0.1 } }}
+        transition={{ type: "spring", stiffness: 900, damping: 9, mass: 0.2 }}
+        style={{ display: "block" }}
+      >
+        {text}
+      </motion.span>
+    </AnimatePresence>
   </motion.h2>
 );
 
@@ -387,13 +398,33 @@ export function RevealButton({
   theme = "teal",
   onClick,
   small = false,
+  delay = 0,
 }) {
   const frosted =
     "backdrop-blur-md bg-white/35 ring-1 ring-white/30 text-white shadow hover:bg-white/40 transition-colors";
 
+  const myRevealVar = React.useMemo(
+    () => ({
+      closed: { opacity: 0, scale: 0, width: 0, transition: BUBBLE_SPRING },
+      open: {
+        opacity: 1,
+        scale: 1,
+        width: BTN_W,
+        transition: { ...BUBBLE_SPRING, delay },
+      },
+      openSmall: {
+        opacity: 1,
+        scale: 1,
+        width: BTN_W_SMALL,
+        transition: { ...BUBBLE_SPRING, delay },
+      },
+    }),
+    [delay]
+  );
+
   return (
     <motion.button
-      variants={revealVar}
+      variants={myRevealVar}
       animate={open ? (small ? "openSmall" : "open") : "closed"}
       className={clsx(
         "overflow-hidden rounded px-3 py-1 text-sm font-semibold inline-block",
