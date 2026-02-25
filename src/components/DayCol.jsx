@@ -23,6 +23,13 @@ const fmt = (d) =>
     ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
     : "";
 
+const fmtDue = (d) => {
+  if (!d) return "";
+  const parsed = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
 const split = (s = "") => {
   const txt = s
     .replace(/[()]/g, "")
@@ -397,6 +404,11 @@ export default function DayCol({
     return rowsToRender.map((r) => {
       const open = r.id === active;
       const [num, desc] = split(r.caseNumber);
+      const dueLabel = fmtDue(r.due);
+      const numLayoutId = `case-num-${r.id}`;
+      const descLayoutId = `case-desc-${r.id}`;
+      const dueLayoutId = `case-due-${r.id}`;
+      const actionsLayoutId = `case-actions-${r.id}`;
       const isInQC = r.modifiers?.includes("stage-qc");
 
       const workflowStatus = workflowMap?.get(r.id);
@@ -439,15 +451,34 @@ export default function DayCol({
                 layout
                 transition={SPRING}
                 className={clsx(
-                  "mx-auto text-center flex flex-col justify-center",
+                  "mx-auto text-center flex flex-col justify-center items-center",
                   pendingTextCls
                 )}
               >
-                <span className="leading-none">{num}</span>
+                <motion.span
+                  layoutId={numLayoutId}
+                  className="leading-none"
+                  transition={SPRING}
+                >
+                  {num}
+                </motion.span>
                 {desc && (
-                  <span className="mt-0.5 text-xs leading-none text-white/80">
+                  <motion.span
+                    layoutId={descLayoutId}
+                    transition={SPRING}
+                    className="mt-0.5 text-xs leading-none text-white/80"
+                  >
                     {desc}
-                  </span>
+                  </motion.span>
+                )}
+                {dueLabel && (
+                  <motion.span
+                    layoutId={dueLayoutId}
+                    transition={SPRING}
+                    className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/60"
+                  >
+                    {dueLabel}
+                  </motion.span>
                 )}
               </motion.div>
             </>
@@ -469,16 +500,42 @@ export default function DayCol({
                     pendingTextCls
                   )}
                 >
-                  <span className="leading-none">{num}</span>
+                  <motion.span
+                    layoutId={numLayoutId}
+                    transition={SPRING}
+                    className="leading-none"
+                  >
+                    {num}
+                  </motion.span>
                   {desc && (
-                    <span className="mt-0.5 text-xs leading-none text-white/80">
+                    <motion.span
+                      layoutId={descLayoutId}
+                      transition={SPRING}
+                      className="mt-0.5 text-xs leading-none text-white/80"
+                    >
                       {desc}
-                    </span>
+                    </motion.span>
+                  )}
+                  {dueLabel && (
+                    <motion.span
+                      layoutId={dueLayoutId}
+                      transition={SPRING}
+                      className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/60"
+                    >
+                      {dueLabel}
+                    </motion.span>
                   )}
                 </div>
 
                 {/* Right: buttons */}
-                <div className="ml-auto flex gap-2 pr-1 items-center flex-shrink-0">
+                <motion.div
+                  layoutId={actionsLayoutId}
+                  transition={SPRING}
+                  initial={{ opacity: 0, x: 16, scale: 0.96 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  exit={{ opacity: 0, x: 12, scale: 0.96 }}
+                  className="ml-auto flex gap-2 pr-1 items-center flex-shrink-0"
+                >
                   <RevealButton
                     open
                     label={
@@ -494,12 +551,28 @@ export default function DayCol({
                     }}
                   />
 
-                  <div className="flex flex-col gap-2">
+                  <motion.div
+                    className="flex flex-col gap-2"
+                    initial="hidden"
+                    animate="visible"
+                    variants={{
+                      hidden: {},
+                      visible: {
+                        transition: { staggerChildren: 0.04, delayChildren: 0.04 },
+                      },
+                    }}
+                  >
                     {isWorkflowPending && showChainIcon && (
-                      <RevealButton
-                        open
-                        label={
-                          <span className="flex items-center gap-1">
+                      <motion.div
+                        variants={{
+                          hidden: { opacity: 0, x: 12, y: 4 },
+                          visible: { opacity: 1, x: 0, y: 0, transition: SPRING },
+                        }}
+                      >
+                        <RevealButton
+                          open
+                          label={
+                            <span className="flex items-center gap-1">
                             <svg
                               width="12"
                               height="12"
@@ -514,16 +587,17 @@ export default function DayCol({
                               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                               <path d="M4 20L20 4" />
                             </svg>
-                            Unlink
-                          </span>
-                        }
-                        theme="gray"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          unlinkFromWorkflow(r.id);
-                          setActive(null);
-                        }}
-                      />
+                              Unlink
+                            </span>
+                          }
+                          theme="gray"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            unlinkFromWorkflow(r.id);
+                            setActive(null);
+                          }}
+                        />
+                      </motion.div>
                     )}
 
                     {!isWorkflowPending && (
@@ -658,8 +732,8 @@ export default function DayCol({
                         )}
                       </>
                     )}
-                  </div>
-                </div>
+                  </motion.div>
+                </motion.div>
               </div>
 
               {/* Bottom: full-width workflow status bar */}
