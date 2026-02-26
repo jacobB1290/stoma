@@ -1098,7 +1098,7 @@ function Inner({
   return (
     <div
       className={clsx(
-        "flex flex-col h-[100dvh] w-screen transition-colors",
+        "flex flex-col h-[100dvh] w-screen overflow-hidden transition-colors",
         isLightTheme ? "text-gray-900" : "text-white"
       )}
     >

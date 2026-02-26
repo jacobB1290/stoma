@@ -6,26 +6,24 @@
 @tailwind utilities;
 
 /* ── App-level global styles ─────────────────────────────────────── */
+html,
+body {
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+
 html {
   margin: 0;
   padding: 0;
-  height: 100%;
-  /* Default theme gradient – JS will override this when theme changes.
-     Using background-size: 100% 100% ensures the gradient fills the
-     entire html element including the iOS safe-area gutters so there
-     are never any white bars behind the status bar or home indicator. */
-  background: linear-gradient(to bottom right, #103e48 0%, #16525f 100%)
-    no-repeat fixed;
-  background-size: 100% 100%;
 }
 
 body {
   margin: 0;
   padding: 0;
-  /* Transparent so the html gradient shows through the safe-area insets */
-  background: transparent;
-  min-height: 100%;
-  min-height: -webkit-fill-available;
 
   /* Prevent iOS from auto-scaling text on rotation */
   -webkit-text-size-adjust: 100%;
@@ -50,9 +48,12 @@ body {
 }
 
 #root {
-  /* Fill the available space inside the safe-area-padded body */
-  min-height: 100vh;
-  min-height: 100dvh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
