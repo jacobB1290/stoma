@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { parseLocalDate } from "./utils/date";
 
 /* ───────── springs & layout ───────── */
-export const SPRING = { type: "spring", stiffness: 500, damping: 40, mass: 1 };
+export const SPRING = { type: "spring", stiffness: 500, damping: 40, mass: 2 };
 export const FAST_EXIT = {
   type: "spring",
   stiffness: 1800,
