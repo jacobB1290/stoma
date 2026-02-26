@@ -109,7 +109,7 @@ const yieldToMainThread = () =>
     setTimeout(resolve, 0);
   });
 
-const shouldYield = (index, chunkSize = 25) => (index + 1) % chunkSize === 0;
+const shouldYield = (index, chunkSize = 10) => (index + 1) % chunkSize === 0;
 
 /** Determine the stage at a given moment ("design" | "production" | "finishing" | null). */
 const getStageAtTime = (caseData, targetTime) => {

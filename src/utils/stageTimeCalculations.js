@@ -358,8 +358,9 @@ export const calculateStageStatistics = async (stage, onProgress, options = {}) 
 
     // Create throttled processor
     const processor = new ThrottledProcessor({
-      maxExecutionTime: 5, // Only 5ms per chunk for ultra-smooth UI
-      yieldInterval: 20, // Yield every 20ms
+      maxExecutionTime: 2, // Prioritize UI responsiveness over raw calc throughput
+      yieldInterval: 32, // Leave enough frame budget for animations/input
+      progressInterval: 120, // Avoid high-frequency progress re-renders
       onProgress: onProgress || (() => {}),
       shouldContinue: () => !isCancelled(),
     });

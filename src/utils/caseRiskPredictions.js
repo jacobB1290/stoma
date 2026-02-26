@@ -179,7 +179,7 @@ const yieldToMainThread = () =>
     setTimeout(resolve, 0);
   });
 
-const shouldYield = (index, chunkSize = 25) => (index + 1) % chunkSize === 0;
+const shouldYield = (index, chunkSize = 10) => (index + 1) % chunkSize === 0;
 
 function dayWindows(d) {
   const y = d.getFullYear(),
