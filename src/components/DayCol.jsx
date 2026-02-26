@@ -18,18 +18,16 @@ import CaseHistory from "./CaseHistory";
 import { useMut } from "../context/DataContext";
 import clsx from "clsx";
 
-const CASE_TEXT_TRANSITION = SPRING;
-
 const ACTION_STACK_VARIANTS = {
   open: {
     transition: {
-      delayChildren: 0.05,
-      staggerChildren: 0.07,
+      delayChildren: 0.02,
+      staggerChildren: 0.04,
     },
   },
   closed: {
     transition: {
-      staggerChildren: 0.06,
+      staggerChildren: 0.04,
       staggerDirection: -1,
     },
   },
@@ -485,21 +483,11 @@ export default function DayCol({
                   pendingTextCls
                 )}
               >
-                <motion.span
-                  layoutId={`case-num-${r.id}`}
-                  transition={CASE_TEXT_TRANSITION}
-                  className="leading-none"
-                >
-                  {num}
-                </motion.span>
+                <span className="leading-none">{num}</span>
                 {desc && (
-                  <motion.span
-                    layoutId={`case-desc-${r.id}`}
-                    transition={CASE_TEXT_TRANSITION}
-                    className="mt-0.5 text-xs leading-none text-white/80"
-                  >
+                  <span className="mt-0.5 text-xs leading-none text-white/80">
                     {desc}
-                  </motion.span>
+                  </span>
                 )}
               </motion.div>
             ) : (
@@ -521,21 +509,11 @@ export default function DayCol({
                     pendingTextCls
                   )}
                 >
-                  <motion.span
-                    layoutId={`case-num-${r.id}`}
-                    transition={CASE_TEXT_TRANSITION}
-                    className="leading-none"
-                  >
-                    {num}
-                  </motion.span>
+                  <span className="leading-none">{num}</span>
                   {desc && (
-                    <motion.span
-                      layoutId={`case-desc-${r.id}`}
-                      transition={CASE_TEXT_TRANSITION}
-                      className="mt-0.5 text-xs leading-none text-white/80"
-                    >
+                    <span className="mt-0.5 text-xs leading-none text-white/80">
                       {desc}
-                    </motion.span>
+                    </span>
                   )}
                 </div>
 
