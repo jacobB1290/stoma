@@ -1103,7 +1103,12 @@ function Inner({
       )}
     >
       {/* Header */}
-      <header className="flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-[75] sticky top-0">
+      <header
+        className={clsx(
+          "flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-[75]",
+          view === "manage" ? "sticky top-0" : "fixed top-0 left-0 right-0"
+        )}
+      >
         <SettingsPill
           onClick={() => setSettingsOpen(true)}
           className="absolute left-4 top-1/2 -translate-y-1/2"
@@ -1322,7 +1327,8 @@ function Inner({
       )}
 
       {/* Main content */}
-      {view === "manage" ? (
+      <div className={clsx("flex-1 min-h-0", view !== "manage" && "pt-[88px]")}>
+        {view === "manage" ? (
         facultySystemManagerEnabled && manageView === "system" ? (
           <SystemManagementScreen />
         ) : (
@@ -1343,7 +1349,8 @@ function Inner({
           onStatsCalculated={() => setIsCalculatingStats(false)}
           weekOffset={weekOffset}
         />
-      )}
+        )}
+      </div>
     </div>
   );
 }
