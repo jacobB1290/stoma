@@ -104,6 +104,13 @@ const endOfDueDay = (caseRow) => {
   return base;
 };
 
+const yieldToMainThread = () =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
+const shouldYield = (index, chunkSize = 25) => (index + 1) % chunkSize === 0;
+
 /** Determine the stage at a given moment ("design" | "production" | "finishing" | null). */
 const getStageAtTime = (caseData, targetTime) => {
   const history = caseData.case_history || [];
@@ -501,7 +508,7 @@ const penaltyUnitsForStage = (d, stage) => {
   return units;
 };
 
-const calculateOnTimeDelivery = (
+const calculateOnTimeDelivery = async (
   cases,
   currentStage = null,
   stageStatistics = null,
@@ -559,14 +566,21 @@ const calculateOnTimeDelivery = (
   const nonExcluded = cases.filter((c) => !isCaseExcluded(c, currentStage));
   const rushReductionFactor = calculateRushReductionFactor(nonExcluded);
 
-  const deliveryData = nonExcluded
-    .map((c) => {
+  const deliveryData = [];
+
+  for (let i = 0; i < nonExcluded.length; i++) {
+    const c = nonExcluded[i];
       const caseDue = endOfDueDay(c);
       const completionEntry = c.case_history?.find(
         (h) => (h.action || "").toLowerCase() === "marked done"
       );
       const isCompleted = !!completionEntry;
-      if (!currentStage && !isCompleted) return null;
+      if (!currentStage && !isCompleted) {
+        if (shouldYield(i)) {
+          await yieldToMainThread();
+        }
+        continue;
+      }
 
       const isRushOrPriority = !!(c.priority || c.rush);
 
@@ -661,7 +675,7 @@ const calculateOnTimeDelivery = (
           )
         : 0;
 
-      return {
+      deliveryData.push({
         id: c.id,
         caseNumber: c.caseNumber || c.casenumber,
         caseType: c.caseType || "general",
@@ -684,9 +698,12 @@ const calculateOnTimeDelivery = (
         stageAnalysis,
         bufferShortages,
         isExcluded: isCaseExcluded(c, currentStage),
-      };
-    })
-    .filter(Boolean);
+      });
+
+      if (shouldYield(i)) {
+        await yieldToMainThread();
+      }
+    }
 
   // Attach velocity info to cases (fast lookup by case number)
   const velMap = new Map((velocityDetails || []).map((v) => [v.caseNumber, v]));
@@ -1528,7 +1545,7 @@ export const calculateDepartmentEfficiency = async (
 
   report(90);
 
-  const onTimeAnalysis = calculateOnTimeDelivery(
+  const onTimeAnalysis = await calculateOnTimeDelivery(
     allValidCases,
     currentStage,
     stageStatistics,
@@ -1542,7 +1559,7 @@ export const calculateDepartmentEfficiency = async (
   );
 
   // Use ALL active cases for risk predictions
-  const predictions = generateCaseRiskPredictions(
+  const predictions = await generateCaseRiskPredictions(
     allActiveCasesForRisk, // This now includes excluded cases but ONLY those currently in stage
     throughputAnalysis,
     currentStage,

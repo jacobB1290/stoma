@@ -174,6 +174,13 @@ const isWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
 const dowPy = (d) => (d.getDay() + 6) % 7;
 const getCurrentTime = () => new Date();
 
+const yieldToMainThread = () =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
+const shouldYield = (index, chunkSize = 25) => (index + 1) % chunkSize === 0;
+
 function dayWindows(d) {
   const y = d.getFullYear(),
     m = d.getMonth(),
@@ -1183,7 +1190,7 @@ const toLevel = (p) =>
 
 /** ======================= MAIN PREDICTION GENERATOR ======================== **/
 
-export function generateCaseRiskPredictions(
+export async function generateCaseRiskPredictions(
   activeCases,
   throughputAnalysis,
   stage = null,
@@ -1214,7 +1221,10 @@ export function generateCaseRiskPredictions(
     STAGE_CAPACITY[currentStage] || 1
   );
 
-  const predictions = activeCases.map((c) => {
+  const predictions = [];
+
+  for (let i = 0; i < activeCases.length; i++) {
+    const c = activeCases[i];
     const caseType =
       c.caseType ||
       (c.modifiers?.includes?.("bbs")
@@ -1313,8 +1323,7 @@ export function generateCaseRiskPredictions(
     );
     const confidenceScore = 75;
     const hoursIdle = timeSinceLastActivityHours(c, stageEnteredAt);
-
-    return {
+    predictions.push({
       id: c.id,
       caseNumber: c.caseNumber || c.casenumber,
       caseType,
@@ -1382,8 +1391,12 @@ export function generateCaseRiskPredictions(
       modelWeights: mlResult.modelWeights,
       logPrediction: mlResult.logPrediction,
       stageBias: mlResult.stageBias,
-    };
-  });
+    });
+
+    if (shouldYield(i)) {
+      await yieldToMainThread();
+    }
+  }
 
   const shock = shockScore(activeCases, currentStage, k);
   const stageThreshold = dynamicReschedThreshold(
