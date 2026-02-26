@@ -4,6 +4,7 @@ export class ThrottledProcessor {
     this.maxExecutionTime = options.maxExecutionTime || 10; // ms per chunk
     this.yieldInterval = options.yieldInterval || 16; // ms between chunks (60fps)
     this.onProgress = options.onProgress || (() => {});
+    this.shouldContinue = options.shouldContinue || (() => true);
   }
 
   async processArray(items, processor) {
@@ -18,6 +19,9 @@ export class ThrottledProcessor {
         i < items.length &&
         performance.now() - chunkStart < this.maxExecutionTime
       ) {
+        if (!this.shouldContinue()) {
+          return results;
+        }
         results.push(await processor(items[i], i));
         processedCount++;
         i++;
@@ -44,6 +48,9 @@ export class ThrottledProcessor {
 
     for (let i = 0; i < items.length; i += batchSize) {
       const batch = items.slice(i, i + batchSize);
+      if (!this.shouldContinue()) {
+        return results;
+      }
       const batchResult = await batchProcessor(batch);
       results.push(...batchResult);
 

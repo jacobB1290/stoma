@@ -347,8 +347,13 @@ export const calculateStageTime = (caseItem, targetStage, history) => {
 };
 
 /* Calculate stage statistics - THE source of truth for all averages */
-export const calculateStageStatistics = async (stage, onProgress) => {
+export const calculateStageStatistics = async (stage, onProgress, options = {}) => {
   try {
+    const { signal } = options;
+    const isCancelled = () => !!signal?.aborted;
+
+    if (isCancelled()) return null;
+
     console.log(`[calculateStageStatistics] Starting for ${stage} stage`);
 
     // Create throttled processor
@@ -356,6 +361,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       maxExecutionTime: 5, // Only 5ms per chunk for ultra-smooth UI
       yieldInterval: 20, // Yield every 20ms
       onProgress: onProgress || (() => {}),
+      shouldContinue: () => !isCancelled(),
     });
 
     // Fetch cases
@@ -365,6 +371,8 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       .select("*, case_history(*)")
       .eq("department", "General")
       .order("created_at", { ascending: false });
+
+    if (isCancelled()) return null;
 
     if (dbError) {
       console.error("[calculateStageStatistics] Database error:", dbError);
@@ -393,6 +401,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
     const processedCases = await processor.processArray(
       casesWithHistory,
       (caseItem) => {
+        if (isCancelled()) return { type: "skip" };
         const history = caseItem.case_history || [];
 
         // Check for exclusion

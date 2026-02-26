@@ -165,6 +165,7 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
   const prevStage = useRef(stage);
   const calculationStartTime = useRef(null);
   const progressAnimationRef = useRef(null);
+  const calcAbortRef = useRef(null);
 
   useEffect(() => {
     if (progressAnimationRef.current) {
@@ -191,6 +192,8 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
   useEffect(() => {
     if (stage !== prevStage.current) {
       pending.current = false;
+      if (calcAbortRef.current) calcAbortRef.current.abort();
+      calcAbortRef.current = null;
       setStats(null);
       setEfficiency(null);
       setProgress(0);
@@ -201,10 +204,21 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
     }
   }, [stage]);
 
+  useEffect(() => {
+    return () => {
+      pending.current = false;
+      if (calcAbortRef.current) calcAbortRef.current.abort();
+      calcAbortRef.current = null;
+    };
+  }, []);
+
   const kick = useCallback(async () => {
     if (!stage) return;
 
     pending.current = true;
+    if (calcAbortRef.current) calcAbortRef.current.abort();
+    calcAbortRef.current = new AbortController();
+    const signal = calcAbortRef.current.signal;
 
     if (activeDept === "Metal") {
       setIsCalculating(false);
@@ -218,7 +232,9 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
         "Metal",
         stage,
         null,
-        stageCount
+        stageCount,
+        null,
+        { signal }
       );
       if (pending.current) setEfficiency(e);
       onDone && onDone();
@@ -232,13 +248,18 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
     calculationStartTime.current = Date.now();
 
     try {
-      const s = await calculateStageStatistics(stage, (p) => {
-        if (pending.current) setProgress(p * 0.7);
-      });
+      const s = await calculateStageStatistics(
+        stage,
+        (p) => {
+          if (pending.current) setProgress(p * 0.7);
+        },
+        { signal }
+      );
 
       if (!pending.current) return;
 
       if (!s) {
+        if (signal.aborted) return;
         setStats({ noData: true, message: "Failed to calculate statistics" });
         setEfficiency({ noData: true, message: "No statistics available" });
         setProgress(0);
@@ -256,9 +277,10 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
           stageCount,
           (p) => {
             if (pending.current) setProgress(70 + p * 0.3);
-          }
+          },
+          { signal }
         );
-        if (pending.current) setEfficiency(e);
+        if (pending.current && e) setEfficiency(e);
       } else {
         setEfficiency({
           noData: true,
@@ -271,6 +293,7 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
       if (pending.current) setProgress(100);
       onDone && onDone();
     } catch (err) {
+      if (signal.aborted) return;
       console.error("Stage calc error:", err);
       if (pending.current) {
         setStats({ error: true, message: err.message });
@@ -283,6 +306,8 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
         setProgress(0);
       }
     } finally {
+      if (signal.aborted) return;
+
       if (pending.current && activeDept !== "Metal") {
         const elapsedTime = Date.now() - calculationStartTime.current;
         const minTime = 500;
@@ -301,6 +326,9 @@ function useStageMetrics(stage, stageCount, activeDept, onDone) {
           }
         }, 200);
       }
+    }
+    if (calcAbortRef.current?.signal === signal) {
+      calcAbortRef.current = null;
     }
   }, [stage, stageCount, activeDept, onDone]);
 

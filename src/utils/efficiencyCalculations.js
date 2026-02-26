@@ -512,8 +512,11 @@ const calculateOnTimeDelivery = async (
   cases,
   currentStage = null,
   stageStatistics = null,
-  velocityDetails = []
+  velocityDetails = [],
+  options = {}
 ) => {
+  const { signal } = options;
+  const isCancelled = () => !!signal?.aborted;
   if (!cases || cases.length === 0) {
     return {
       overall: {
@@ -569,6 +572,7 @@ const calculateOnTimeDelivery = async (
   const deliveryData = [];
 
   for (let i = 0; i < nonExcluded.length; i++) {
+    if (isCancelled()) return null;
     const c = nonExcluded[i];
       const caseDue = endOfDueDay(c);
       const completionEntry = c.case_history?.find(
@@ -704,6 +708,8 @@ const calculateOnTimeDelivery = async (
         await yieldToMainThread();
       }
     }
+
+  if (isCancelled()) return null;
 
   // Attach velocity info to cases (fast lookup by case number)
   const velMap = new Map((velocityDetails || []).map((v) => [v.caseNumber, v]));
@@ -983,6 +989,8 @@ const calculateOnTimeDelivery = async (
         100;
     }
   }
+
+  if (isCancelled()) return null;
 
   overall.actualRate =
     deliveryData.length > 0
@@ -1326,12 +1334,17 @@ export const calculateDepartmentEfficiency = async (
   currentStage = null,
   stageStatistics = null,
   stageCount = 0,
-  onProgress = null
+  onProgress = null,
+  options = {}
 ) => {
   const referenceTime = Date.now();
+  const { signal } = options;
+  const isCancelled = () => !!signal?.aborted;
+
+  if (isCancelled()) return null;
 
   const report = (pct) => {
-    if (typeof onProgress === "function") onProgress(pct);
+    if (!isCancelled() && typeof onProgress === "function") onProgress(pct);
   };
 
   if (currentStage && (!stageStatistics || stageStatistics.noData)) {
@@ -1490,6 +1503,7 @@ export const calculateDepartmentEfficiency = async (
 
   const types = ["general", "bbs", "flex"];
   for (let i = 0; i < types.length; i++) {
+    if (isCancelled()) return null;
     const type = types[i];
     const stats = stageStatistics.typeStats?.[type];
     if (
@@ -1549,8 +1563,11 @@ export const calculateDepartmentEfficiency = async (
     allValidCases,
     currentStage,
     stageStatistics,
-    allVelocityDetails
+    allVelocityDetails,
+    options
   );
+
+  if (!onTimeAnalysis || isCancelled()) return null;
 
   const efficiencyScore = combinedScore(
     throughputAnalysis,
@@ -1563,8 +1580,11 @@ export const calculateDepartmentEfficiency = async (
     allActiveCasesForRisk, // This now includes excluded cases but ONLY those currently in stage
     throughputAnalysis,
     currentStage,
-    stageStatistics
+    stageStatistics,
+    options
   );
+
+  if (!onTimeAnalysis || !predictions || isCancelled()) return null;
 
   const explanation = explanationFor(
     throughputAnalysis,

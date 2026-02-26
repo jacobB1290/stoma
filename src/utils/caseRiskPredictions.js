@@ -1194,8 +1194,13 @@ export async function generateCaseRiskPredictions(
   activeCases,
   throughputAnalysis,
   stage = null,
-  stageStats = null
+  stageStats = null,
+  options = {}
 ) {
+  const { signal } = options;
+  const isCancelled = () => !!signal?.aborted;
+
+  if (isCancelled()) return null;
   if (!activeCases || activeCases.length === 0) {
     return {
       atRisk: 0,
@@ -1224,6 +1229,7 @@ export async function generateCaseRiskPredictions(
   const predictions = [];
 
   for (let i = 0; i < activeCases.length; i++) {
+    if (isCancelled()) return null;
     const c = activeCases[i];
     const caseType =
       c.caseType ||
@@ -1398,6 +1404,8 @@ export async function generateCaseRiskPredictions(
     }
   }
 
+  if (isCancelled()) return null;
+
   const shock = shockScore(activeCases, currentStage, k);
   const stageThreshold = dynamicReschedThreshold(
     currentStage,
@@ -1407,6 +1415,7 @@ export async function generateCaseRiskPredictions(
   capacityAwareStageSchedule(predictions, currentStage, getCurrentTime());
 
   for (const p of predictions) {
+    if (isCancelled()) return null;
     const reasons = [];
     if (p.riskComponents.slack >= 0.65)
       reasons.push(
