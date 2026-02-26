@@ -12,13 +12,16 @@ import {
   RevealButton,
   guard,
   SPRING,
+  LAYOUT_SPRING,
 } from "../animationEngine";
 import { AnimatePresence, motion, useMotionValue } from "motion/react";
 import CaseHistory from "./CaseHistory";
 import { useMut } from "../context/DataContext";
 import clsx from "clsx";
 
-const CASE_TEXT_TRANSITION = SPRING;
+// Use the overdamped spring for layoutId text morphs so case numbers
+// settle immediately without oscillating during quick row switches.
+const CASE_TEXT_TRANSITION = LAYOUT_SPRING;
 
 const ACTION_STACK_VARIANTS = {
   open: {
@@ -487,7 +490,6 @@ export default function DayCol({
             {!showExpanded ? (
               <motion.div
                 key="collapsed"
-                layout
                 transition={SPRING}
                 initial={{ opacity: 0, scale: 0.992, y: 2 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -517,7 +519,6 @@ export default function DayCol({
             ) : (
               <motion.div
                 key="expanded"
-                layout
                 transition={SPRING}
                 initial={{ opacity: 0, scale: 0.992, y: 2 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
