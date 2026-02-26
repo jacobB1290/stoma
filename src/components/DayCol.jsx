@@ -186,7 +186,7 @@ const linkedDeptLabel = (workflowStatus, currentId) => {
 const StagePriorityBar = ({ columnRef, rowRefs, prioIds, stageKey }) => {
   const barY = useMotionValue(0);
   const barHeight = useMotionValue(0);
-  const animationFrame = useRef(null);
+  const rafId = useRef(null);
 
   const track = useCallback(() => {
     if (prioIds.length === 0 || !columnRef.current) {
@@ -209,17 +209,42 @@ const StagePriorityBar = ({ columnRef, rowRefs, prioIds, stageKey }) => {
     barHeight.set(total);
   }, [prioIds, columnRef, rowRefs, barY, barHeight]);
 
+  const scheduleTrack = useCallback(() => {
+    if (rafId.current) return;
+    rafId.current = requestAnimationFrame(() => {
+      rafId.current = null;
+      track();
+    });
+  }, [track]);
+
   useLayoutEffect(() => {
     track();
-    const frame = () => {
-      track();
-      animationFrame.current = requestAnimationFrame(frame);
-    };
-    animationFrame.current = requestAnimationFrame(frame);
+
+    if (!columnRef.current || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      scheduleTrack();
+    });
+
+    observer.observe(columnRef.current);
+    prioIds.forEach((id) => {
+      const el = rowRefs.current[id];
+      if (el) observer.observe(el);
+    });
+
+    window.addEventListener("resize", scheduleTrack, { passive: true });
+    window.addEventListener("scroll", scheduleTrack, { passive: true });
+
     return () => {
-      if (animationFrame.current) cancelAnimationFrame(animationFrame.current);
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleTrack);
+      window.removeEventListener("scroll", scheduleTrack);
+      if (rafId.current) {
+        cancelAnimationFrame(rafId.current);
+        rafId.current = null;
+      }
     };
-  }, [track]);
+  }, [columnRef, prioIds, rowRefs, scheduleTrack, track]);
 
   useLayoutEffect(() => {
     track();
@@ -471,7 +496,7 @@ export default function DayCol({
             </motion.span>
           )}
 
-          <AnimatePresence mode="popLayout" initial={false}>
+          <AnimatePresence initial={false}>
             {!open ? (
               <motion.div
                 key="collapsed"
@@ -789,7 +814,7 @@ export default function DayCol({
 
           {!hideHeader && <ColumnHeader text={fmt(date)} isToday={isToday} />}
 
-          <AnimatePresence mode="popLayout">
+          <AnimatePresence>
             {rows.length ? (
               renderContent()
             ) : (
