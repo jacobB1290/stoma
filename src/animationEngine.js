@@ -396,7 +396,7 @@ export function RevealButton({
       animate={open ? (small ? "openSmall" : "open") : "closed"}
       exit="closed"
       className={clsx(
-        "overflow-hidden rounded px-3 py-1 text-sm font-semibold inline-block",
+        "overflow-hidden rounded px-3 py-1 text-sm font-semibold inline-flex items-center justify-center whitespace-nowrap",
         frosted,
         small && "px-1 py-0.5",
         open && "ml-2"
