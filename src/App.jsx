@@ -542,30 +542,30 @@ function AppShell() {
   }, [theme]);
 
   useEffect(() => {
-    // Theme colour map – applied to <html> so the gradient fills the entire
-    // screen including iOS safe-area gutters (status bar + home indicator).
-    // Using inline style instead of Tailwind classes because Tailwind's
-    // bg-gradient-to-br is relative to element size and would leave bare
-    // background visible behind safe-area padding on body.
-    const gradients = {
-      blue: "linear-gradient(to bottom right, #103E48 0%, #16525F 100%)",
-      white: "linear-gradient(to bottom right, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.6) 50%, rgba(255,255,255,0.9) 100%)",
-      dark: "linear-gradient(to bottom right, #0f172a 0%, #1e293b 50%, #0f172a 100%)",
-      pink: "linear-gradient(to bottom right, rgba(255,240,245,0.4) 0%, rgba(252,231,243,0.6) 50%, rgba(255,240,245,0.9) 100%)",
-    };
-    const gradient = gradients[theme] || gradients.blue;
-    // Set on html so it bleeds behind the safe-area insets on body
-    document.documentElement.style.background = `${gradient} no-repeat fixed`;
-    document.documentElement.style.backgroundSize = "100% 100%";
-    // Keep body transparent so html background shows through safe zones
-    document.body.style.background = "transparent";
-
-    // Legacy Tailwind classes removed – no longer needed for background
-    const allBgClasses = ["bg-gradient-to-br", "from-[#103E48]", "to-[#16525F]",
-      "from-white/40", "via-white/60", "to-white/90",
-      "from-slate-900", "via-slate-800",
-      "from-pink-50/40", "via-pink-100/60", "to-pink-50/90"];
-    document.body.classList.remove(...allBgClasses);
+    const blue = ["bg-gradient-to-br", "from-[#103E48]", "to-[#16525F]"];
+    const white = [
+      "bg-gradient-to-br",
+      "from-white/40",
+      "via-white/60",
+      "to-white/90",
+    ];
+    const dark = [
+      "bg-gradient-to-br",
+      "from-slate-900",
+      "via-slate-800",
+      "to-slate-900",
+    ];
+    const pink = [
+      "bg-gradient-to-br",
+      "from-pink-50/40",
+      "via-pink-100/60",
+      "to-pink-50/90",
+    ];
+    document.body.classList.remove(...blue, ...white, ...dark, ...pink);
+    if (theme === "blue") document.body.classList.add(...blue);
+    else if (theme === "white") document.body.classList.add(...white);
+    else if (theme === "pink") document.body.classList.add(...pink);
+    else document.body.classList.add(...dark);
   }, [theme]);
 
   useEffect(() => {
@@ -1098,12 +1098,12 @@ function Inner({
   return (
     <div
       className={clsx(
-        "flex flex-col h-[100dvh] w-screen overflow-hidden transition-colors",
+        "flex flex-col h-[100dvh] w-screen transition-colors",
         isLightTheme ? "text-gray-900" : "text-white"
       )}
     >
       {/* Header */}
-      <header className="flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-[75] sticky top-0">
+      <header className="flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-40">
         <SettingsPill
           onClick={() => setSettingsOpen(true)}
           className="absolute left-4 top-1/2 -translate-y-1/2"
