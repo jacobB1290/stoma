@@ -614,7 +614,6 @@ export default function MetaCol({
     setReleasePopover(null);
     setReleaseButtonRect(null);
     setActive(null);
-    setClosing(null);
   };
 
   const renderContent = () => {
@@ -845,13 +844,11 @@ export default function MetaCol({
                       if (isWorkflowPending) return;
                       updateCaseStage(r, ts, ir);
                       setActive(null);
-                      setClosing(null);
                     }}
                     onComplete={() => {
                       if (isWorkflowPending) return;
                       toggleComplete?.(r.id, r.completed);
                       setActive(null);
-                      setClosing(null);
                     }}
                     onRelease={(e) => {
                       if (isWorkflowPending) return;
@@ -866,12 +863,10 @@ export default function MetaCol({
                       if (isWorkflowPending) return;
                       toggleStage2?.(r);
                       setActive(null);
-                      setClosing(null);
                     }}
                     onUnlink={() => {
                       unlinkFromWorkflow(r.id);
                       setActive(null);
-                      setClosing(null);
                     }}
                   />
                 )}
