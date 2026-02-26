@@ -23,17 +23,19 @@ const CASE_TEXT_TRANSITION = SPRING;
 const ACTION_STACK_VARIANTS = {
   open: {
     transition: {
-      delayChildren: 0.05,
-      staggerChildren: 0.07,
+      delayChildren: 0,
+      staggerChildren: 0.035,
     },
   },
   closed: {
     transition: {
-      staggerChildren: 0.06,
+      staggerChildren: 0.03,
       staggerDirection: -1,
     },
   },
 };
+
+const ROW_SWITCH_CLOSE_MS = 110;
 
 const ACTION_ITEM_VARIANTS = {
   open: {
@@ -458,7 +460,7 @@ export default function DayCol({
         const queued = queuedTargetRef.current;
         queuedTargetRef.current = undefined;
         if (queued !== undefined) requestActiveRow(queued);
-      }, 150);
+      }, ROW_SWITCH_CLOSE_MS);
       return;
     }
 
@@ -472,7 +474,7 @@ export default function DayCol({
         queuedTargetRef.current = undefined;
         if (queued !== undefined && queued !== targetRowId)
           requestActiveRow(queued);
-      }, 150);
+      }, ROW_SWITCH_CLOSE_MS);
       return;
     }
 
@@ -496,7 +498,8 @@ export default function DayCol({
       const isOpen = r.id === active;
       const isClosing_ = r.id === closing;
       const showExpanded = isOpen || isClosing_;
-      const showButtons = isOpen && !isClosing_;
+      const buttonsOpen = isOpen && !isClosing_;
+      const showButtons = isOpen || isClosing_;
       const [num, desc] = split(r.caseNumber);
       const isInQC = r.modifiers?.includes("stage-qc");
 
@@ -613,7 +616,7 @@ export default function DayCol({
                 <div className="ml-auto flex gap-2 pr-1 items-center flex-shrink-0">
                   <motion.div variants={ACTION_ITEM_VARIANTS}>
                     <RevealButton
-                      open
+                      open={buttonsOpen}
                       label={
                         <span className="font-serif italic font-bold text-xs px-1">
                           i
@@ -632,13 +635,13 @@ export default function DayCol({
                     className="flex flex-col gap-2"
                     variants={ACTION_STACK_VARIANTS}
                     initial="closed"
-                    animate="open"
+                    animate={buttonsOpen ? "open" : "closed"}
                     exit="closed"
                   >
                     {isWorkflowPending && showChainIcon && (
                       <motion.div variants={ACTION_ITEM_VARIANTS}>
                         <RevealButton
-                          open
+                          open={buttonsOpen}
                           label={
                             <span className="flex items-center gap-1">
                               <svg
@@ -675,7 +678,7 @@ export default function DayCol({
                             {stage === "design" && (
                               <>
                                 <RevealButton
-                                  open
+                                  open={buttonsOpen}
                                   label="Next →"
                                   theme="blue"
                                   onClick={(e) => {
@@ -685,7 +688,7 @@ export default function DayCol({
                                   }}
                                 />
                                 <RevealButton
-                                  open
+                                  open={buttonsOpen}
                                   label="Repair"
                                   theme="amber"
                                   onClick={(e) => {
@@ -699,7 +702,7 @@ export default function DayCol({
                             {stage === "production" && (
                               <>
                                 <RevealButton
-                                  open
+                                  open={buttonsOpen}
                                   label="← Prev"
                                   theme="gray"
                                   onClick={(e) => {
@@ -709,7 +712,7 @@ export default function DayCol({
                                   }}
                                 />
                                 <RevealButton
-                                  open
+                                  open={buttonsOpen}
                                   label="Next →"
                                   theme="blue"
                                   onClick={(e) => {
@@ -723,7 +726,7 @@ export default function DayCol({
                             {stage === "finishing" && (
                               <>
                                 <RevealButton
-                                  open
+                                  open={buttonsOpen}
                                   label="← Prev"
                                   theme="gray"
                                   onClick={(e) => {
@@ -733,7 +736,7 @@ export default function DayCol({
                                   }}
                                 />
                                 <RevealButton
-                                  open
+                                  open={buttonsOpen}
                                   label="QC →"
                                   theme="green"
                                   onClick={(e) => {
@@ -752,7 +755,7 @@ export default function DayCol({
                           !r.completed && (
                             <>
                               <RevealButton
-                                open
+                                open={buttonsOpen}
                                 label="← Prev"
                                 theme="gray"
                                 onClick={(e) => {
@@ -762,7 +765,7 @@ export default function DayCol({
                                 }}
                               />
                               <RevealButton
-                                open
+                                open={buttonsOpen}
                                 label="Done"
                                 theme="green"
                                 onClick={(e) => {
@@ -775,7 +778,7 @@ export default function DayCol({
                           )}
                         {r.department === "Metal" && !r.stage2 && (
                           <RevealButton
-                            open
+                            open={buttonsOpen}
                             label={"Stage\u00A02"}
                             theme="purple"
                             onClick={(e) => {
@@ -788,7 +791,7 @@ export default function DayCol({
                         {(r.department !== "General" ||
                           (!stage && !isInQC)) && (
                           <RevealButton
-                            open
+                            open={buttonsOpen}
                             label="Done"
                             theme="green"
                             onClick={(e) => {
