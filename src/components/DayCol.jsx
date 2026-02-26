@@ -254,7 +254,11 @@ export default function DayCol({
   toggleStage2 = guard("toggleStage2", toggleStage2);
 
   const [active, setActive] = useState(null);
+  const [closing, setClosing] = useState(null);
   const [showHistory, setShowHistory] = useState(null);
+  const closeTimerRef = useRef(null);
+  const queuedTargetRef = useRef(undefined);
+  const activeRef = useRef(null);
   const rowRefs = useRef({});
   const columnRef = useRef(null);
   const [dividersReady, setDividersReady] = useState(false);
@@ -425,9 +429,74 @@ export default function DayCol({
     return renderRows(rows, "all");
   };
 
+  useLayoutEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  useLayoutEffect(
+    () => () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    },
+    []
+  );
+
+  const requestActiveRow = useCallback((targetRowId) => {
+    const currentActive = activeRef.current;
+
+    if (closeTimerRef.current) {
+      queuedTargetRef.current = targetRowId;
+      return;
+    }
+
+    if (currentActive === targetRowId) {
+      if (currentActive == null) return;
+      setClosing(currentActive);
+      closeTimerRef.current = setTimeout(() => {
+        closeTimerRef.current = null;
+        setActive(null);
+        setClosing(null);
+        const queued = queuedTargetRef.current;
+        queuedTargetRef.current = undefined;
+        if (queued !== undefined) requestActiveRow(queued);
+      }, 150);
+      return;
+    }
+
+    if (currentActive != null) {
+      setClosing(currentActive);
+      closeTimerRef.current = setTimeout(() => {
+        closeTimerRef.current = null;
+        setActive(targetRowId ?? null);
+        setClosing(null);
+        const queued = queuedTargetRef.current;
+        queuedTargetRef.current = undefined;
+        if (queued !== undefined && queued !== targetRowId)
+          requestActiveRow(queued);
+      }, 150);
+      return;
+    }
+
+    setActive(targetRowId ?? null);
+    setClosing(null);
+  }, []);
+
+  const handleRowToggle = useCallback(
+    (rowId) => {
+      requestActiveRow(rowId);
+    },
+    [requestActiveRow]
+  );
+
+  const closeExpandedRow = useCallback(() => {
+    requestActiveRow(null);
+  }, [requestActiveRow]);
+
   const renderRows = (rowsToRender, stageKey) => {
     return rowsToRender.map((r) => {
-      const open = r.id === active;
+      const isOpen = r.id === active;
+      const isClosing_ = r.id === closing;
+      const showExpanded = isOpen || isClosing_;
+      const showButtons = isOpen && !isClosing_;
       const [num, desc] = split(r.caseNumber);
       const isInQC = r.modifiers?.includes("stage-qc");
 
@@ -451,15 +520,15 @@ export default function DayCol({
         <RowShell
           key={r.id}
           row={r}
-          open={open}
+          open={showExpanded}
           dayRow
           innerRef={(el) => {
             if (el) rowRefs.current[r.id] = el;
           }}
-          onClick={() => setActive(open ? null : r.id)}
+          onClick={() => handleRowToggle(r.id)}
           workflowPending={isWorkflowPending}
         >
-          {showChainIcon && !open && (
+          {showChainIcon && !showExpanded && (
             <motion.span
               initial={{ opacity: 0, x: -4 }}
               animate={{ opacity: 0.4, x: 0 }}
@@ -472,7 +541,7 @@ export default function DayCol({
           )}
 
           <AnimatePresence mode="popLayout" initial={false}>
-            {!open ? (
+            {!showExpanded ? (
               <motion.div
                 key="collapsed"
                 layout
@@ -540,6 +609,7 @@ export default function DayCol({
                 </div>
 
                 {/* Right: buttons */}
+                {showButtons && (
                 <div className="ml-auto flex gap-2 pr-1 items-center flex-shrink-0">
                   <motion.div variants={ACTION_ITEM_VARIANTS}>
                     <RevealButton
@@ -592,7 +662,7 @@ export default function DayCol({
                           onClick={(e) => {
                             e.stopPropagation();
                             unlinkFromWorkflow(r.id);
-                            setActive(null);
+                            closeExpandedRow();
                           }}
                         />
                       </motion.div>
@@ -611,7 +681,7 @@ export default function DayCol({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "production");
-                                    setActive(null);
+                                    closeExpandedRow();
                                   }}
                                 />
                                 <RevealButton
@@ -621,7 +691,7 @@ export default function DayCol({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "finishing", true);
-                                    setActive(null);
+                                    closeExpandedRow();
                                   }}
                                 />
                               </>
@@ -635,7 +705,7 @@ export default function DayCol({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "design");
-                                    setActive(null);
+                                    closeExpandedRow();
                                   }}
                                 />
                                 <RevealButton
@@ -645,7 +715,7 @@ export default function DayCol({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "finishing");
-                                    setActive(null);
+                                    closeExpandedRow();
                                   }}
                                 />
                               </>
@@ -659,7 +729,7 @@ export default function DayCol({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "production");
-                                    setActive(null);
+                                    closeExpandedRow();
                                   }}
                                 />
                                 <RevealButton
@@ -669,7 +739,7 @@ export default function DayCol({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     updateCaseStage(r, "qc");
-                                    setActive(null);
+                                    closeExpandedRow();
                                   }}
                                 />
                               </>
@@ -688,7 +758,7 @@ export default function DayCol({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   updateCaseStage(r, "finishing");
-                                  setActive(null);
+                                  closeExpandedRow();
                                 }}
                               />
                               <RevealButton
@@ -698,7 +768,7 @@ export default function DayCol({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   toggleComplete(r.id, r.completed);
-                                  setActive(null);
+                                  closeExpandedRow();
                                 }}
                               />
                             </>
@@ -711,7 +781,7 @@ export default function DayCol({
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleStage2(r);
-                              setActive(null);
+                              closeExpandedRow();
                             }}
                           />
                         )}
@@ -724,7 +794,7 @@ export default function DayCol({
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleComplete(r.id, r.completed);
-                              setActive(null);
+                              closeExpandedRow();
                             }}
                           />
                         )}
@@ -732,6 +802,7 @@ export default function DayCol({
                     )}
                   </motion.div>
                 </div>
+                )}
               </div>
 
               {/* Bottom: full-width workflow status bar */}

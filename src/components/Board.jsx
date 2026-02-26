@@ -1036,7 +1036,7 @@ export default function Board({
       ) : (
         <LayoutGroup>
           <motion.div
-            layout
+            layout="position"
             transition={{ layout: SPRING }}
             className="flex gap-4 flex-nowrap"
           >
