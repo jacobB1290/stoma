@@ -35,7 +35,8 @@ export function ColumnShell({ children, isToday, metaColor }) {
       : "bg-[#16525F]";
   return (
     <motion.div
-      {...layout}
+      layout="position"
+      transition={{ layout: SPRING }}
       className={clsx("flex-1 flex flex-col p-4 rounded-lg", bg)}
     >
       {children}
