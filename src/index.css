@@ -37,6 +37,7 @@ body {
 
   /* Suppress the gray tap flash on iOS interactive elements */
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 
   /* Push content away from the iOS status bar (black-translucent overlays
      the content) and the home indicator at the bottom.  Without these the
@@ -51,8 +52,8 @@ body {
 
 #root {
   /* Fill the available space inside the safe-area-padded body */
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
 }

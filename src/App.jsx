@@ -573,6 +573,55 @@ function AppShell() {
     return () => clearTimeout(timerId);
   }, []);
 
+  useEffect(() => {
+    const preventGesture = (event) => {
+      event.preventDefault();
+    };
+
+    let lastTouchEnd = 0;
+    const preventMultiTouchZoom = (event) => {
+      if (event.touches && event.touches.length > 1) {
+        event.preventDefault();
+      }
+    };
+
+    const preventDoubleTapZoom = (event) => {
+      const now = Date.now();
+      if (now - lastTouchEnd < 300) {
+        event.preventDefault();
+      }
+      lastTouchEnd = now;
+    };
+
+    const preventCtrlWheelZoom = (event) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+      }
+    };
+
+    document.addEventListener("gesturestart", preventGesture);
+    document.addEventListener("gesturechange", preventGesture);
+    document.addEventListener("gestureend", preventGesture);
+    document.addEventListener("touchmove", preventMultiTouchZoom, {
+      passive: false,
+    });
+    document.addEventListener("touchend", preventDoubleTapZoom, {
+      passive: false,
+    });
+    document.addEventListener("wheel", preventCtrlWheelZoom, {
+      passive: false,
+    });
+
+    return () => {
+      document.removeEventListener("gesturestart", preventGesture);
+      document.removeEventListener("gesturechange", preventGesture);
+      document.removeEventListener("gestureend", preventGesture);
+      document.removeEventListener("touchmove", preventMultiTouchZoom);
+      document.removeEventListener("touchend", preventDoubleTapZoom);
+      document.removeEventListener("wheel", preventCtrlWheelZoom);
+    };
+  }, []);
+
   useEffect(() => localStorage.setItem("lastView", view), [view]);
 
   useEffect(
@@ -1098,12 +1147,17 @@ function Inner({
   return (
     <div
       className={clsx(
-        "flex flex-col h-[100dvh] w-screen overflow-hidden transition-colors",
+        "flex flex-col h-full w-full overflow-hidden transition-colors",
         isLightTheme ? "text-gray-900" : "text-white"
       )}
     >
       {/* Header */}
-      <header className="flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-[75] sticky top-0">
+      <header
+        className={clsx(
+          "flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-[75]",
+          view === "manage" ? "sticky top-0" : "fixed top-0 left-0 right-0"
+        )}
+      >
         <SettingsPill
           onClick={() => setSettingsOpen(true)}
           className="absolute left-4 top-1/2 -translate-y-1/2"
@@ -1322,7 +1376,8 @@ function Inner({
       )}
 
       {/* Main content */}
-      {view === "manage" ? (
+      <div className="flex flex-col flex-1 min-h-0">
+        {view === "manage" ? (
         facultySystemManagerEnabled && manageView === "system" ? (
           <SystemManagementScreen />
         ) : (
@@ -1343,7 +1398,8 @@ function Inner({
           onStatsCalculated={() => setIsCalculatingStats(false)}
           weekOffset={weekOffset}
         />
-      )}
+        )}
+      </div>
     </div>
   );
 }
