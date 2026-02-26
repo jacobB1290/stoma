@@ -755,6 +755,8 @@ function Inner({
   const [isCalculatingStats, setIsCalculatingStats] = useState(false);
   const statsCalculationTimeout = useRef(null);
   const [isMobileView, setIsMobileView] = useState(window.innerWidth < 768);
+  const headerRef = useRef(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
   let activeDept = null;
   if (view === "digital") activeDept = "General";
@@ -771,6 +773,26 @@ function Inner({
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      setHeaderHeight(headerRef.current?.offsetHeight ?? 0);
+    };
+
+    updateHeaderHeight();
+    window.addEventListener("resize", updateHeaderHeight);
+
+    let resizeObserver = null;
+    if (typeof ResizeObserver !== "undefined" && headerRef.current) {
+      resizeObserver = new ResizeObserver(updateHeaderHeight);
+      resizeObserver.observe(headerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updateHeaderHeight);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [view, isMobileView]);
 
   useEffect(() => {
     if (view === "digital") hasBeenOnDigital.current = true;
@@ -1104,6 +1126,7 @@ function Inner({
     >
       {/* Header */}
       <header
+        ref={headerRef}
         className={clsx(
           "flex items-center justify-center gap-4 p-4 bg-[#103E48]/30 shadow backdrop-blur-md rounded-b-xl relative z-[75]",
           view === "manage" ? "sticky top-0" : "fixed top-0 left-0 right-0"
@@ -1327,7 +1350,10 @@ function Inner({
       )}
 
       {/* Main content */}
-      <div className={clsx("flex-1 min-h-0", view !== "manage" && "pt-[88px]")}>
+      <div
+        className="flex flex-col flex-1 min-h-0"
+        style={view !== "manage" ? { paddingTop: headerHeight } : undefined}
+      >
         {view === "manage" ? (
         facultySystemManagerEnabled && manageView === "system" ? (
           <SystemManagementScreen />
