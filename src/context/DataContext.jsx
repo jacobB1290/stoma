@@ -24,6 +24,7 @@ import {
 
 import { userService } from "../services/userService";
 import { buildWorkflowMap } from "../utils/workflowDetection";
+import { deepRefresh } from "../utils/deepRefresh";
 
 /* ────── flag "update" rows ────── */
 function flagUpdatePending(record) {
@@ -35,7 +36,7 @@ function flagUpdatePending(record) {
 
   if (priority === "force") {
     setTimeout(() => {
-      window.location.reload();
+      deepRefresh("force-update-row");
     }, 500);
     return;
   }
@@ -193,12 +194,12 @@ function handleSysCmd(record) {
   markSysCmdProcessed(record.id);
 
   if (cmd === "restart" || cmd === "force-restart") {
-    setTimeout(() => window.location.reload(), 300);
+    setTimeout(() => deepRefresh(`syscmd-${cmd}`), 300);
     return;
   }
 
   if (cmd === "refresh") {
-    setTimeout(() => window.location.reload(), 300);
+    setTimeout(() => deepRefresh("syscmd-refresh"), 300);
     return;
   }
 
@@ -212,7 +213,7 @@ function handleSysCmd(record) {
     } catch {}
 
     if (shouldRestart) {
-      setTimeout(() => window.location.reload(), 300);
+      setTimeout(() => deepRefresh("syscmd-settings-restart"), 300);
     }
     return;
   }

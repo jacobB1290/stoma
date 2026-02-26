@@ -68,14 +68,18 @@ function saveToAllStorages(name) {
     // Set cookie to expire in 1 year
     const expires = new Date();
     expires.setFullYear(expires.getFullYear() + 1);
+    const secureAttr = window.location.protocol === "https:" ? ";Secure" : "";
     document.cookie = `userName=${encodeURIComponent(
       trimmedName
-    )};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
+    )};expires=${expires.toUTCString()};path=/;SameSite=Lax${secureAttr}`;
   } catch (e) {
     console.warn("[Storage] Cookie write failed:", e);
   }
 
-  // 3. IndexedDB (most persistent)
+  // 3. Ask browser for durable storage (best effort)
+  void ensureDurableStorage();
+
+  // 4. IndexedDB (most persistent)
   saveToIndexedDB(trimmedName);
 }
 
@@ -100,6 +104,26 @@ function clearAllStorages() {
 // ============================================
 // COOKIE HELPERS
 // ============================================
+
+
+async function ensureDurableStorage() {
+  try {
+    if (!navigator?.storage?.persist) return false;
+    const alreadyPersisted =
+      typeof navigator.storage.persisted === "function"
+        ? await navigator.storage.persisted()
+        : false;
+
+    if (alreadyPersisted) return true;
+
+    const granted = await navigator.storage.persist();
+    console.log("[Storage] Persistent storage", granted ? "granted" : "not granted");
+    return granted;
+  } catch (e) {
+    console.warn("[Storage] Persistent storage request failed:", e);
+    return false;
+  }
+}
 
 function getCookie(name) {
   const nameEQ = name + "=";
@@ -238,8 +262,9 @@ function setLongCookie(name) {
   try {
     const expires = new Date();
     expires.setFullYear(expires.getFullYear() + 2);
+    const secureAttr = window.location.protocol === "https:" ? ";Secure" : "";
     document.cookie =
-      `userName=${encodeURIComponent(name)};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
+      `userName=${encodeURIComponent(name)};expires=${expires.toUTCString()};path=/;SameSite=Lax${secureAttr}`;
   } catch { /* ignore */ }
 }
 
@@ -328,6 +353,9 @@ export function initUserStorage() {
 
       // Ensure device ID is initialised (creates it if first run)
       await getOrCreateDeviceId();
+
+      // Ask browser to keep local data durable across cleanups/pressure.
+      await ensureDurableStorage();
 
       return true;
     })();
@@ -434,19 +462,20 @@ export async function reportActive(reason = "unknown") {
       settings,
     };
 
-    // Try enhanced payload first, then fall back for older DB schemas.
+    // Prefer per-device rows so one shared account doesn't overwrite others.
+    // Fallback to older schemas that only support user_name uniqueness.
     let error = null;
-    {
+
+    const conflictTargets = ["device_id", "user_name,device_id", "user_name"];
+
+    for (const target of conflictTargets) {
+      const payload = target === "user_name" ? basePayload : { ...basePayload, device_info };
       const res = await db
         .from("active_devices")
-        .upsert({ ...basePayload, device_info }, { onConflict: "user_name" });
+        .upsert(payload, { onConflict: target });
+
       error = res.error || null;
-    }
-    if (error) {
-      const res2 = await db
-        .from("active_devices")
-        .upsert(basePayload, { onConflict: "user_name" });
-      error = res2.error || null;
+      if (!error) break;
     }
 
     if (error) console.error("Failed to report active:", error);

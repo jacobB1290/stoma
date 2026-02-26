@@ -6,6 +6,7 @@ import "./styles/glass.css"; // existing
 import "./flash.css"; // existing
 import "./index.css"; // Tailwind base + app globals
 import { configureLLM } from "./qa/LLMChatService";
+import { deepRefresh } from "./utils/deepRefresh";
 
 // API key is read from the REACT_APP_OPENAI_API_KEY environment variable.
 // Set it in Vercel → Project Settings → Environment Variables,
@@ -50,7 +51,7 @@ if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (!refreshing) {
         refreshing = true;
-        window.location.reload();
+        deepRefresh("service-worker-controller-change");
       }
     });
   });

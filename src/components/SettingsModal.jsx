@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 import { useUser } from "../context/UserContext";
 import { useLiteMode } from "../LiteModePerformancePatch";
+import { deepRefresh } from "../utils/deepRefresh";
 
 /* ─── fluid animation presets ─── */
 const SHEET = {
@@ -428,7 +429,7 @@ export default function SettingsModal({
         localStorage.getItem("forceUpdate") === "true"
       ) {
         localStorage.removeItem("forceUpdate");
-        window.location.reload();
+        deepRefresh("settings-force-update");
         return;
       }
 
@@ -440,7 +441,7 @@ export default function SettingsModal({
           "update-pending",
           "update-critical"
         );
-        window.location.reload();
+        deepRefresh("settings-force-update");
       } else {
         setUpdatePending(true);
         setCard("sys");
@@ -804,7 +805,7 @@ export default function SettingsModal({
                             setShowNotes(!showNotes);
                           } else {
                             clearUpdateFlags();
-                            window.location.reload();
+                            deepRefresh("settings-force-update");
                           }
                         }}
                         className="w-full p-3 flex items-center gap-3"
@@ -936,7 +937,7 @@ export default function SettingsModal({
                               <button
                                 onClick={() => {
                                   clearUpdateFlags();
-                                  window.location.reload();
+                                  deepRefresh("settings-force-update");
                                 }}
                                 className={`w-full mt-3 py-2 rounded-lg font-medium text-sm text-white ${
                                   updatePriority === "high"
@@ -957,7 +958,7 @@ export default function SettingsModal({
                 <ActionBtn
                   onClick={() => {
                     setSpin(true);
-                    setTimeout(() => window.location.reload(), 100);
+                    setTimeout(() => deepRefresh("settings-refresh-button"), 100);
                   }}
                   className="flex items-center justify-center gap-2"
                 >
