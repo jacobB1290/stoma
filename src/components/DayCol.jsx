@@ -616,7 +616,7 @@ export default function DayCol({
                                 />
                                 <RevealButton
                                   open
-                                  label="Repair"
+                                  label="Repair ↓"
                                   theme="amber"
                                   onClick={(e) => {
                                     e.stopPropagation();
