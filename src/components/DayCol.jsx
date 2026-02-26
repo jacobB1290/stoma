@@ -35,7 +35,6 @@ const ACTION_STACK_VARIANTS = {
   },
 };
 
-const ROW_SWITCH_CLOSE_MS = 110;
 
 const ACTION_ITEM_VARIANTS = {
   open: {
@@ -256,11 +255,7 @@ export default function DayCol({
   toggleStage2 = guard("toggleStage2", toggleStage2);
 
   const [active, setActive] = useState(null);
-  const [closing, setClosing] = useState(null);
   const [showHistory, setShowHistory] = useState(null);
-  const closeTimerRef = useRef(null);
-  const queuedTargetRef = useRef(undefined);
-  const activeRef = useRef(null);
   const rowRefs = useRef({});
   const columnRef = useRef(null);
   const [dividersReady, setDividersReady] = useState(false);
@@ -431,75 +426,20 @@ export default function DayCol({
     return renderRows(rows, "all");
   };
 
-  useLayoutEffect(() => {
-    activeRef.current = active;
-  }, [active]);
-
-  useLayoutEffect(
-    () => () => {
-      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    },
-    []
-  );
-
-  const requestActiveRow = useCallback((targetRowId) => {
-    const currentActive = activeRef.current;
-
-    if (closeTimerRef.current) {
-      queuedTargetRef.current = targetRowId;
-      return;
-    }
-
-    if (currentActive === targetRowId) {
-      if (currentActive == null) return;
-      setClosing(currentActive);
-      closeTimerRef.current = setTimeout(() => {
-        closeTimerRef.current = null;
-        setActive(null);
-        setClosing(null);
-        const queued = queuedTargetRef.current;
-        queuedTargetRef.current = undefined;
-        if (queued !== undefined) requestActiveRow(queued);
-      }, ROW_SWITCH_CLOSE_MS);
-      return;
-    }
-
-    if (currentActive != null) {
-      setClosing(currentActive);
-      closeTimerRef.current = setTimeout(() => {
-        closeTimerRef.current = null;
-        setActive(targetRowId ?? null);
-        setClosing(null);
-        const queued = queuedTargetRef.current;
-        queuedTargetRef.current = undefined;
-        if (queued !== undefined && queued !== targetRowId)
-          requestActiveRow(queued);
-      }, ROW_SWITCH_CLOSE_MS);
-      return;
-    }
-
-    setActive(targetRowId ?? null);
-    setClosing(null);
+  const handleRowToggle = useCallback((rowId) => {
+    setActive((currentActive) => (currentActive === rowId ? null : rowId));
   }, []);
 
-  const handleRowToggle = useCallback(
-    (rowId) => {
-      requestActiveRow(rowId);
-    },
-    [requestActiveRow]
-  );
-
   const closeExpandedRow = useCallback(() => {
-    requestActiveRow(null);
-  }, [requestActiveRow]);
+    setActive(null);
+  }, []);
 
   const renderRows = (rowsToRender, stageKey) => {
     return rowsToRender.map((r) => {
-      const isOpen = r.id === active;
-      const isClosing_ = r.id === closing;
-      const showExpanded = isOpen || isClosing_;
-      const buttonsOpen = isOpen && !isClosing_;
-      const showButtons = isOpen || isClosing_;
+      const open = r.id === active;
+      const buttonsOpen = open;
+      const showExpanded = open;
+      const showButtons = open;
       const [num, desc] = split(r.caseNumber);
       const isInQC = r.modifiers?.includes("stage-qc");
 
