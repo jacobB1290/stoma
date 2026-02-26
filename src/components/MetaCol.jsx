@@ -538,7 +538,6 @@ export default function MetaCol({
   showStageDividers = false,
 }) {
   const [active, setActive] = useState(null);
-  const [closing, setClosing] = useState(null);
   const [showHistory, setShowHistory] = useState(null);
   const [releasePopover, setReleasePopover] = useState(null);
   const [releaseButtonRect, setReleaseButtonRect] = useState(null);
@@ -563,21 +562,7 @@ export default function MetaCol({
 
   const handleRowClick = (rowId, isCurrentlyOpen) => {
     if (releasePopover?.id === rowId) return;
-    if (isCurrentlyOpen) {
-      setClosing(rowId);
-      setTimeout(() => {
-        setActive(null);
-        setClosing(null);
-      }, 150);
-    } else {
-      if (active) {
-        setClosing(active);
-        setTimeout(() => {
-          setActive(rowId);
-          setClosing(null);
-        }, 150);
-      } else setActive(rowId);
-    }
+    setActive(isCurrentlyOpen ? null : rowId);
     setReleasePopover(null);
     setReleaseButtonRect(null);
   };
@@ -585,13 +570,7 @@ export default function MetaCol({
   const handleCancel = () => {
     setReleasePopover(null);
     setReleaseButtonRect(null);
-    if (active) {
-      setClosing(active);
-      setTimeout(() => {
-        setActive(null);
-        setClosing(null);
-      }, 150);
-    }
+    setActive(null);
   };
 
   const handleReleaseConfirm = async (updates) => {
@@ -713,9 +692,8 @@ export default function MetaCol({
   const renderRows = (rowsToRender) => {
     return rowsToRender.map((r) => {
       const isOpen = r.id === active;
-      const isClosing_ = r.id === closing;
-      const showExpanded = isOpen || isClosing_;
-      const showButtons = isOpen && !isClosing_;
+      const showExpanded = isOpen;
+      const showButtons = isOpen;
 
       const [num, desc] = split(r.caseNumber);
       const isStage2 = r.modifiers?.includes("stage2");

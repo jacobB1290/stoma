@@ -13,7 +13,17 @@ export const FAST_EXIT = {
   mass: 0.1,
 };
 export const TWEEN = { type: "tween", ease: "easeOut", duration: 0.25 };
-export const layout = { layout: true, transition: { layout: SPRING } };
+
+/* Overdamped spring for row height/position layout animations.
+   Damping ratio ≈ 1.58 (> 1) — settles immediately with no oscillation,
+   preventing the snap-back-and-forward when switching rows quickly. */
+export const LAYOUT_SPRING = {
+  type: "spring",
+  stiffness: 500,
+  damping: 50,
+  mass: 0.5,
+};
+export const layout = { layout: true, transition: { layout: LAYOUT_SPRING } };
 
 /* --pulse-clock is now driven by FlashContext's RAF loop (see FlashContext.jsx).
    This stale setInterval-based clock has been removed to prevent double-writing
