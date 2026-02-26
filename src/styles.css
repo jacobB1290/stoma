@@ -729,6 +729,18 @@ html {
   }
 }
 
+/*
+  iOS Home Screen (standalone) already receives safe-area offset via <body>
+  in src/index.css. Applying it again here pushes the add-case card too low.
+  Keep the current behavior elsewhere and only neutralize the duplicate offset
+  for standalone mode.
+*/
+@media (display-mode: standalone) {
+  .form-container-wrapper {
+    padding-top: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *:not(.new-account-sheen):not(.new-account-sheen *) {
     animation-duration: 0.01ms !important;
