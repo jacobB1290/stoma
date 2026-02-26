@@ -425,6 +425,10 @@ export default function DayCol({
     return renderRows(rows, "all");
   };
 
+  const handleRowToggle = useCallback((rowId) => {
+    setActive((currentActive) => (currentActive === rowId ? null : rowId));
+  }, []);
+
   const renderRows = (rowsToRender, stageKey) => {
     return rowsToRender.map((r) => {
       const open = r.id === active;
@@ -456,7 +460,7 @@ export default function DayCol({
           innerRef={(el) => {
             if (el) rowRefs.current[r.id] = el;
           }}
-          onClick={() => setActive(open ? null : r.id)}
+          onClick={() => handleRowToggle(r.id)}
           workflowPending={isWorkflowPending}
         >
           {showChainIcon && !open && (
