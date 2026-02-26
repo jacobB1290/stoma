@@ -37,6 +37,7 @@ body {
 
   /* Suppress the gray tap flash on iOS interactive elements */
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 
   /* Push content away from the iOS status bar (black-translucent overlays
      the content) and the home indicator at the bottom.  Without these the

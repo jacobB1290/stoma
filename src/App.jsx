@@ -573,6 +573,55 @@ function AppShell() {
     return () => clearTimeout(timerId);
   }, []);
 
+  useEffect(() => {
+    const preventGesture = (event) => {
+      event.preventDefault();
+    };
+
+    let lastTouchEnd = 0;
+    const preventMultiTouchZoom = (event) => {
+      if (event.touches && event.touches.length > 1) {
+        event.preventDefault();
+      }
+    };
+
+    const preventDoubleTapZoom = (event) => {
+      const now = Date.now();
+      if (now - lastTouchEnd < 300) {
+        event.preventDefault();
+      }
+      lastTouchEnd = now;
+    };
+
+    const preventCtrlWheelZoom = (event) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+      }
+    };
+
+    document.addEventListener("gesturestart", preventGesture);
+    document.addEventListener("gesturechange", preventGesture);
+    document.addEventListener("gestureend", preventGesture);
+    document.addEventListener("touchmove", preventMultiTouchZoom, {
+      passive: false,
+    });
+    document.addEventListener("touchend", preventDoubleTapZoom, {
+      passive: false,
+    });
+    document.addEventListener("wheel", preventCtrlWheelZoom, {
+      passive: false,
+    });
+
+    return () => {
+      document.removeEventListener("gesturestart", preventGesture);
+      document.removeEventListener("gesturechange", preventGesture);
+      document.removeEventListener("gestureend", preventGesture);
+      document.removeEventListener("touchmove", preventMultiTouchZoom);
+      document.removeEventListener("touchend", preventDoubleTapZoom);
+      document.removeEventListener("wheel", preventCtrlWheelZoom);
+    };
+  }, []);
+
   useEffect(() => localStorage.setItem("lastView", view), [view]);
 
   useEffect(
