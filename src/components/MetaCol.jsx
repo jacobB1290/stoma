@@ -72,6 +72,13 @@ const ReleasePopover = ({ caseItem, onConfirm, onCancel, anchorRect }) => {
   const [dueDate, setDueDate] = useState(
     caseItem.due ? new Date(caseItem.due).toISOString().split("T")[0] : ""
   );
+  const todayISO = (() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, "0");
+    const d = String(today.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  })();
   const popoverRef = useRef(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
@@ -218,6 +225,7 @@ const ReleasePopover = ({ caseItem, onConfirm, onCancel, anchorRect }) => {
           </label>
           <input
             type="date"
+            min={todayISO}
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
             onClick={(e) => e.stopPropagation()}

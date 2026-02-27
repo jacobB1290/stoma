@@ -1491,8 +1491,10 @@ export default function Editor({ data, deptDefault }) {
 
   const todayISO = useMemo(() => {
     const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d.toISOString().slice(0, 10);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
   }, []);
 
   const handleDueChange = useCallback(
@@ -1749,14 +1751,16 @@ export default function Editor({ data, deptDefault }) {
       if (!due) {
         setDue(defaultDueDate);
       }
+
+      dateInputRef.current.focus();
+
       try {
         if (typeof dateInputRef.current.showPicker === "function") {
           dateInputRef.current.showPicker();
         }
       } catch (error) {
-        console.log("showPicker not available, falling back to focus");
+        // Safari/macOS can throw for showPicker; keep the native focused input behavior.
       }
-      dateInputRef.current.focus();
     }
   }, [due, defaultDueDate]);
 
@@ -2865,15 +2869,14 @@ export default function Editor({ data, deptDefault }) {
                       </div>
                     )}
                   </div>
-                  <div
-                    className="relative cursor-pointer"
-                    onClick={handleDateClick}
-                  >
+                  <div className="relative cursor-pointer">
                     <input
                       ref={dateInputRef}
                       type="date"
                       data-input-id="date"
                       value={due}
+                      min={todayISO}
+                      onClick={handleDateClick}
                       onFocus={() => {
                         handleFocusChange("date");
                         // Auto-populate with default date if empty (only if automations enabled)
@@ -3229,7 +3232,7 @@ export default function Editor({ data, deptDefault }) {
             <option value="Metal">Metal</option>
           </select>
         </div>
-        <div>
+        <div className="relative">
           <input
             data-filter-id="search"
             value={search}
@@ -3237,8 +3240,21 @@ export default function Editor({ data, deptDefault }) {
             onBlur={() => setFocusedFilter(null)}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search cases..."
-            className="filter-input filter-shadow"
+            className={clsx(
+              "filter-input filter-shadow",
+              search && "pr-8"
+            )}
           />
+          {search && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600"
+            >
+              ×
+            </button>
+          )}
         </div>
       </motion.div>
       <motion.div
