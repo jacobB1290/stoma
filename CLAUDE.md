@@ -8,7 +8,7 @@ This file provides context for AI assistants working in this repository.
 
 **Stomaboard** is a React-based case management and workflow optimization system for a dental/medical prosthetics business. It tracks cases through multi-stage production workflows, provides real-time efficiency analytics, and includes an AI-powered Q&A interface backed by OpenAI.
 
-- **App version:** 10.5 (see `src/constants.js`)
+- **App version source:** `package.json` via `src/version.js` (currently starts at `11.0.0`)
 - **Deployment target:** Vercel
 - **Backend:** Supabase (PostgreSQL)
 - **AI integration:** OpenAI GPT API via `src/qa/LLMChatService.js`
@@ -216,8 +216,39 @@ Two animation libraries are in use — use the right one for the right job:
 
 ## Deployment
 
-Deployed on **Vercel**. No CI/CD configuration files are present in the repo. Vercel auto-deploys from the connected branch on push.
+Deployed on **Vercel** with GitHub Actions release automation (`.github/workflows/version-bump.yml`). Vercel auto-deploys from the connected branch on push.
 
-Build command: `CI=false react-scripts build`
+Build command: `node scripts/generate-changelog.mjs && CI=false react-scripts build`
 Output directory: `build/`
 Environment variables: configured in Vercel dashboard, not in repo files.
+
+
+---
+
+## Automated Versioning + Update Notifier (Important)
+
+This repository now uses a fully automated release metadata flow:
+
+1. **Single source of truth:** `package.json` `version`
+2. **Runtime version export:** `src/version.js` (`APP_VERSION`, `compareVersions`)
+3. **Build-time metadata generation:** `scripts/generate-changelog.mjs`
+4. **Generated artifacts:** `public/version.json`, `public/changelog.json`
+5. **Runtime polling:** `src/services/versionCheckService.js` polls `/version.json` every 60s
+6. **Notifier trigger:** Dispatches `window` `update-available` event consumed by existing settings/update UI
+
+### Priority model (standard vs urgent)
+- Metadata `priority: "standard"` -> UI notifier priority `"normal"`
+- Metadata `priority: "urgent"` -> UI notifier priority `"high"`
+- `"force"` remains an exceptional/manual path only
+
+### Semantic version bump model
+GitHub Action `.github/workflows/version-bump.yml` determines bump from commit subject:
+- contains `BREAKING` -> **major**
+- starts with `feat|feature|new` -> **minor**
+- otherwise -> **patch**
+
+### AI assistant policy (Codex/Claude)
+- Never hardcode app version in components or services.
+- Always read app version through `src/version.js`.
+- If release metadata format changes, update both generator and polling consumer in the same PR.
+- Keep docs in sync (`AGENTS.md` + `CLAUDE.md`) whenever release automation rules change.
