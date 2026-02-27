@@ -1494,8 +1494,7 @@ export default function Editor({ data, deptDefault }) {
 
   const handleDueChange = useCallback(
     (nextDue) => {
-      const normalizedDue = nextDue && nextDue < todayISO ? todayISO : nextDue;
-      setDue(normalizedDue);
+      setDue(nextDue);
 
       // Mark that the user explicitly touched the due date
       dueTouchedRef.current = true;
@@ -1507,7 +1506,7 @@ export default function Editor({ data, deptDefault }) {
       if (disableAutomations) return;
 
       // If user sets due date to today, auto-trigger Priority + animation
-      if (normalizedDue && normalizedDue === todayISO && !priority) {
+      if (nextDue && nextDue === todayISO && !priority) {
         setPriority(true);
         setPriorityDetected(true);
 
@@ -1519,7 +1518,7 @@ export default function Editor({ data, deptDefault }) {
       }
 
       // If due is within 2 business days (tomorrow/next business day), auto-trigger Rush + animation
-      const bd = businessDaysBetweenISO(todayISO, normalizedDue);
+      const bd = businessDaysBetweenISO(todayISO, nextDue);
       if (typeof bd === "number" && bd >= 1 && bd <= 2 && !rush) {
         setRush(true);
         setRushDetected(true);
