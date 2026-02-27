@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { SPRING } from "../animationEngine";
 import { db } from "../services/caseService";
 import { fetchActiveUsers } from "../services/userService";
-import { APP_VERSION } from "../constants";
+import { APP_VERSION } from "../version";
 import { getCanonicalName } from "../utils/nameNormalization";
 
 export default function UpdateModal({ open, onClose }) {

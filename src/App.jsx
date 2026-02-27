@@ -23,6 +23,7 @@ import { LiteModeProvider } from "./LiteModePerformancePatch";
 import Editor from "./components/Editor";
 import SettingsModal from "./components/SettingsModal";
 import SystemManagementScreen from "./components/SystemManagementScreen";
+import { startVersionPolling } from "./services/versionCheckService";
 
 /* =============================
    Week Navigation Component
@@ -571,6 +572,11 @@ function AppShell() {
   useEffect(() => {
     const timerId = scheduleMidnightRefresh();
     return () => clearTimeout(timerId);
+  }, []);
+
+  useEffect(() => {
+    const stopPolling = startVersionPolling();
+    return () => stopPolling();
   }, []);
 
   useEffect(() => localStorage.setItem("lastView", view), [view]);
