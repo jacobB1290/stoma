@@ -2868,7 +2868,7 @@ export default function Editor({ data, deptDefault }) {
                     />
                     {!due && (
                       <div className="pointer-events-none absolute inset-0 flex items-center px-3 z-10">
-                        <span className="text-gray-400 text-sm">Due Date</span>
+                        <span className="text-gray-400 text-sm">MM/DD/YYYY</span>
                       </div>
                     )}
                   </div>
