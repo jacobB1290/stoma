@@ -227,7 +227,7 @@ const ReleasePopover = ({ caseItem, onConfirm, onCancel, anchorRect }) => {
             type="date"
             min={todayISO}
             value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
+            onChange={(e) => setDueDate(e.target.value && e.target.value < todayISO ? todayISO : e.target.value)}
             onClick={(e) => e.stopPropagation()}
             className={clsx(
               "w-full px-2.5 py-1.5 rounded-lg border text-sm focus:outline-none transition-all",

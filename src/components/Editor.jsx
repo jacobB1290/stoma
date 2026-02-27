@@ -440,11 +440,6 @@ export default function Editor({ data, deptDefault }) {
     return 4;
   }, [dept]);
 
-  const defaultDueDate = useMemo(
-    () => getBusinessDaysAhead(defaultDueDaysByDept),
-    [getBusinessDaysAhead, defaultDueDaysByDept]
-  );
-
   const setDueAuto = useCallback(
     (days, reason) => {
       const iso = getBusinessDaysAhead(days);
@@ -1499,7 +1494,8 @@ export default function Editor({ data, deptDefault }) {
 
   const handleDueChange = useCallback(
     (nextDue) => {
-      setDue(nextDue);
+      const normalizedDue = nextDue && nextDue < todayISO ? todayISO : nextDue;
+      setDue(normalizedDue);
 
       // Mark that the user explicitly touched the due date
       dueTouchedRef.current = true;
@@ -1511,7 +1507,7 @@ export default function Editor({ data, deptDefault }) {
       if (disableAutomations) return;
 
       // If user sets due date to today, auto-trigger Priority + animation
-      if (nextDue && nextDue === todayISO && !priority) {
+      if (normalizedDue && normalizedDue === todayISO && !priority) {
         setPriority(true);
         setPriorityDetected(true);
 
@@ -1523,7 +1519,7 @@ export default function Editor({ data, deptDefault }) {
       }
 
       // If due is within 2 business days (tomorrow/next business day), auto-trigger Rush + animation
-      const bd = businessDaysBetweenISO(todayISO, nextDue);
+      const bd = businessDaysBetweenISO(todayISO, normalizedDue);
       if (typeof bd === "number" && bd >= 1 && bd <= 2 && !rush) {
         setRush(true);
         setRushDetected(true);
@@ -1744,25 +1740,6 @@ export default function Editor({ data, deptDefault }) {
     },
     [focusedInput]
   );
-
-  const handleDateClick = useCallback(() => {
-    if (dateInputRef.current) {
-      // Auto-populate with default date if empty
-      if (!due) {
-        setDue(defaultDueDate);
-      }
-
-      dateInputRef.current.focus();
-
-      try {
-        if (typeof dateInputRef.current.showPicker === "function") {
-          dateInputRef.current.showPicker();
-        }
-      } catch (error) {
-        // Safari/macOS can throw for showPicker; keep the native focused input behavior.
-      }
-    }
-  }, [due, defaultDueDate]);
 
   const renderDuplicateNotification = () => {
     if (!showDuplicateWarning || duplicates.length === 0) return null;
@@ -2876,7 +2853,6 @@ export default function Editor({ data, deptDefault }) {
                       data-input-id="date"
                       value={due}
                       min={todayISO}
-                      onClick={handleDateClick}
                       onFocus={() => {
                         handleFocusChange("date");
                         // Auto-populate with default date if empty (only if automations enabled)
