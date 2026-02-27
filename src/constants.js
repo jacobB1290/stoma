@@ -1,2 +1,3 @@
 // constants.js
-export const APP_VERSION = "10.5";
+// APP_VERSION now resolves from package.json via src/version.js.
+export { APP_VERSION } from "./version";
