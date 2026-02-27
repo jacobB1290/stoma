@@ -472,26 +472,11 @@
   }
 }
 
-/* Date input fixes */
+/* Date input fixes (layout only, keep native platform picker UI) */
 .date-input {
-  color-scheme: light;
   min-height: 41px !important;
   line-height: normal;
   color: var(--gray-900);
-}
-
-.date-input::-webkit-datetime-edit-fields-wrapper {
-  padding: 0;
-}
-
-.date-input::-webkit-calendar-picker-indicator {
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.2s ease;
-}
-
-.date-input::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
 }
 
 /* Hide date text when empty to show placeholder */
