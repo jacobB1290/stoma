@@ -22,7 +22,7 @@ import CaseTable from "./CaseTable";
 import clsx from "clsx";
 import "../styles.css";
 import { checkForDuplicates } from "../services/caseService";
-import { APP_VERSION } from "../constants";
+import { APP_VERSION } from "../version";
 const AllHistoryModal = lazy(() => import("./AllHistoryModal"));
 const DeleteCompletedModal = lazy(() => import("./DeleteCompletedModal"));
 const UpdateModal = lazy(() => import("./UpdateModal"));

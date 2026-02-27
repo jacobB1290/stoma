@@ -1,5 +1,5 @@
 import { db } from "./caseService";
-import { APP_VERSION } from "../constants";
+import { APP_VERSION } from "../version";
 import {
   getCanonicalName,
   getNameVariations,
