@@ -13,7 +13,7 @@ import clsx from "clsx";
 import { db } from "../services/caseService";
 import { fetchActiveUsers } from "../services/userService";
 import { useMut } from "../context/DataContext";
-import { APP_VERSION } from "../constants";
+import { APP_VERSION } from "../version";
 import { calculateStageStatistics } from "../utils/stageTimeCalculations";
 import { calculateDepartmentEfficiency } from "../utils/efficiencyCalculations";
 import { formatHours } from "../utils/caseRiskPredictions";
