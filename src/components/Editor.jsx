@@ -1740,6 +1740,17 @@ export default function Editor({ data, deptDefault }) {
     [focusedInput]
   );
 
+  const handleDateInputClick = useCallback(() => {
+    const dateInput = dateInputRef.current;
+    if (!dateInput) return;
+
+    dateInput.focus();
+
+    if (typeof dateInput.showPicker === "function") {
+      dateInput.showPicker();
+    }
+  }, []);
+
   const renderDuplicateNotification = () => {
     if (!showDuplicateWarning || duplicates.length === 0) return null;
     const notificationContent = (
@@ -2845,7 +2856,10 @@ export default function Editor({ data, deptDefault }) {
                       </div>
                     )}
                   </div>
-                  <div className="relative cursor-pointer">
+                  <div
+                    className="relative cursor-pointer"
+                    onClick={handleDateInputClick}
+                  >
                     <input
                       ref={dateInputRef}
                       type="date"
@@ -2863,10 +2877,10 @@ export default function Editor({ data, deptDefault }) {
                       onChange={(e) => handleDueChange(e.target.value)}
                       className={clsx(
                         "form-input date-input cursor-pointer",
-                        !due && "date-empty"
+                        !due && focusedInput !== "date" && "date-empty"
                       )}
                     />
-                    {!due && (
+                    {!due && focusedInput !== "date" && (
                       <div className="pointer-events-none absolute inset-0 flex items-center px-3 z-10">
                         <span className="text-gray-400 text-sm">MM/DD/YYYY</span>
                       </div>
