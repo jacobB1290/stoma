@@ -30,6 +30,7 @@ const TEXT_SIZE_MOBILE = 10;
 
 const DESKTOP_SCALE = 1 + TEXT_SIZE_DESKTOP / 100;
 const MOBILE_SCALE = 1 + TEXT_SIZE_MOBILE / 100;
+const gentleSpring = { type: "spring", stiffness: 200, damping: 26 };
 
 /* ───────── bright glass tint helpers ───────── */
 const TINT = {
@@ -1074,35 +1075,23 @@ export default function AllHistoryModal({ onClose }) {
           >
             {/* Animated blurred backdrop */}
             <motion.div
-              className="absolute inset-0 pointer-events-auto"
+              className="absolute inset-0 pointer-events-auto backdrop-blur-sm"
               onClick={(e) => {
                 if (!selectedCase) {
-                  // Only close on backdrop click if no case history
                   handleClose();
                 }
               }}
-              initial={{
-                backdropFilter: "blur(0px)",
-                WebkitBackdropFilter: "blur(0px)",
-                backgroundColor: "rgba(0, 0, 0, 0)",
-              }}
-              animate={{
-                backdropFilter: "blur(2px)",
-                WebkitBackdropFilter: "blur(2px)",
-                backgroundColor: "rgba(0, 0, 0, 0.2)",
-              }}
-              exit={{
-                backdropFilter: "blur(0px)",
-                WebkitBackdropFilter: "blur(0px)",
-                backgroundColor: "rgba(0, 0, 0, 0)",
-              }}
-              transition={{ duration: 0.5, ease: "easeOut" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              style={{ backgroundColor: "rgba(0,0,0,0.2)" }}
             />
 
             {/* Main popup */}
             <AnimatePresence>
               {isReady && (
-                <motion.div className="fixed inset-0 flex items-center justify-center pointer-events-none p-4">
+                <motion.div className="fixed inset-0 flex items-center justify-center pointer-events-none p-2 sm:p-4">
                   <motion.div
                     ref={modalRef}
                     className="w-full max-w-5xl pointer-events-auto overflow-hidden rounded-2xl border border-white/30 shadow-2xl flex flex-col"
@@ -1119,6 +1108,7 @@ export default function AllHistoryModal({ onClose }) {
                       },
                       opacity: { duration: 0.2, ease: "easeOut" },
                       borderRadius: { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
+                      layout: { ...gentleSpring, duration: 0.4 },
                     }}
                     style={modalStyle}
                     onAnimationComplete={() => {
