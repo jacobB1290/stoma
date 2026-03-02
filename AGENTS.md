@@ -44,7 +44,43 @@ PR merged to main (use squash-and-merge so the commit subject = PR title)
 Without `GH_PAT`, the Action's `git push` will fail and the version will never bump.
 Without squash-and-merge, merge commit subjects ("Merge pull request #N…") never match `feat:` or `BREAKING`, so every release is a patch regardless of actual content.
 
-## Standard vs Urgent updates
+## How to use the update notifier system
+
+### Controlling version bump + notifier via commit messages
+
+Set the PR title (squash-and-merge commit subject) deliberately:
+
+| Intent | Commit/PR title pattern | Result |
+|---|---|---|
+| Bug fix, small change | Anything not matching below | `patch` bump, `normal` notifier |
+| New feature | Starts with `feat:`, `feat(`, `feature:`, `feature(`, `new:`, or `new(` | `minor` bump, `normal` notifier |
+| Breaking change | Contains `BREAKING` | `major` bump, `normal` notifier |
+| Urgent fix (any bump type) | Contains `urgent`, `hotfix`, `critical`, or `security` | same bump type + `high` notifier (flashing alert) |
+
+Examples:
+```
+fix: correct rush case sorting              → 11.0.1, normal notifier
+feat: add weekly efficiency export          → 11.1.0, normal notifier
+fix: critical null pointer in Editor        → 11.0.1, HIGH notifier (flashing)
+feat: BREAKING redesign case schema         → 12.0.0, normal notifier
+fix: urgent security patch in auth layer    → 11.0.1, HIGH notifier (flashing)
+```
+
+### Two trigger paths
+
+**Automatic (every deploy):** `src/services/versionCheckService.js` polls `/version.json` every 60s on every client. Fires `update-available` when server version > `APP_VERSION` baked in the bundle. Guarded by `localStorage.lastNotifiedVersion` so each version notifies each user only once.
+
+**Manual (admin UI):** Inserting a `casenumber: "update"` row into the `cases` table triggers `DataContext`'s existing Supabase realtime subscription on every connected tab, which fires the same `update-available` event locally. The row is deleted immediately after processing. Use this path for instant notification with custom release notes, not for version control.
+
+### Notifier levels
+
+| Priority | User experience |
+|---|---|
+| `normal` | Quiet update banner |
+| `high` | Flashing alert + `update-critical` CSS class on `<html>` |
+| `force` | Immediate hard-reload on all tabs, cache cleared, no user prompt — manual admin action only |
+
+### Standard vs Urgent updates
 - `standard` release priority => notifier priority `normal`
 - `urgent` release priority => notifier priority `high`
 - `force` should be reserved for exceptional break/fix scenarios only

@@ -164,10 +164,17 @@
   animation-delay: var(--pulse-clock, 0s);
 }
 
-/* -------------------------------------------------------------- 
+/* --------------------------------------------------------------
    UPDATE COMMAND flash helpers
 -------------------------------------------------------------- */
-.update-pending button[aria-label="Settings"],
+
+/* Settings icon flashes only for minor / major / manual updates.
+   Patch releases are silent on the icon (update still visible in modal). */
+.update-should-flash button[aria-label="Settings"] {
+  animation: gentle-flash 1.5s ease-in-out infinite;
+  animation-delay: var(--pulse-clock, 0s);
+}
+
 .update-pending .flash-system,
 .update-pending .flash-update {
   animation: gentle-flash 1.5s ease-in-out infinite;

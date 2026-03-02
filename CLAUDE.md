@@ -288,9 +288,43 @@ The Action inspects **all non-merge commit subjects** in the push range (`git lo
 
 `public/version.json` and `public/changelog.json` are **build-time outputs** listed in `.gitignore`. Never commit them manually. The changelog range is scoped from the most recent git tag to `HEAD`; each version bump creates a tag so the next changelog only includes new commits.
 
-### AI assistant policy (Codex/Claude)
+### How to use the system
+
+#### Controlling version bump type via commit messages
+
+The GitHub Action reads commit subjects automatically — no manual version editing ever needed.
+
+| Goal | Write your commit/PR title like this |
+|---|---|
+| Patch release `11.0.0 → 11.0.1` | `fix: correct due-date calculation` *(any subject not matching below)* |
+| Minor release `11.0.0 → 11.1.0` | `feat: add bulk case export` or `feature: ...` or `new: ...` |
+| Major release `11.0.0 → 12.0.0` | Include the word `BREAKING` anywhere: `feat: BREAKING redesign case schema` |
+| Urgent / high-priority notifier | Include `urgent`, `hotfix`, `critical`, or `security`: `fix: critical null pointer in Editor` |
+
+With squash-and-merge the **PR title** is the commit subject the Action reads. Set it deliberately.
+
+#### What the three notifier levels look like for users
+
+| Level | How it's triggered | What the user sees |
+|---|---|---|
+| `normal` | Standard release, or manual "Standard Update" push | Quiet update banner in the UI |
+| `high` | Commit contains `urgent`/`hotfix`/`critical`/`security`, or manual "High Priority" push | Flashing alert, `update-critical` CSS class added to `<html>` |
+| `force` | Manual "Force Reload" push only — **never set automatically** | Every open tab is immediately hard-refreshed with no prompt (cache cleared, service worker updated) |
+
+#### Two paths that can trigger the notifier
+
+**Path 1 — Automatic (every deploy):**
+Every user session polls `/version.json` every 60 seconds via `src/services/versionCheckService.js`. When `version.json.version` is newer than the `APP_VERSION` baked into their bundle, the `update-available` event fires. Each version only notifies a user once (guarded by `localStorage.lastNotifiedVersion`). Users who open a fresh tab after a deploy get the new bundle immediately and never see the notifier.
+
+**Path 2 — Manual push (admin UI only):**
+An admin opens the "Push Update" panel (accessible from settings). It inserts a sentinel row (`casenumber: "update"`) into the Supabase `cases` table. Every connected client receives the row via the existing Supabase realtime subscription in `DataContext`, which fires the same `update-available` event locally on each tab. The row is immediately deleted after being processed. This path is for notifying users right now without waiting up to 60 seconds, or for attaching custom release notes.
+
+#### Rules for AI assistants
+
 - Never hardcode app version in components or services.
 - Always read app version through `src/version.js`.
 - If release metadata format changes, update both generator and polling consumer in the same PR.
 - Keep docs in sync (`AGENTS.md` + `CLAUDE.md`) whenever release automation rules change.
 - Do not commit `public/version.json` or `public/changelog.json` — they are generated artifacts.
+- Do not use `force` priority in automated flows — it causes an immediate hard-reload for all users with no warning.
+- Do not add a second Supabase realtime subscription or a second polling interval for version checking — both already exist and adding duplicates will cause double-notifications.
