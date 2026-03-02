@@ -1740,17 +1740,22 @@ export default function Editor({ data, deptDefault }) {
     [focusedInput]
   );
 
+  const openDatePicker = useCallback(() => {
+    const dateInput = dateInputRef.current;
+    if (!dateInput || typeof dateInput.showPicker !== "function") return;
+    dateInput.showPicker();
+  }, []);
+
   const handleDateInputClick = useCallback((event) => {
     const dateInput = dateInputRef.current;
     if (!dateInput) return;
 
     dateInput.focus();
 
-    const clickedInput = event?.target === dateInput;
-    if (!clickedInput && typeof dateInput.showPicker === "function") {
-      dateInput.showPicker();
+    if (event?.target !== dateInput) {
+      openDatePicker();
     }
-  }, []);
+  }, [openDatePicker]);
 
   const renderDuplicateNotification = () => {
     if (!showDuplicateWarning || duplicates.length === 0) return null;
@@ -2875,6 +2880,7 @@ export default function Editor({ data, deptDefault }) {
                         }
                       }}
                       onBlur={() => handleFocusChange(null)}
+                      onDoubleClick={openDatePicker}
                       onChange={(e) => handleDueChange(e.target.value)}
                       className={clsx(
                         "form-input date-input cursor-pointer",
