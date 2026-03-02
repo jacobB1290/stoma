@@ -439,7 +439,8 @@ export default function SettingsModal({
       if (isAutoUpdateEnabled) {
         document.documentElement.classList.remove(
           "update-pending",
-          "update-critical"
+          "update-critical",
+          "update-should-flash"
         );
         deepRefresh("settings-force-update");
       } else {
@@ -453,6 +454,16 @@ export default function SettingsModal({
           document.documentElement.classList.remove("update-critical");
         }
         document.documentElement.classList.add("update-pending");
+
+        // Only flash the settings icon for minor/major bumps (or manual pushes
+        // where bumpType is unknown). Patch-only updates are silent on the icon.
+        const bumpType = e.detail?.bumpType; // undefined = manual push → flash
+        const isQuietPatch = bumpType === "patch" && priority !== "high";
+        if (!isQuietPatch) {
+          document.documentElement.classList.add("update-should-flash");
+        } else {
+          document.documentElement.classList.remove("update-should-flash");
+        }
       }
     };
     window.addEventListener("update-available", fn);
@@ -478,7 +489,8 @@ export default function SettingsModal({
   const clearUpdateFlags = useCallback(() => {
     document.documentElement.classList.remove(
       "update-pending",
-      "update-critical"
+      "update-critical",
+      "update-should-flash"
     );
     localStorage.removeItem("updateNotes");
     localStorage.removeItem("updatePriority");

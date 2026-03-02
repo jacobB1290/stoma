@@ -9,6 +9,18 @@ function mapPriority(priority) {
   return "normal";
 }
 
+function getBumpType(oldVer, newVer) {
+  const parse = (v) =>
+    String(v || "0")
+      .split(".")
+      .map((p) => parseInt(p, 10) || 0);
+  const [oldMaj, oldMin] = parse(oldVer);
+  const [newMaj, newMin] = parse(newVer);
+  if (newMaj > oldMaj) return "major";
+  if (newMin > oldMin) return "minor";
+  return "patch";
+}
+
 async function fetchReleaseMetadata() {
   const response = await fetch(`/version.json?ts=${Date.now()}`, {
     cache: "no-store",
@@ -50,6 +62,7 @@ export function startVersionPolling() {
             notes,
             version: metadata.version,
             date: metadata.date || "",
+            bumpType: getBumpType(APP_VERSION, metadata.version),
             timestamp: Date.now(),
           },
         })
