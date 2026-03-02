@@ -167,7 +167,6 @@
 /* -------------------------------------------------------------- 
    UPDATE COMMAND flash helpers
 -------------------------------------------------------------- */
-.update-pending button[aria-label="Settings"],
 .update-pending .flash-system,
 .update-pending .flash-update {
   animation: gentle-flash 1.5s ease-in-out infinite;
