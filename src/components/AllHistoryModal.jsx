@@ -556,6 +556,7 @@ export default function AllHistoryModal({ onClose }) {
   const [current, setCurrent] = useState("");
   const [isClosing, setIsClosing] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [animationComplete, setAnimationComplete] = useState(false);
   const [selectedCase, setSelectedCase] = useState(null);
   const [newRowIds, setNewRowIds] = useState(new Set());
@@ -846,6 +847,11 @@ export default function AllHistoryModal({ onClose }) {
     }
   }, [animationComplete, loadInitialData]);
 
+  /* Expand modal once initial data is ready */
+  useEffect(() => {
+    if (!loading) setIsExpanded(true);
+  }, [loading]);
+
   /* Load remaining data in background */
   const loadRemainingData = useCallback(
     async (afterDate, existingGroups) => {
@@ -1047,7 +1053,6 @@ export default function AllHistoryModal({ onClose }) {
   /* memoized modal style */
   const modalStyle = useMemo(
     () => ({
-      height: "85vh",
       background: rgba(TINT.SHELL_WHITE),
       backdropFilter: "blur(40px) saturate(180%)",
       WebkitBackdropFilter: "blur(40px) saturate(180%)",
@@ -1116,63 +1121,69 @@ export default function AllHistoryModal({ onClose }) {
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
+                    <LayoutGroup>
                     <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: 0.2, duration: 0.4 }}
-                      className="flex flex-col h-full"
+                      className="flex flex-col max-h-[90vh] overflow-hidden"
                     >
-                      {/* Header */}
-                      <motion.header
-                        className="flex-shrink-0 flex items-center justify-between px-6 py-4"
-                        style={{ background: rgba(TINT.HEADER_WHITE) }}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{
-                          delay: 0.3,
-                          duration: 0.3,
-                          ease: "easeOut",
-                        }}
-                      >
-                        <h2
-                          className="font-semibold text-gray-800"
-                          style={{ fontSize: `${20 * headerScale}px` }}
+                      {!isExpanded ? (
+                        <motion.div
+                          layout
+                          className="flex flex-col items-center justify-center py-12"
                         >
-                          All Case History
-                        </h2>
-                        <motion.button
-                          onClick={handleClose}
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          transition={{
-                            type: "tween",
-                            duration: 0.1,
-                            ease: "easeOut",
-                          }}
-                          className="rounded-lg px-4 py-2 bg-white/50 hover:bg-white/70 backdrop-blur-xl border border-white/50 shadow-sm transition-colors text-gray-700"
-                          style={{
-                            willChange: "transform",
-                            fontSize: `${14 * headerScale}px`,
-                          }}
-                        >
-                          Close
-                        </motion.button>
-                      </motion.header>
-
-                      {loading ? (
-                        <LoadingSpinner />
+                          <LoadingSpinner />
+                        </motion.div>
                       ) : (
                         <>
+                          {/* Header */}
+                          <motion.header
+                            layout="position"
+                            className="flex-shrink-0 flex items-center justify-between px-6 py-4"
+                            style={{ background: rgba(TINT.HEADER_WHITE) }}
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{
+                              type: "spring",
+                              stiffness: 280,
+                              damping: 22,
+                            }}
+                          >
+                            <h2
+                              className="font-semibold text-gray-800"
+                              style={{ fontSize: `${20 * headerScale}px` }}
+                            >
+                              All Case History
+                            </h2>
+                            <motion.button
+                              onClick={handleClose}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              transition={{
+                                type: "tween",
+                                duration: 0.1,
+                                ease: "easeOut",
+                              }}
+                              className="rounded-lg px-4 py-2 bg-white/50 hover:bg-white/70 backdrop-blur-xl border border-white/50 shadow-sm transition-colors text-gray-700"
+                              style={{
+                                willChange: "transform",
+                                fontSize: `${14 * headerScale}px`,
+                              }}
+                            >
+                              Close
+                            </motion.button>
+                          </motion.header>
+
                           {/* Sticky stats bar */}
                           <motion.div
+                            layout="position"
                             className="flex-shrink-0 sticky top-0 z-20 flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3"
                             style={{ background: rgba(TINT.HEADER_WHITE) }}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
                             transition={{
-                              delay: 0.35,
-                              duration: 0.3,
-                              ease: "easeOut",
+                              type: "spring",
+                              stiffness: 280,
+                              damping: 22,
+                              delay: 0.04,
                             }}
                           >
                             <motion.span
@@ -1209,14 +1220,16 @@ export default function AllHistoryModal({ onClose }) {
 
                           {/* Content area */}
                           <motion.div
+                            layout="position"
                             ref={listRef}
                             className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
+                            initial={{ opacity: 0, y: 16 }}
+                            animate={{ opacity: 1, y: 0 }}
                             transition={{
-                              duration: 0.25,
-                              delay: 0.4,
-                              ease: "easeOut",
+                              type: "spring",
+                              stiffness: 280,
+                              damping: 22,
+                              delay: 0.08,
                             }}
                             style={{
                               WebkitOverflowScrolling: "touch",
@@ -1307,30 +1320,40 @@ export default function AllHistoryModal({ onClose }) {
                                   </motion.section>
                                 ))}
                                 </LayoutGroup>
-                                {loadingMore && (
-                                  <div className="flex justify-center py-8">
-                                    <div className="flex items-center gap-2 text-gray-500">
-                                      <motion.div
-                                        animate={{ rotate: 360 }}
-                                        transition={{
-                                          duration: 1,
-                                          repeat: Infinity,
-                                          ease: "linear",
-                                        }}
-                                        className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full"
-                                      />
-                                      <span className="text-sm">
-                                        Loading older history...
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
+                                <AnimatePresence>
+                                  {loadingMore && (
+                                    <motion.div
+                                      layout
+                                      initial={{ opacity: 0 }}
+                                      animate={{ opacity: 1 }}
+                                      exit={{ opacity: 0 }}
+                                      transition={{ duration: 0.2 }}
+                                      className="flex justify-center py-8"
+                                    >
+                                      <div className="flex items-center gap-2 text-gray-500">
+                                        <motion.div
+                                          animate={{ rotate: 360 }}
+                                          transition={{
+                                            duration: 1,
+                                            repeat: Infinity,
+                                            ease: "linear",
+                                          }}
+                                          className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full"
+                                        />
+                                        <span className="text-sm">
+                                          Loading older history...
+                                        </span>
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
                               </div>
                             )}
                           </motion.div>
                         </>
                       )}
                     </motion.div>
+                    </LayoutGroup>
                   </motion.div>
                 </motion.div>
               )}
