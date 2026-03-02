@@ -1740,13 +1740,14 @@ export default function Editor({ data, deptDefault }) {
     [focusedInput]
   );
 
-  const handleDateInputClick = useCallback(() => {
+  const handleDateInputClick = useCallback((event) => {
     const dateInput = dateInputRef.current;
     if (!dateInput) return;
 
     dateInput.focus();
 
-    if (typeof dateInput.showPicker === "function") {
+    const clickedInput = event?.target === dateInput;
+    if (!clickedInput && typeof dateInput.showPicker === "function") {
       dateInput.showPicker();
     }
   }, []);
