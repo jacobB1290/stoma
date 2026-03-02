@@ -1746,16 +1746,17 @@ export default function Editor({ data, deptDefault }) {
     dateInput.showPicker();
   }, []);
 
-  const handleDateInputClick = useCallback((event) => {
-    const dateInput = dateInputRef.current;
-    if (!dateInput) return;
+  const handleDateContainerMouseDown = useCallback(
+    (event) => {
+      const dateInput = dateInputRef.current;
+      if (!dateInput || event?.target === dateInput) return;
 
-    dateInput.focus();
-
-    if (event?.target !== dateInput) {
+      event.preventDefault();
+      dateInput.focus({ preventScroll: true });
       openDatePicker();
-    }
-  }, [openDatePicker]);
+    },
+    [openDatePicker]
+  );
 
   const renderDuplicateNotification = () => {
     if (!showDuplicateWarning || duplicates.length === 0) return null;
@@ -2864,7 +2865,7 @@ export default function Editor({ data, deptDefault }) {
                   </div>
                   <div
                     className="relative cursor-pointer"
-                    onClick={handleDateInputClick}
+                    onMouseDown={handleDateContainerMouseDown}
                   >
                     <input
                       ref={dateInputRef}
@@ -2880,7 +2881,6 @@ export default function Editor({ data, deptDefault }) {
                         }
                       }}
                       onBlur={() => handleFocusChange(null)}
-                      onDoubleClick={openDatePicker}
                       onChange={(e) => handleDueChange(e.target.value)}
                       className={clsx(
                         "form-input date-input cursor-pointer",
