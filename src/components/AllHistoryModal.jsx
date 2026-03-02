@@ -1,4 +1,3 @@
-// AllHistoryModal.jsx - Add debugging version
 import React, {
   useEffect,
   useState,
@@ -10,12 +9,11 @@ import React, {
   lazy,
   Suspense,
 } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 import { createPortal } from "react-dom";
 import { db } from "../services/caseService";
+import { formatHistoryAction } from "../utils/historyActionFormatter";
 
-// Add debug logging
-console.log("[AllHistoryModal] Module loading...");
 
 // Lazy load CaseHistory modal
 const CaseHistory = lazy(() => import("./CaseHistory"));
@@ -86,24 +84,7 @@ const split = (s = "") => {
 };
 
 /* ───────── action processing helpers (matching CaseHistory) ───────── */
-const formatDateShort = (dateStr) => {
-  const [, month, day] = dateStr.split("T")[0].split("-");
-  return `${parseInt(month)}-${parseInt(day)}`;
-};
-
-const processActionText = (action) => {
-  const dueChangePattern =
-    /Due changed from (\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})/i;
-  const match = action.match(dueChangePattern);
-
-  if (match) {
-    const fromDate = formatDateShort(match[1]);
-    const toDate = formatDateShort(match[2]);
-    return `Due date changed from ${fromDate} to ${toDate}`;
-  }
-
-  return action;
-};
+const processActionText = formatHistoryAction;
 
 /* ───────── layout constants ───────── */
 const gridBase =
@@ -122,22 +103,13 @@ const preloadManager = {
   hasPreloaded: false,
 
   preload: async () => {
-    console.log("[AllHistoryModal] preloadManager.preload called", {
-      hasPreloaded: preloadManager.hasPreloaded,
-      isPreloading: preloadManager.isPreloading,
-    });
-
     if (preloadManager.promise) {
-      console.log("[AllHistoryModal] Returning existing promise");
       return preloadManager.promise;
     }
 
     preloadManager.isPreloading = true;
     preloadManager.promise = (async () => {
-      const startTime = performance.now();
       try {
-        console.log("[AllHistoryModal] Starting data fetch...");
-
         // Calculate date for 2 days ago
         const twoDaysAgo = new Date();
         twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
@@ -152,11 +124,6 @@ const preloadManager = {
           .eq("cases.archived", false)
           .gte("created_at", twoDaysAgoStr)
           .order("created_at", { ascending: false });
-
-        const fetchTime = performance.now() - startTime;
-        console.log(`[AllHistoryModal] Data fetched in ${fetchTime}ms`, {
-          recordCount: recentData?.length || 0,
-        });
 
         if (recentError) throw recentError;
 
@@ -176,7 +143,6 @@ const preloadManager = {
   },
 
   reset: () => {
-    console.log("[AllHistoryModal] Resetting preload manager");
     preloadManager.promise = null;
     preloadManager.data = null;
     preloadManager.error = null;
@@ -452,7 +418,6 @@ const Stat = memo(({ label, n, cases, statId }) => {
 /* ───────── optimized row component ───────── */
 const Row = memo(({ row, onCaseClick, isNew = false }) => {
   const [num, desc] = useMemo(() => split(row.casenumber), [row.casenumber]);
-  const [isHovered, setIsHovered] = useState(false);
 
   const baseFontSize = window.innerWidth < 640 ? 12 : 14;
   const scale = window.innerWidth < 640 ? MOBILE_SCALE : DESKTOP_SCALE;
@@ -461,7 +426,6 @@ const Row = memo(({ row, onCaseClick, isNew = false }) => {
   const handleClick = useCallback(
     (e) => {
       e.stopPropagation();
-      console.log("Row clicked:", row.case_id, row.casenumber); // Debug log
       if (row.case_id && onCaseClick) {
         onCaseClick(row.case_id, row.casenumber);
       }
@@ -471,15 +435,10 @@ const Row = memo(({ row, onCaseClick, isNew = false }) => {
 
   return (
     <motion.div
+      layout="position"
       className="relative px-6 py-3 cursor-pointer select-none"
-      style={{
-        backgroundColor: isHovered
-          ? rgba(TINT.ROW_HOVER)
-          : rgba(TINT.ROW_WHITE),
-        transition: "background-color 0.15s ease-out",
-      }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      style={{ backgroundColor: rgba(TINT.ROW_WHITE) }}
+      whileHover={{ backgroundColor: rgba(TINT.ROW_HOVER), x: 1 }}
       onClick={handleClick}
       role="button"
       tabIndex={0}
@@ -488,9 +447,9 @@ const Row = memo(({ row, onCaseClick, isNew = false }) => {
           handleClick(e);
         }
       }}
-      initial={isNew ? { opacity: 0, y: -20 } : false}
-      animate={isNew ? { opacity: 1, y: 0 } : false}
-      transition={isNew ? { duration: 0.3, ease: "easeOut" } : false}
+      initial={isNew ? { opacity: 0, y: -14, scale: 0.99 } : false}
+      animate={isNew ? { opacity: 1, y: 0, scale: 1 } : false}
+      transition={isNew ? { duration: 0.28, ease: [0.22, 1, 0.36, 1] } : false}
     >
       <div
         className={grid}
@@ -574,9 +533,6 @@ const LoadingSkeleton = () => (
 
 /* ───────── main modal component ───────── */
 export default function AllHistoryModal({ onClose }) {
-  console.log("[AllHistoryModal] Component rendering");
-  const renderStartTime = performance.now();
-
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -596,7 +552,6 @@ export default function AllHistoryModal({ onClose }) {
 
   /* Handle case click */
   const handleCaseClick = useCallback((caseId, caseNumber) => {
-    console.log("handleCaseClick called:", caseId, caseNumber); // Debug log
     setSelectedCase({ id: caseId, caseNumber });
   }, []);
 
@@ -745,8 +700,6 @@ export default function AllHistoryModal({ onClose }) {
           table: "case_history",
         },
         async (payload) => {
-          console.log("New case history:", payload.new);
-
           // Check if we've already processed this row
           const rowId = `${payload.new.created_at}-${payload.new.case_id}-${payload.new.action}`;
           if (processedIdsRef.current.has(rowId)) {
@@ -797,7 +750,6 @@ export default function AllHistoryModal({ onClose }) {
 
   /* Start animation immediately */
   useEffect(() => {
-    console.log("[AllHistoryModal] Setting isReady to true");
     requestAnimationFrame(() => {
       if (mountedRef.current) {
         setIsReady(true);
@@ -808,27 +760,21 @@ export default function AllHistoryModal({ onClose }) {
   /* Load data after animation starts - prioritize first 2 days */
   useEffect(() => {
     if (animationComplete) {
-      console.log("[AllHistoryModal] Animation complete, loading data...");
       loadInitialData();
     }
   }, [animationComplete]);
 
   /* Load first 2 days of data quickly */
   const loadInitialData = useCallback(async () => {
-    const loadStartTime = performance.now();
-    console.log("[AllHistoryModal] loadInitialData called");
-
     try {
       let recentData, twoDaysAgoStr;
 
       // Check if we have preloaded data
       if (preloadManager.data) {
-        console.log("[AllHistoryModal] Using preloaded data");
         ({ recentData, twoDaysAgoStr } = preloadManager.data);
         // Reset preload data after using it
         preloadManager.reset();
       } else {
-        console.log("[AllHistoryModal] No preloaded data, fetching now...");
         // Fallback to fetching data if not preloaded
         const twoDaysAgo = new Date();
         twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
@@ -892,10 +838,6 @@ export default function AllHistoryModal({ onClose }) {
 
       const recentGroups = [...recentMap.values()];
 
-      const processTime = performance.now() - loadStartTime;
-      console.log(
-        `[AllHistoryModal] Initial data processed in ${processTime}ms`
-      );
 
       // Show recent data immediately
       if (mountedRef.current) {
@@ -1126,11 +1068,6 @@ export default function AllHistoryModal({ onClose }) {
     []
   );
 
-  // Log render time
-  useEffect(() => {
-    const renderTime = performance.now() - renderStartTime;
-    console.log(`[AllHistoryModal] Render completed in ${renderTime}ms`);
-  });
 
   return createPortal(
     <>
@@ -1177,39 +1114,28 @@ export default function AllHistoryModal({ onClose }) {
                     ref={modalRef}
                     className="w-full max-w-5xl pointer-events-auto overflow-hidden rounded-2xl border border-white/30 shadow-2xl flex flex-col"
                     initial={{
-                      scale: 0,
                       opacity: 0,
-                      borderRadius: "100%",
+                      scale: 0.92,
+                      y: 18,
                     }}
                     animate={{
-                      scale: 1,
                       opacity: 1,
-                      borderRadius: "1rem",
+                      scale: 1,
+                      y: 0,
                     }}
                     exit={{
-                      scale: 0,
                       opacity: 0,
-                      borderRadius: "100%",
+                      scale: 0.96,
+                      y: 10,
                     }}
                     transition={{
-                      scale: {
-                        type: "spring",
-                        stiffness: 260,
-                        damping: 20,
-                        duration: 0.5,
-                      },
-                      opacity: {
-                        duration: 0.3,
-                        ease: "easeOut",
-                      },
-                      borderRadius: {
-                        duration: 0.4,
-                        ease: [0.16, 1, 0.3, 1],
-                      },
+                      type: "spring",
+                      stiffness: 280,
+                      damping: 28,
+                      mass: 0.85,
                     }}
                     style={modalStyle}
                     onAnimationComplete={() => {
-                      console.log("[AllHistoryModal] Animation complete");
                       setAnimationComplete(true);
                     }}
                     onClick={(e) => e.stopPropagation()}
@@ -1334,12 +1260,18 @@ export default function AllHistoryModal({ onClose }) {
                               </motion.div>
                             ) : (
                               <div>
-                                {groups.map((g) => (
-                                  <section
+                                <LayoutGroup>
+                                  {groups.map((g, groupIndex) => (
+                                  <motion.section
+                                    layout
                                     key={g.key}
                                     className="px-6 py-4 first:pt-6 last:pb-6"
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.22, delay: Math.min(groupIndex * 0.04, 0.2) }}
                                   >
-                                    <div
+                                    <motion.div
+                                      layout
                                       className="rounded-xl overflow-hidden backdrop-blur-sm"
                                       style={{
                                         background: rgba(TINT.ROW_WHITE),
@@ -1395,9 +1327,10 @@ export default function AllHistoryModal({ onClose }) {
                                           })}
                                         </div>
                                       </div>
-                                    </div>
-                                  </section>
+                                    </motion.div>
+                                  </motion.section>
                                 ))}
+                                </LayoutGroup>
                                 {loadingMore && (
                                   <div className="flex justify-center py-8">
                                     <div className="flex items-center gap-2 text-gray-500">
@@ -1444,5 +1377,3 @@ export default function AllHistoryModal({ onClose }) {
     document.body
   );
 }
-
-console.log("[AllHistoryModal] Module loaded");

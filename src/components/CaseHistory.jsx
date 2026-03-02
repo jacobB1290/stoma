@@ -10,6 +10,7 @@ import { db, parseNoteTime } from "../services/caseService";
 import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 import { useMut } from "../context/DataContext";
 import { getWorkflowStatus } from "../utils/workflowDetection";
+import { formatHistoryAction } from "../utils/historyActionFormatter";
 import clsx from "clsx";
 
 /* ══════════════════════════════════════════════ */
@@ -45,11 +46,6 @@ const fmtDateOnly = (dateStr) => {
     day: "numeric",
     year: "numeric",
   });
-};
-
-const fmtDateShort = (dateStr) => {
-  const [, m, d] = dateStr.split("T")[0].split("-");
-  return `${parseInt(m)}-${parseInt(d)}`;
 };
 
 const fmtDateCompact = (dateStr) => {
@@ -155,71 +151,7 @@ const getActionType = (action) => {
   return "default";
 };
 
-/**
- * Distinguish between case number changes, note changes, and note additions/removals.
- * The raw log format is: "Case # changed from <old> to <new>"
- * We parse the old/new values and compare the numeric prefix vs the note suffix.
- */
-const parseCaseNumberChange = (action) => {
-  const m = action.match(/^Case # changed from (.+) to (.+)$/i);
-  if (!m) return null;
-  const oldVal = m[1].trim();
-  const newVal = m[2].trim();
-
-  const splitCN = (cn) => {
-    const parts = cn
-      .replace(/[()]/g, "")
-      .replace(/\s*-\s*/, " ")
-      .trim()
-      .split(/\s+/);
-    const num = parts.shift() || "";
-    const note = parts.join(" ");
-    return { num, note };
-  };
-
-  const oldParsed = splitCN(oldVal);
-  const newParsed = splitCN(newVal);
-
-  const numChanged = oldParsed.num !== newParsed.num;
-  const noteChanged = oldParsed.note !== newParsed.note;
-
-  if (numChanged && noteChanged) {
-    return `Case # changed from ${oldParsed.num} to ${
-      newParsed.num
-    } and note changed to "${newParsed.note || "(removed)"}"`;
-  }
-  if (numChanged) {
-    return `Case # changed from ${oldParsed.num} to ${newParsed.num}`;
-  }
-  if (noteChanged) {
-    if (!oldParsed.note && newParsed.note) {
-      return `Note added: "${newParsed.note}"`;
-    }
-    if (oldParsed.note && !newParsed.note) {
-      return `Note removed (was "${oldParsed.note}")`;
-    }
-    return `Note changed from "${oldParsed.note}" to "${newParsed.note}"`;
-  }
-  return action;
-};
-
-const processActionText = (action) => {
-  const dueMatch = action.match(
-    /Due changed from (\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})/i
-  );
-  if (dueMatch)
-    return `Due date changed from ${fmtDateShort(
-      dueMatch[1]
-    )} to ${fmtDateShort(dueMatch[2])}`;
-
-  const caseNumMatch = action.match(/^Case # changed from (.+) to (.+)$/i);
-  if (caseNumMatch) {
-    const result = parseCaseNumberChange(action);
-    if (result) return result;
-  }
-
-  return action;
-};
+const processActionText = formatHistoryAction;
 
 const actionColors = {
   complete: "text-blue-600 bg-blue-50 border-blue-200",
