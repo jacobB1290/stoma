@@ -227,28 +227,70 @@ Environment variables: configured in Vercel dashboard, not in repo files.
 
 ## Automated Versioning + Update Notifier (Important)
 
-This repository now uses a fully automated release metadata flow:
+This repository uses a fully automated release metadata flow:
 
 1. **Single source of truth:** `package.json` `version`
 2. **Runtime version export:** `src/version.js` (`APP_VERSION`, `compareVersions`)
 3. **Build-time metadata generation:** `scripts/generate-changelog.mjs`
-4. **Generated artifacts:** `public/version.json`, `public/changelog.json`
+4. **Generated artifacts:** `public/version.json`, `public/changelog.json` — **not committed; Vercel regenerates them on every deploy**
 5. **Runtime polling:** `src/services/versionCheckService.js` polls `/version.json` every 60s
 6. **Notifier trigger:** Dispatches `window` `update-available` event consumed by existing settings/update UI
 
-### Priority model (standard vs urgent)
-- Metadata `priority: "standard"` -> UI notifier priority `"normal"`
-- Metadata `priority: "urgent"` -> UI notifier priority `"high"`
-- `"force"` remains an exceptional/manual path only
+### End-to-end release flow
+
+```
+PR merged to main
+  → GitHub Action (version-bump.yml) runs
+    → reads all non-merge commit subjects in the push range
+    → determines semver bump (major / minor / patch)
+    → npm version <bump> --no-git-tag-version   ← updates package.json only
+    → git commit package.json package-lock.json [skip ci]
+    → git tag v<new-version>
+    → git push origin HEAD:main
+    → git push origin v<new-version>
+  → Vercel detects the [skip ci] commit and builds
+    → generate-changelog.mjs fetches full history (unshallows clone)
+    → writes public/version.json + public/changelog.json from package.json version
+    → CRA build bakes APP_VERSION from package.json into the JS bundle
+  → deployed app serves /version.json with the new version
+    → existing browser sessions (old bundle) detect version > APP_VERSION
+    → fire update-available event → user sees update notifier
+```
+
+> **Important:** The update notifier only fires for users who already have an older version of the app open in their browser. A fresh page load always has matching `APP_VERSION` and `/version.json` — this is by design (stale-session detection).
+
+### Prerequisites — one-time setup
+
+| Requirement | Where to configure |
+|---|---|
+| `GH_PAT` secret with `contents: write` scope | GitHub repo → Settings → Secrets and variables → Actions |
+| Squash-and-merge enabled (recommended) | GitHub repo → Settings → General → Merge button → Allow squash merging |
+
+`GH_PAT` must have write access to the repo so the Action can push the version bump commit and the git tag back to `main`. The default `GITHUB_TOKEN` cannot push to protected branches.
+
+Using **squash-and-merge** ensures the squash commit subject (= PR title) is what the Action reads for bump-type detection. If you use regular merge commits (`Merge pull request #N…`), the Action falls back to `patch` for every merge regardless of PR content.
 
 ### Semantic version bump model
-GitHub Action `.github/workflows/version-bump.yml` determines bump from commit subject:
-- contains `BREAKING` -> **major**
-- starts with `feat|feature|new` -> **minor**
-- otherwise -> **patch**
+
+The Action inspects **all non-merge commit subjects** in the push range (`git log BEFORE..AFTER --no-merges`):
+
+- any subject contains `BREAKING` → **major**
+- any subject starts with `feat(`, `feat:`, `feature(`, `feature:`, `new(`, or `new:` → **minor**
+- otherwise → **patch**
+
+### Priority model (standard vs urgent)
+
+- any subject contains `urgent`, `hotfix`, `critical`, or `security` → `priority: "urgent"` → notifier `"high"`
+- otherwise → `priority: "standard"` → notifier `"normal"`
+- `"force"` is a manual exceptional path only
+
+### Generated artifacts
+
+`public/version.json` and `public/changelog.json` are **build-time outputs** listed in `.gitignore`. Never commit them manually. The changelog range is scoped from the most recent git tag to `HEAD`; each version bump creates a tag so the next changelog only includes new commits.
 
 ### AI assistant policy (Codex/Claude)
 - Never hardcode app version in components or services.
 - Always read app version through `src/version.js`.
 - If release metadata format changes, update both generator and polling consumer in the same PR.
 - Keep docs in sync (`AGENTS.md` + `CLAUDE.md`) whenever release automation rules change.
+- Do not commit `public/version.json` or `public/changelog.json` — they are generated artifacts.

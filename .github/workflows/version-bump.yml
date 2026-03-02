@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+# Required so the action can commit the version bump back to main
+permissions:
+  contents: write
+
 jobs:
   bump:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
@@ -20,18 +24,30 @@ jobs:
 
       - name: Determine bump + release priority
         run: |
-          COMMIT_MSG=$(git log --oneline -1 --format="%s")
-          echo "Last commit: $COMMIT_MSG"
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
 
-          if echo "$COMMIT_MSG" | grep -qi "BREAKING"; then
+          # Collect all non-merge commit subjects included in this push.
+          # Falls back to the single head commit when BEFORE is the zero SHA
+          # (e.g. first push to main or a force-push that rewrote history).
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            COMMIT_MSGS=$(git log -1 --pretty=format:"%s" --no-merges)
+          else
+            COMMIT_MSGS=$(git log "$BEFORE".."$AFTER" --pretty=format:"%s" --no-merges)
+          fi
+
+          echo "Commits analysed:"
+          echo "$COMMIT_MSGS"
+
+          if echo "$COMMIT_MSGS" | grep -qi "BREAKING"; then
             echo "BUMP=major" >> $GITHUB_ENV
-          elif echo "$COMMIT_MSG" | grep -qiE "^(feat|feature|new)(\(|:)"; then
+          elif echo "$COMMIT_MSGS" | grep -qiE "^(feat|feature|new)(\(|:)"; then
             echo "BUMP=minor" >> $GITHUB_ENV
           else
             echo "BUMP=patch" >> $GITHUB_ENV
           fi
 
-          if echo "$COMMIT_MSG" | grep -qiE "urgent|hotfix|critical|security"; then
+          if echo "$COMMIT_MSGS" | grep -qiE "urgent|hotfix|critical|security"; then
             echo "RELEASE_PRIORITY=urgent" >> $GITHUB_ENV
           else
             echo "RELEASE_PRIORITY=standard" >> $GITHUB_ENV
@@ -41,12 +57,15 @@ jobs:
         run: |
           npm version ${{ env.BUMP }} --no-git-tag-version
           VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "New version: $VERSION"
 
-      - name: Commit and push
+      - name: Commit, tag, and push
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add package.json package-lock.json
           git commit -m "chore: bump to v$(node -p \"require('./package.json').version\") [skip ci]" || echo "No version changes to commit"
-          git push
+          git tag "v$VERSION"
+          git push origin HEAD:main
+          git push origin "v$VERSION"
