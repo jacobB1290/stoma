@@ -11,6 +11,13 @@ function safeExec(command) {
   }
 }
 
+// Vercel and some CI environments do shallow clones. Unshallow so that
+// `git describe` and `git log` have access to the full history and tags.
+// This is a no-op in environments that already have a full clone.
+safeExec('git fetch --unshallow');
+// Make sure tags are available (needed after unshallow in some CI setups).
+safeExec('git fetch --tags');
+
 const packageJson = JSON.parse(execSync('cat package.json').toString());
 const version = packageJson.version;
 
