@@ -1123,8 +1123,7 @@ export default function AllHistoryModal({ onClose }) {
                   >
                     <LayoutGroup>
                     <motion.div
-                      layout="position"
-                      className="flex flex-col h-full max-h-[90vh] overflow-hidden"
+                      className="flex flex-col max-h-[90vh] overflow-hidden"
                     >
                       {!isExpanded ? (
                         <motion.div
@@ -1321,24 +1320,33 @@ export default function AllHistoryModal({ onClose }) {
                                   </motion.section>
                                 ))}
                                 </LayoutGroup>
-                                {loadingMore && (
-                                  <div className="flex justify-center py-8">
-                                    <div className="flex items-center gap-2 text-gray-500">
-                                      <motion.div
-                                        animate={{ rotate: 360 }}
-                                        transition={{
-                                          duration: 1,
-                                          repeat: Infinity,
-                                          ease: "linear",
-                                        }}
-                                        className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full"
-                                      />
-                                      <span className="text-sm">
-                                        Loading older history...
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
+                                <AnimatePresence>
+                                  {loadingMore && (
+                                    <motion.div
+                                      layout
+                                      initial={{ opacity: 0 }}
+                                      animate={{ opacity: 1 }}
+                                      exit={{ opacity: 0 }}
+                                      transition={{ duration: 0.2 }}
+                                      className="flex justify-center py-8"
+                                    >
+                                      <div className="flex items-center gap-2 text-gray-500">
+                                        <motion.div
+                                          animate={{ rotate: 360 }}
+                                          transition={{
+                                            duration: 1,
+                                            repeat: Infinity,
+                                            ease: "linear",
+                                          }}
+                                          className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full"
+                                        />
+                                        <span className="text-sm">
+                                          Loading older history...
+                                        </span>
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
                               </div>
                             )}
                           </motion.div>
