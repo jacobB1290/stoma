@@ -348,3 +348,46 @@ The GitHub Action reads the **squash commit subject** (= PR title) to decide the
 3. State explicitly in your PR summary what semver bump the title will produce (e.g. "This PR title will trigger a **minor** bump: 11.0.4 → 11.1.0").
 
 **Common mistake to avoid:** Describing a feature in the PR body but giving the title a non-`feat:` prefix (e.g. "Add URL-based user identification"). The Action only reads the title, not the body. If it's a feature, the title must start with `feat:`.
+
+#### Release Notes Entry
+
+Instead of relying solely on git commit messages for the changelog, you can provide **user-friendly release notes** that will be displayed to users in the app's update notifier.
+
+**Creating custom release notes:**
+
+1. During PR development, create a file called `RELEASE_NOTES_ENTRY.md` at the repo root:
+```markdown
+# Release Notes: Feature Name
+
+## What's New ✨
+- User-visible feature or improvement
+
+## What Got Fixed 🐛
+- Bug fixes and resolved issues
+
+## For Users 👤
+- How users should use this feature
+
+## For Admins 👨‍💼
+- Admin-specific information (if applicable)
+
+## For Developers 👨‍💻
+- Technical details (if applicable)
+```
+
+2. The `scripts/generate-changelog.mjs` script will automatically detect this file during build
+3. If `RELEASE_NOTES_ENTRY.md` exists, its content takes precedence over git commit history in the changelog
+4. If it doesn't exist, the script falls back to showing git commits (as before)
+
+**Rules:**
+
+- Use **markdown formatting** for readability (headers, lists, bold/italic)
+- Include **sections relevant to your work** — delete sections that don't apply
+- Use **emojis** sparingly but for visual scanning
+- Keep it **concise** — users scan changelogs quickly
+- This file is **committed** as part of your PR (it stays in git history)
+- The file is **optional** — if you don't create it, git commits are used instead
+
+**Why this matters:**
+
+Git commit subjects are often abbreviated and technical. This lets developers write user-friendly, well-formatted release notes that make sense to both technical and non-technical users.
