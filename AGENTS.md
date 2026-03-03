@@ -66,6 +66,65 @@ feat: BREAKING redesign case schema         → 12.0.0, normal notifier
 fix: urgent security patch in auth layer    → 11.0.1, HIGH notifier (flashing)
 ```
 
+### Custom Release Notes via RELEASE_NOTES_ENTRY.md
+
+Instead of relying only on git commit messages for user-facing changelogs, you can provide **custom, formatted release notes** that will be included in the app's update notifier.
+
+**Workflow:**
+
+1. During PR development, create `RELEASE_NOTES_ENTRY.md` at the repo root with user-friendly notes
+2. The `scripts/generate-changelog.mjs` script automatically detects it during build
+3. If present, the custom notes take precedence over git commits in the changelog
+4. If absent, the script falls back to git commit history (as before)
+
+**Template:**
+```markdown
+# Release Notes: Feature Name
+
+## What's New ✨
+- User-visible improvements and features
+
+## What Got Fixed 🐛
+- Bug resolutions
+
+## For Users 👤
+- How to use the new feature
+
+## For Admins 👨‍💼
+- Admin-relevant details (if any)
+
+## For Developers 👨‍💻
+- Technical notes (if any)
+```
+
+**Rules:**
+- Use markdown formatting for readability
+- Include only relevant sections; delete N/A sections
+- Keep it concise — users scan quickly
+- The file is **committed** as part of the PR
+- The file is **optional** — missing it means git commits are used
+
+**Example:**
+
+You fixed a bug and added a feature. Create `RELEASE_NOTES_ENTRY.md`:
+```markdown
+# Release Notes: Name Persistence & Settings Sync
+
+## What's New ✨
+- Bookmarkable app URLs with your name (`/jacob`)
+
+## What Got Fixed 🐛
+- Name persistence across browser restarts
+- Settings sync when using URL slug
+- "Change Name" button in Settings
+
+## For Users 👤
+- Use your bookmarkable URL to skip setup and auto-restore settings
+- Visit Settings → "Change Name" to update your name anytime
+```
+
+When this PR is merged and deployed, users see these friendly notes in the update notifier instead of raw commit messages.
+
 ### Two trigger paths
 
 **Automatic (every deploy):** `src/services/versionCheckService.js` polls `/version.json` every 60s on every client. Fires `update-available` when server version > `APP_VERSION` baked in the bundle. Guarded by `localStorage.lastNotifiedVersion` so each version notifies each user only once.

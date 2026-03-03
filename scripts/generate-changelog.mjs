@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
 
 function safeExec(command) {
   try {
@@ -26,11 +26,24 @@ const range = latestTag
   ? `${latestTag}..HEAD`
   : `${safeExec('git rev-list --max-parents=0 HEAD')}..HEAD`;
 
-const commitLines = safeExec(
-  `git log ${range} --pretty=format:"- %s" --no-merges`
-);
-
-const changes = commitLines || '- Bug fixes and improvements';
+// Check if RELEASE_NOTES_ENTRY.md exists in the working directory
+let changes;
+if (existsSync('RELEASE_NOTES_ENTRY.md')) {
+  const releaseNotes = readFileSync('RELEASE_NOTES_ENTRY.md', 'utf-8');
+  // Extract markdown content and convert to changelog format
+  changes = releaseNotes
+    .split('\n')
+    .filter((line) => line.trim() && !line.startsWith('#'))
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+} else {
+  // Fall back to git commit history
+  const commitLines = safeExec(
+    `git log ${range} --pretty=format:"- %s" --no-merges`
+  );
+  changes = commitLines || '- Bug fixes and improvements';
+}
 
 const normalized = changes
   .split('\n')
