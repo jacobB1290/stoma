@@ -14,13 +14,30 @@ export const db = createClient(URL, KEY, { auth: { persistSession: false } });
 
 /* ──────────────────────────────────────────────────────────────
       Helpers – current user name
+      Reads from the same persistent layers as userService so the
+      name survives browser closes and restarts on shared Chrome
+      profiles. sessionStorage is intentionally not used here
+      because it is cleared on every browser close.
       ─────────────────────────────────────────────────────────── */
 const getCurrentUserName = () => {
-  const tmp = sessionStorage.getItem("tempUserName");
-  if (tmp !== null) return tmp;
-  const perm = localStorage.getItem("userName");
-  if (perm !== null) return perm;
-  if (sessionStorage.getItem("bypassUser") !== null) return "";
+  // 1. localStorage (primary — survives browser close/reopen)
+  try {
+    const v = localStorage.getItem("userName");
+    if (v && v.trim()) return v.trim();
+  } catch { /* ignore read errors */ }
+
+  // 2. Cookie backup (survives some localStorage clears)
+  try {
+    const nameEQ = "userName=";
+    for (const c of document.cookie.split(";")) {
+      const t = c.trim();
+      if (t.startsWith(nameEQ)) {
+        const v = decodeURIComponent(t.slice(nameEQ.length)).trim();
+        if (v) return v;
+      }
+    }
+  } catch { /* ignore read errors */ }
+
   return "Unknown";
 };
 
