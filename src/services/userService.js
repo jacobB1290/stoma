@@ -444,8 +444,12 @@ export async function reportActive(reason = "unknown") {
       "showCaseTableDividers",
       "lockAddCaseCard",
       "showStageDividers",
+      "enableMobileBoardView",
+      "disableAutomations",
+      "boostDarkMode",
       "autoUpdate",
       "facultySystemManager",
+      "liteUi",
     ];
 
     const settings = {};
@@ -760,8 +764,12 @@ export function applySettings(settings) {
     "showCaseTableDividers",
     "lockAddCaseCard",
     "showStageDividers",
+    "enableMobileBoardView",
+    "disableAutomations",
+    "boostDarkMode",
     "autoUpdate",
     "facultySystemManager",
+    "liteUi",
   ];
 
   let appliedCount = 0;
