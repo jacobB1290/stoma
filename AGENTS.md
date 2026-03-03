@@ -112,6 +112,23 @@ When making any release-affecting change:
 5. If changing release policy, update both `AGENTS.md` and `CLAUDE.md` in same PR.
 6. Do not commit `public/version.json` or `public/changelog.json` — they are generated artifacts.
 
+### PR title / semver bump — AI responsibility
+
+**The PR title is the version bump signal. You must set it correctly before the PR is merged.**
+
+When your work includes a new user-facing feature (new UI, new behaviour, new URL scheme, new capability), the PR title MUST start with `feat:`. Failing to do so silently downgrades a minor release to a patch.
+
+Rules:
+- Added a new feature → title starts with `feat: …`
+- Bug fix only → title starts with `fix: …`
+- Contains a breaking change → include `BREAKING` anywhere in the title
+- Urgent/security → include `urgent`, `hotfix`, `critical`, or `security` in the title
+
+When you open or summarise a PR, explicitly state what semver bump the title will produce and why. Example:
+> "PR title starts with `feat:` → this will produce a **minor** bump (e.g. 11.0.4 → 11.1.0)."
+
+If you are unsure whether something counts as a feature vs a fix, err on the side of `feat:`.
+
 ## Do not do
 - Do not reintroduce hardcoded `APP_VERSION` constants in feature files.
 - Do not bypass generated metadata by manually editing runtime-only values.
@@ -120,6 +137,8 @@ When making any release-affecting change:
 - Do not change `git push` in the workflow to omit the explicit `origin HEAD:main` — bare `git push` is unreliable in Actions environments.
 
 ## Quick checklist before PR
+- [ ] **PR title set correctly** — starts with `feat:` if any new feature is included, `fix:` for bug-fix-only, contains `BREAKING` if breaking
+- [ ] **Semver bump stated** — e.g. "this PR title produces a minor bump"
 - [ ] Version source still `package.json`
 - [ ] `src/version.js` still canonical app version export
 - [ ] `scripts/generate-changelog.mjs` still writes both metadata files
