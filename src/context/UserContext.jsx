@@ -53,11 +53,40 @@ export function UserProvider({ children }) {
         setName(canonical);
         setNeedsName(false);
 
-        // Fetch and apply settings from the database for this user
+        // Fetch and apply settings from the database for this user.
+        // Only overwrite localStorage if the Supabase record is at least as
+        // fresh as the last local change.  Without this guard, a quick refresh
+        // (before the 500 ms debounced heartbeat fires) would always restore
+        // the *old* Supabase copy and discard the change the user just made.
         try {
           const settingsResult = await fetchSettingsForName(canonical);
           if (settingsResult?.settings && Object.keys(settingsResult.settings).length > 0) {
-            applySettings(settingsResult.settings);
+            const localUpdatedAt  = parseInt(localStorage.getItem("_settings_updated_at") || "0", 10);
+            // settings_updated_at is the timestamp we embed in device_info when
+            // flushing to Supabase, so it reflects when those settings were
+            // actually changed — not just when the heartbeat happened to fire.
+            const remoteUpdatedAt = parseInt(settingsResult.settingsUpdatedAt  || "0", 10);
+
+            const remoteIsNewer = remoteUpdatedAt >= localUpdatedAt;
+            const noLocalHistory = localUpdatedAt === 0; // fresh device / cleared storage
+
+            if (remoteIsNewer || noLocalHistory) {
+              console.log(
+                `[UserContext] Applying Supabase settings (remote: ${remoteUpdatedAt}, local: ${localUpdatedAt})`
+              );
+              applySettings(settingsResult.settings);
+              // Align our local timestamp so the next refresh doesn't think
+              // these now-identical settings are "newer" than Supabase.
+              try {
+                if (remoteUpdatedAt > 0) {
+                  localStorage.setItem("_settings_updated_at", String(remoteUpdatedAt));
+                }
+              } catch { /* ignore */ }
+            } else {
+              console.log(
+                `[UserContext] Skipping Supabase settings – local is newer (local: ${localUpdatedAt}, remote: ${remoteUpdatedAt})`
+              );
+            }
           }
         } catch (err) {
           console.warn("[UserContext] Failed to fetch settings for URL name:", err);

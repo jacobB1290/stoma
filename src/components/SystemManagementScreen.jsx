@@ -146,7 +146,12 @@ const extractUserSettings = (user) => {
     "showCaseTableDividers",
     "lockAddCaseCard",
     "showStageDividers",
+    "enableMobileBoardView",
+    "disableAutomations",
+    "boostDarkMode",
     "autoUpdate",
+    "facultySystemManager",
+
     "lite-ui",
     "liteUi", // legacy key – kept for backward compat with older Supabase records
   ]);
@@ -1664,7 +1669,7 @@ const SETTING_DEFINITIONS = [
   { key: "lockAddCaseCard", label: "Lock Add Card", type: "toggle" },
   { key: "showStageDividers", label: "Stage Dividers", type: "toggle" },
   { key: "enableMobileBoardView", label: "Mobile Board View", type: "toggle" },
-  { key: "disableAutomations", label: "Smart Automations", type: "toggle" },
+  { key: "disableAutomations", label: "Smart Automations", type: "toggle", invert: true },
   { key: "boostDarkMode", label: "Boost Dark Mode", type: "toggle" },
   { key: "autoUpdate", label: "Auto Update", type: "toggle" },
   { key: "facultySystemManager", label: "Faculty: System Manager", type: "toggle" },
@@ -1733,6 +1738,17 @@ const SettingsPanel = memo(function SettingsPanel({
             settingsMode === "edit" &&
             editValue !== displaySettings[setting.key];
 
+          // For inverted settings (e.g. disableAutomations) the stored value is
+          // the logical opposite of what the user sees, so flip it for display.
+          const displayViewValue =
+            setting.invert && typeof viewValue === "boolean"
+              ? !viewValue
+              : viewValue;
+          const displayEditValue =
+            setting.invert && typeof editValue === "boolean"
+              ? !editValue
+              : editValue;
+
           return (
             <div
               key={setting.key}
@@ -1747,27 +1763,27 @@ const SettingsPanel = memo(function SettingsPanel({
                 <span
                   className={clsx(
                     "text-xs font-medium",
-                    typeof viewValue === "boolean"
-                      ? viewValue
+                    typeof displayViewValue === "boolean"
+                      ? displayViewValue
                         ? "text-emerald-600"
                         : "text-gray-400"
                       : "text-gray-700"
                   )}
                 >
-                  {formatValue(setting.key, viewValue)}
+                  {formatValue(setting.key, displayViewValue)}
                 </span>
               ) : setting.type === "toggle" ? (
                 <button
                   onClick={() => onSettingsChange(setting.key, !editValue)}
                   className={clsx(
                     "relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full transition-colors",
-                    editValue ? "bg-[#16525F]" : "bg-gray-300"
+                    displayEditValue ? "bg-[#16525F]" : "bg-gray-300"
                   )}
                 >
                   <span
                     className={clsx(
                       "inline-block h-3 w-3 rounded-full bg-white shadow transition-transform mt-0.5",
-                      editValue ? "translate-x-3.5 ml-0.5" : "translate-x-0.5"
+                      displayEditValue ? "translate-x-3.5 ml-0.5" : "translate-x-0.5"
                     )}
                   />
                 </button>
@@ -2120,7 +2136,20 @@ export default function SystemManagementScreen() {
   useEffect(() => {
     loadUsers();
     const t = setInterval(loadUsers, 15000);
-    return () => clearInterval(t);
+
+    const channel = db
+      .channel("sms-active-devices-updates")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "active_devices" },
+        () => loadUsers()
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(t);
+      db.removeChannel(channel);
+    };
   }, [loadUsers]);
 
   const loadHistory = useCallback(async () => {

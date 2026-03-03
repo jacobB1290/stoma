@@ -464,6 +464,10 @@ export async function reportActive(reason = "unknown") {
       language: navigator.language,
       viewport: { w: window.innerWidth, h: window.innerHeight },
       settings,
+      // Embed when settings were last changed locally so that fetchSettingsForName
+      // can compare against the receiving device's timestamp and avoid clobbering
+      // a newer local change with an older Supabase record.
+      settings_updated_at: localStorage.getItem("_settings_updated_at") || null,
     };
 
     // Prefer per-device rows so one shared account doesn't overwrite others.
@@ -473,7 +477,7 @@ export async function reportActive(reason = "unknown") {
     const conflictTargets = ["device_id", "user_name,device_id", "user_name"];
 
     for (const target of conflictTargets) {
-      const payload = target === "user_name" ? basePayload : { ...basePayload, device_info };
+      const payload = { ...basePayload, device_info };
       const res = await db
         .from("active_devices")
         .upsert(payload, { onConflict: target });
@@ -580,6 +584,14 @@ let heartbeatListenersAttached = false;
 // rapid toggle clicks only fire one network request.
 let settingsChangedDebounce = null;
 function handleSettingsChanged() {
+  // Stamp the exact moment of the local change so UserContext can compare this
+  // against the Supabase record's settings_updated_at and refuse to overwrite
+  // locally-made changes with a stale cloud copy.
+  try {
+    localStorage.setItem("_settings_updated_at", Date.now().toString());
+  } catch { /* private-mode / storage full – ignore */ }
+
+
   if (settingsChangedDebounce) clearTimeout(settingsChangedDebounce);
   settingsChangedDebounce = setTimeout(() => {
     log("Settings changed – flushing to Supabase");
@@ -724,45 +736,35 @@ export async function fetchSettingsForName(inputName) {
       `[UserService] Found ${matchingRecords.length} matching record(s)`
     );
 
-    // Find the record with the most complete settings
-    // Prioritize: most recent record with non-empty settings
-    let bestRecord = null;
-    let bestSettingsCount = -1;
+    // Pick the most recently-seen record that has settings.
+    // Previously this used a "most keys" heuristic which caused an old device
+    // (with 11 keys) to silently beat the current device (with 10 keys), so the
+    // user's latest changes were always overwritten on refresh.
+    const recordsWithSettings = matchingRecords.filter(
+      (r) => r.device_info?.settings && Object.keys(r.device_info.settings).length > 0
+    );
 
-    for (const record of matchingRecords) {
-      const settings = record.device_info?.settings;
-      const settingsCount = settings ? Object.keys(settings).length : 0;
-
-      // Prefer record with more settings, or more recent if same count
-      if (settingsCount > bestSettingsCount) {
-        bestRecord = record;
-        bestSettingsCount = settingsCount;
-      } else if (settingsCount === bestSettingsCount && settingsCount > 0) {
-        // If same number of settings, prefer more recent
-        if (
-          bestRecord &&
-          new Date(record.last_seen) > new Date(bestRecord.last_seen)
-        ) {
-          bestRecord = record;
-        }
-      }
-    }
+    // matchingRecords is already ordered by last_seen DESC (from the DB query),
+    // so the first element of each filtered list is the most recent.
+    const bestRecord = recordsWithSettings[0] ?? matchingRecords[0];
 
     if (!bestRecord) {
-      // If no record has settings, just use the most recent one
-      bestRecord = matchingRecords[0];
+      console.log(`[UserService] No usable record found for "${inputName}"`);
+      return null;
     }
 
     const settings = bestRecord.device_info?.settings || {};
+    const settingsUpdatedAt = bestRecord.device_info?.settings_updated_at ?? null;
 
     console.log(
-      `[UserService] Using settings from "${bestRecord.user_name}":`,
+      `[UserService] Using settings from "${bestRecord.user_name}" (last_seen: ${bestRecord.last_seen}, settings_updated_at: ${settingsUpdatedAt}):`,
       settings
     );
 
     return {
       canonicalName,
       settings,
+      settingsUpdatedAt,
       foundInRecord: bestRecord.user_name,
       lastSeen: bestRecord.last_seen,
       appVersion: bestRecord.app_version,
