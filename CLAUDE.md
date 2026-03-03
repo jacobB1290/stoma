@@ -328,3 +328,23 @@ An admin opens the "Push Update" panel (accessible from settings). It inserts a 
 - Do not commit `public/version.json` or `public/changelog.json` — they are generated artifacts.
 - Do not use `force` priority in automated flows — it causes an immediate hard-reload for all users with no warning.
 - Do not add a second Supabase realtime subscription or a second polling interval for version checking — both already exist and adding duplicates will cause double-notifications.
+
+#### PR title / semver bump — AI responsibility
+
+The GitHub Action reads the **squash commit subject** (= PR title) to decide the version bump. You are responsible for setting the PR title correctly.
+
+**Rules:**
+
+| Work type | Required PR title prefix | Resulting bump |
+|---|---|---|
+| New user-facing feature or capability | `feat:` or `feature:` or `new:` | **minor** (e.g. 11.0.x → 11.1.0) |
+| Bug fix, refactor, docs, chore | anything else (e.g. `fix:`) | **patch** (e.g. 11.0.3 → 11.0.4) |
+| Breaking change | include `BREAKING` anywhere | **major** (e.g. 11.x.x → 12.0.0) |
+| Urgent/security | include `urgent`, `hotfix`, `critical`, or `security` | high-priority notifier |
+
+**Before opening a PR, you MUST:**
+1. Identify whether the work contains any new user-facing feature (new screen, new button, new behaviour the user didn't have before).
+2. If yes → prefix the PR title with `feat: `.
+3. State explicitly in your PR summary what semver bump the title will produce (e.g. "This PR title will trigger a **minor** bump: 11.0.4 → 11.1.0").
+
+**Common mistake to avoid:** Describing a feature in the PR body but giving the title a non-`feat:` prefix (e.g. "Add URL-based user identification"). The Action only reads the title, not the body. If it's a feature, the title must start with `feat:`.
