@@ -591,6 +591,7 @@ function handleSettingsChanged() {
     localStorage.setItem("_settings_updated_at", Date.now().toString());
   } catch { /* private-mode / storage full – ignore */ }
 
+
   if (settingsChangedDebounce) clearTimeout(settingsChangedDebounce);
   settingsChangedDebounce = setTimeout(() => {
     log("Settings changed – flushing to Supabase");

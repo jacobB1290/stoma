@@ -151,6 +151,7 @@ const extractUserSettings = (user) => {
     "boostDarkMode",
     "autoUpdate",
     "facultySystemManager",
+
     "lite-ui",
     "liteUi", // legacy key – kept for backward compat with older Supabase records
   ]);
