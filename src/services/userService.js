@@ -449,7 +449,7 @@ export async function reportActive(reason = "unknown") {
       "boostDarkMode",
       "autoUpdate",
       "facultySystemManager",
-      "liteUi",
+      "lite-ui",
     ];
 
     const settings = {};
@@ -575,6 +575,19 @@ function handleBeforeUnload() {
 // ============================================
 let heartbeatListenersAttached = false;
 
+// Debounced handler: flush settings to Supabase immediately when a setting changes,
+// rather than waiting up to 20 s for the next heartbeat tick. Debounced 500 ms so
+// rapid toggle clicks only fire one network request.
+let settingsChangedDebounce = null;
+function handleSettingsChanged() {
+  if (settingsChangedDebounce) clearTimeout(settingsChangedDebounce);
+  settingsChangedDebounce = setTimeout(() => {
+    log("Settings changed – flushing to Supabase");
+    reportActive("settings-changed");
+    settingsChangedDebounce = null;
+  }, 500);
+}
+
 export function startHeartbeat() {
   log("=== STARTING HEARTBEAT SYSTEM ===");
 
@@ -595,6 +608,10 @@ export function startHeartbeat() {
     window.addEventListener("scroll", handleActivity, { passive: true });
     window.addEventListener("touchstart", handleActivity, { passive: true });
 
+    // Immediately persist settings whenever they change so a quick refresh
+    // doesn't lose the latest values before the 20-second heartbeat fires.
+    window.addEventListener("settings-changed", handleSettingsChanged);
+
     heartbeatListenersAttached = true;
     log("All event listeners attached");
   } else {
@@ -612,6 +629,11 @@ export function stopHeartbeat() {
     activityDebounceTimeout = null;
   }
 
+  if (settingsChangedDebounce) {
+    clearTimeout(settingsChangedDebounce);
+    settingsChangedDebounce = null;
+  }
+
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   window.removeEventListener("focus", handleFocus);
   window.removeEventListener("blur", handleBlur);
@@ -620,6 +642,7 @@ export function stopHeartbeat() {
   window.removeEventListener("keydown", handleActivity);
   window.removeEventListener("scroll", handleActivity);
   window.removeEventListener("touchstart", handleActivity);
+  window.removeEventListener("settings-changed", handleSettingsChanged);
 
   heartbeatListenersAttached = false;
   log("All event listeners removed");
@@ -769,7 +792,7 @@ export function applySettings(settings) {
     "boostDarkMode",
     "autoUpdate",
     "facultySystemManager",
-    "liteUi",
+    "lite-ui",
   ];
 
   let appliedCount = 0;
@@ -787,6 +810,26 @@ export function applySettings(settings) {
       }
     }
   });
+
+  // Backward compat: old Supabase records stored lite mode as "liteUi" (camelCase).
+  // If the canonical "lite-ui" key wasn't in the settings payload but the old key is,
+  // apply it to the correct key so pre-fix sessions still restore Lite Mode correctly.
+  if (
+    settings["liteUi"] !== undefined &&
+    settings["liteUi"] !== null &&
+    settings["lite-ui"] === undefined
+  ) {
+    try {
+      localStorage.setItem("lite-ui", settings["liteUi"]);
+      appliedSettings["lite-ui"] = settings["liteUi"];
+      appliedCount++;
+      console.log(
+        `[UserService] Applied legacy liteUi → lite-ui: ${settings["liteUi"]}`
+      );
+    } catch (e) {
+      console.warn("[UserService] Failed to apply legacy liteUi setting:", e);
+    }
+  }
 
   console.log(`[UserService] Applied ${appliedCount} settings`);
 

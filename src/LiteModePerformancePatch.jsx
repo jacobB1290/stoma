@@ -169,6 +169,25 @@ export function LiteModeProvider({ children }) {
     }
   }, [lite]);
 
+  /* Re-sync state when settings are applied from Supabase (e.g. on login or
+     when an admin pushes settings via SystemManagementScreen).  The event
+     detail may carry the value under "lite-ui" (current) or the legacy
+     "liteUi" key so we check both. */
+  useEffect(() => {
+    const onSettingsApplied = (e) => {
+      const detail = e.detail || {};
+      const raw = detail["lite-ui"] ?? detail["liteUi"];
+      if (raw === undefined) return;
+      try {
+        setLite(typeof raw === "boolean" ? raw : raw === "true");
+      } catch {
+        /* ignore parse errors */
+      }
+    };
+    window.addEventListener("settings-applied", onSettingsApplied);
+    return () => window.removeEventListener("settings-applied", onSettingsApplied);
+  }, []);
+
   const toggle = useCallback(() => setLite((v) => !v), []);
 
   /* ── Keyboard shortcut: Alt + Shift + L ── */

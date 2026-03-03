@@ -486,6 +486,41 @@ export default function SettingsModal({
     localStorage.setItem("autoUpdate", autoUpdate ? "true" : "false");
   }, [autoUpdate]);
 
+  /* --- Re-sync all local state when settings are applied from Supabase ---
+     This handles cross-device sync: when the user logs in and their saved
+     settings are fetched from Supabase, we need the modal's React state to
+     reflect the new localStorage values, not its stale mount-time snapshot. */
+  useEffect(() => {
+    const onSettingsApplied = () => {
+      setShowCaseTableDividers(
+        JSON.parse(localStorage.getItem("showCaseTableDividers") ?? "true")
+      );
+      setLockAddCaseCard(
+        JSON.parse(localStorage.getItem("lockAddCaseCard") ?? "false")
+      );
+      setShowStageDividers(
+        JSON.parse(localStorage.getItem("showStageDividers") ?? "false")
+      );
+      setFacultySystemManager(
+        JSON.parse(localStorage.getItem("facultySystemManager") ?? "false")
+      );
+      setEnableMobileBoardView(
+        JSON.parse(localStorage.getItem("enableMobileBoardView") ?? "false")
+      );
+      setDisableAutomations(
+        JSON.parse(localStorage.getItem("disableAutomations") ?? "true")
+      );
+      setBoostDarkMode(
+        JSON.parse(localStorage.getItem("boostDarkMode") ?? "false")
+      );
+      // autoUpdate is handled by its own sanitize effect; re-read here too
+      setAutoUpdate(getAutoUpdateSetting());
+    };
+    window.addEventListener("settings-applied", onSettingsApplied);
+    return () =>
+      window.removeEventListener("settings-applied", onSettingsApplied);
+  }, []);
+
   const clearUpdateFlags = useCallback(() => {
     document.documentElement.classList.remove(
       "update-pending",
