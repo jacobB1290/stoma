@@ -713,6 +713,10 @@ function AppShell() {
             setShowInfoBar={setShowInfoBar}
           />
 
+          {/* Mounted here so the open-registration event from SettingsModal
+              can open the name-change flow while the user is logged in. */}
+          <UserSetupModal />
+
         </DataProvider>
       </FlashProvider>
     </LiteModeProvider>
