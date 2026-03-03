@@ -168,7 +168,11 @@ const getDefaultSettings = () => ({
   showCaseTableDividers: true,
   lockAddCaseCard: false,
   showStageDividers: false,
+  enableMobileBoardView: false,
+  disableAutomations: true,
+  boostDarkMode: false,
   autoUpdate: false,
+  facultySystemManager: false,
   liteUi: false,
 });
 
@@ -1653,7 +1657,11 @@ const SETTING_DEFINITIONS = [
   { key: "showCaseTableDividers", label: "Table Dividers", type: "toggle" },
   { key: "lockAddCaseCard", label: "Lock Add Card", type: "toggle" },
   { key: "showStageDividers", label: "Stage Dividers", type: "toggle" },
+  { key: "enableMobileBoardView", label: "Mobile Board View", type: "toggle" },
+  { key: "disableAutomations", label: "Smart Automations", type: "toggle" },
+  { key: "boostDarkMode", label: "Boost Dark Mode", type: "toggle" },
   { key: "autoUpdate", label: "Auto Update", type: "toggle" },
+  { key: "facultySystemManager", label: "Faculty: System Manager", type: "toggle" },
   { key: "liteUi", label: "Lite UI", type: "toggle" },
 ];
 

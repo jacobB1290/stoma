@@ -10,6 +10,8 @@ import {
   startHeartbeat,
   stopHeartbeat,
   reportActive,
+  fetchSettingsForName,
+  applySettings,
 } from "../services/userService";
 import { getCanonicalName } from "../utils/nameNormalization";
 
@@ -42,7 +44,7 @@ export function UserProvider({ children }) {
   const [needsName, setNeedsName] = useState(false);
 
   useEffect(() => {
-    initUserStorage().then(() => {
+    initUserStorage().then(async () => {
       // 1. URL slug takes highest priority: /jacob → bypass setup, use "Jacob"
       const urlName = getNameFromPath();
       if (urlName) {
@@ -50,6 +52,17 @@ export function UserProvider({ children }) {
         userService.setName(canonical);
         setName(canonical);
         setNeedsName(false);
+
+        // Fetch and apply settings from the database for this user
+        try {
+          const settingsResult = await fetchSettingsForName(canonical);
+          if (settingsResult?.settings && Object.keys(settingsResult.settings).length > 0) {
+            applySettings(settingsResult.settings);
+          }
+        } catch (err) {
+          console.warn("[UserContext] Failed to fetch settings for URL name:", err);
+        }
+
         setReady(true);
         return;
       }
