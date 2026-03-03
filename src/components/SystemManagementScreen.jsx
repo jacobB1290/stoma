@@ -147,17 +147,23 @@ const extractUserSettings = (user) => {
     "lockAddCaseCard",
     "showStageDividers",
     "autoUpdate",
-    "liteUi",
+    "lite-ui",
+    "liteUi", // legacy key – kept for backward compat with older Supabase records
   ]);
   const parsed = {};
   Object.entries(deviceInfo.settings).forEach(([key, val]) => {
-    parsed[key] = booleanKeys.has(key)
+    const parsedVal = booleanKeys.has(key)
       ? val === "true"
         ? true
         : val === "false"
         ? false
         : val
       : val;
+    parsed[key] = parsedVal;
+    // Normalize legacy "liteUi" key to the canonical "lite-ui"
+    if (key === "liteUi" && parsed["lite-ui"] === undefined) {
+      parsed["lite-ui"] = parsedVal;
+    }
   });
   return parsed;
 };
@@ -173,7 +179,7 @@ const getDefaultSettings = () => ({
   boostDarkMode: false,
   autoUpdate: false,
   facultySystemManager: false,
-  liteUi: false,
+  "lite-ui": false,
 });
 
 // Date formatters
@@ -1662,7 +1668,7 @@ const SETTING_DEFINITIONS = [
   { key: "boostDarkMode", label: "Boost Dark Mode", type: "toggle" },
   { key: "autoUpdate", label: "Auto Update", type: "toggle" },
   { key: "facultySystemManager", label: "Faculty: System Manager", type: "toggle" },
-  { key: "liteUi", label: "Lite UI", type: "toggle" },
+  { key: "lite-ui", label: "Lite UI", type: "toggle" },
 ];
 
 const SettingsPanel = memo(function SettingsPanel({
