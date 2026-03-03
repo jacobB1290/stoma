@@ -477,7 +477,7 @@ export async function reportActive(reason = "unknown") {
     const conflictTargets = ["device_id", "user_name,device_id", "user_name"];
 
     for (const target of conflictTargets) {
-      const payload = target === "user_name" ? basePayload : { ...basePayload, device_info };
+      const payload = { ...basePayload, device_info };
       const res = await db
         .from("active_devices")
         .upsert(payload, { onConflict: target });
