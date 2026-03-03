@@ -2135,7 +2135,20 @@ export default function SystemManagementScreen() {
   useEffect(() => {
     loadUsers();
     const t = setInterval(loadUsers, 15000);
-    return () => clearInterval(t);
+
+    const channel = db
+      .channel("sms-active-devices-updates")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "active_devices" },
+        () => loadUsers()
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(t);
+      db.removeChannel(channel);
+    };
   }, [loadUsers]);
 
   const loadHistory = useCallback(async () => {
