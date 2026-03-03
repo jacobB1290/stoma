@@ -15,6 +15,14 @@ configureLLM({
   apiKey: process.env.REACT_APP_OPENAI_API_KEY || "",
 });
 
+// Strip the _deep_refresh marker so it never persists in the address bar
+// or bookmarks after a cache-busting reload.
+if (window.location.search.includes("_deep_refresh")) {
+  const clean = new URL(window.location.href);
+  clean.searchParams.delete("_deep_refresh");
+  window.history.replaceState(null, "", clean.pathname + clean.search + clean.hash);
+}
+
 createRoot(document.getElementById("root")).render(<App />);
 
 // ── Service Worker registration ────────────────────────────────────────────
@@ -22,6 +30,13 @@ createRoot(document.getElementById("root")).render(<App />);
 // caching, and (eventually) offline resilience.
 if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
   window.addEventListener("load", () => {
+    // Capture whether a SW was already controlling the page *before* we
+    // register. On the very first install there is no existing controller,
+    // so controllerchange fires from null → new SW. That is not an update
+    // worth reloading for — the user just loaded fresh content. Only reload
+    // when an *existing* SW is replaced by a newer one.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+
     navigator.serviceWorker
       .register("/service-worker.js", { scope: "/" })
       .then((registration) => {
@@ -46,10 +61,12 @@ if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
         console.warn("[SW] Registration failed:", err);
       });
 
-    // When the controller changes (new SW activated), reload the page once
+    // Reload once when a new SW takes control — but only if this is a real
+    // update (there was already a controller before). Skip on first install
+    // to avoid the unnecessary double-load on first open.
     let refreshing = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (!refreshing) {
+      if (!refreshing && hadController) {
         refreshing = true;
         deepRefresh("service-worker-controller-change");
       }
