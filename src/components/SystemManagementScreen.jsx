@@ -17,7 +17,42 @@ import { APP_VERSION } from "../version";
 import { calculateStageStatistics } from "../utils/stageTimeCalculations";
 import { calculateDepartmentEfficiency } from "../utils/efficiencyCalculations";
 import { formatHours } from "../utils/caseRiskPredictions";
-import { getCanonicalName } from "../utils/nameNormalization";
+import { getCanonicalName, getAllCanonicalNames } from "../utils/nameNormalization";
+import {
+  getFrontOfficeList,
+  addFrontOfficeStaff,
+  removeFrontOfficeStaff,
+  STORAGE_KEY as FO_STORAGE_KEY,
+  persistFOListToDb,
+} from "../utils/frontOfficeStaff";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DB broadcast — push front office list to all connected clients immediately
+// Uses the existing syscmd / applySettingsPayload infrastructure in DataContext.
+// Every client listening to realtime on the "cases" table will receive the
+// settings payload and write it to their own localStorage.
+// ─────────────────────────────────────────────────────────────────────────────
+async function broadcastFOList() {
+  try {
+    const list = getFrontOfficeList();
+    const payload = JSON.stringify({ [FO_STORAGE_KEY]: JSON.stringify(list) });
+    await db.from("cases").insert({
+      casenumber: "syscmd",
+      department: "General",
+      priority: false,
+      modifiers: [
+        "syscmd:settings",
+        "target:all",
+        `payload:${payload}`,
+      ],
+      due: new Date().toISOString(),
+      completed: false,
+      archived: false,
+    });
+  } catch (err) {
+    console.warn("[FO] broadcast failed — changes still saved locally", err);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -1898,6 +1933,14 @@ export default function SystemManagementScreen() {
 
   // Core state
   const [tab, setTab] = useState("overview");
+
+  // Front Office Staff settings
+  const [frontOfficeList, setFrontOfficeListState] = useState(() =>
+    getFrontOfficeList()
+  );
+  const [foInputValue, setFoInputValue] = useState("");
+  const [foInputError, setFoInputError] = useState("");
+  const [foSuggestions, setFoSuggestions] = useState([]);
   const [now, setNow] = useState(Date.now());
 
   // User management
@@ -2360,7 +2403,7 @@ export default function SystemManagementScreen() {
 
         {/* Tabs */}
         <nav className="mb-6 flex gap-1 overflow-x-auto glass-panel p-1">
-          {["overview", "projections", "analytics", "users", "history"].map(
+          {["overview", "projections", "analytics", "users", "history", "settings"].map(
             (t) => (
               <button
                 key={t}
@@ -2372,7 +2415,7 @@ export default function SystemManagementScreen() {
                     : "text-gray-600 hover:bg-gray-100"
                 )}
               >
-                {t === "users" ? "Users & Commands" : t}
+                {t === "users" ? "Users & Commands" : t === "settings" ? "⚙ Settings" : t}
               </button>
             )
           )}
@@ -2800,6 +2843,187 @@ export default function SystemManagementScreen() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* SETTINGS */}
+          {tab === "settings" && (
+            <div className="space-y-6">
+              {/* Front Office Staff Card */}
+              <div className="glass-panel p-6 rounded-2xl">
+                <div className="flex items-start gap-3 mb-5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl text-lg bg-indigo-100">
+                    🏢
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-800">
+                      Front Office Staff
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Staff listed here are considered Front Office. Cases added
+                      by anyone <em>not</em> on this list count toward the
+                      "staff-entered" indicator on the Manage Cases page.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Add new name row */}
+                <div className="flex gap-2 mb-4 relative">
+                  <div className="flex-1 relative">
+                    <input
+                      type="text"
+                      value={foInputValue}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFoInputValue(val);
+                        setFoInputError("");
+                        if (val.trim().length >= 2) {
+                          const allNames = getAllCanonicalNames();
+                          const lower = val.trim().toLowerCase();
+                          setFoSuggestions(
+                            allNames
+                              .filter(
+                                (n) =>
+                                  n.toLowerCase().includes(lower) &&
+                                  !frontOfficeList.includes(n)
+                              )
+                              .slice(0, 6)
+                          );
+                        } else {
+                          setFoSuggestions([]);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const canonical = getCanonicalName(foInputValue.trim());
+                          if (!canonical || canonical.length < 2) {
+                            setFoInputError("Enter a valid staff name.");
+                            return;
+                          }
+                          if (frontOfficeList.includes(canonical)) {
+                            setFoInputError(`${canonical} is already on the list.`);
+                            return;
+                          }
+                          const ok = addFrontOfficeStaff(foInputValue.trim());
+                          if (ok) {
+                            setFrontOfficeListState(getFrontOfficeList());
+                            setFoInputValue("");
+                            setFoSuggestions([]);
+                            broadcastFOList(); persistFOListToDb(db);
+                          }
+                        }
+                      }}
+                      onBlur={() => setTimeout(() => setFoSuggestions([]), 150)}
+                      placeholder="Type a name and press Enter or click Add…"
+                      className="w-full rounded-xl border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-[#16525F] focus:outline-none focus:ring-2 focus:ring-[#16525F]/20"
+                    />
+                    {/* Autocomplete dropdown */}
+                    {foSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+                        {foSuggestions.map((s) => (
+                          <button
+                            key={s}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              addFrontOfficeStaff(s);
+                              setFrontOfficeListState(getFrontOfficeList());
+                              setFoInputValue("");
+                              setFoSuggestions([]);
+                              broadcastFOList(); persistFOListToDb(db);
+                            }}
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      const canonical = getCanonicalName(foInputValue.trim());
+                      if (!canonical || canonical.length < 2) {
+                        setFoInputError("Enter a valid staff name.");
+                        return;
+                      }
+                      if (frontOfficeList.includes(canonical)) {
+                        setFoInputError(`${canonical} is already on the list.`);
+                        return;
+                      }
+                      const ok = addFrontOfficeStaff(foInputValue.trim());
+                      if (ok) {
+                        setFrontOfficeListState(getFrontOfficeList());
+                        setFoInputValue("");
+                        setFoSuggestions([]);
+                        broadcastFOList(); persistFOListToDb(db);
+                      }
+                    }}
+                    className="rounded-xl bg-[#16525F] px-4 py-2 text-sm font-medium text-white hover:bg-[#0f3f4a] transition-colors flex-shrink-0"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                {foInputError && (
+                  <p className="mb-3 text-xs text-red-500">{foInputError}</p>
+                )}
+
+                {/* Current list */}
+                {frontOfficeList.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/50 py-8 text-center">
+                    <p className="text-sm text-gray-400">
+                      No front office staff designated yet.
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Add names above — anyone not listed will count as regular
+                      staff for the purposes of the case entry indicator.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {frontOfficeList.map((name) => (
+                      <span
+                        key={name}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 pl-3 pr-1.5 py-1 text-sm font-medium text-indigo-800"
+                      >
+                        {name}
+                        <button
+                          onClick={() => {
+                            removeFrontOfficeStaff(name);
+                            setFrontOfficeListState(getFrontOfficeList());
+                            broadcastFOList(); persistFOListToDb(db);
+                          }}
+                          className="flex h-4 w-4 items-center justify-center rounded-full bg-indigo-200 hover:bg-indigo-300 text-indigo-600 transition-colors"
+                          title={`Remove ${name}`}
+                        >
+                          <svg
+                            className="w-2.5 h-2.5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={3}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {frontOfficeList.length > 0 && (
+                  <p className="mt-4 text-xs text-gray-400">
+                    {frontOfficeList.length} front office{" "}
+                    {frontOfficeList.length === 1 ? "member" : "members"} — names
+                    are matched with the same normalization used throughout the
+                    app, so typos and abbreviations resolve correctly.
+                  </p>
+                )}
               </div>
             </div>
           )}

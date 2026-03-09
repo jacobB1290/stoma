@@ -24,6 +24,7 @@ import {
 
 import { userService } from "../services/userService";
 import { buildWorkflowMap } from "../utils/workflowDetection";
+import { initFrontOfficeSync } from "../utils/frontOfficeStaff";
 import { deepRefresh } from "../utils/deepRefresh";
 
 /* ────── flag "update" rows ────── */
@@ -246,6 +247,12 @@ export function DataProvider({ activeDept, children }) {
   const [rows, setRows] = useState([]);
   const [workflowMap, setWorkflowMap] = useState(new Map());
   const workflowBuildRef = useRef(0);
+
+  /* ─── Front Office list sync — fetch from DB on mount, subscribe realtime ─── */
+  useEffect(() => {
+    const cleanup = initFrontOfficeSync(db);
+    return cleanup;
+  }, []);
 
   /* ── initial fetch (excluding archived) ── */
   useEffect(() => {
