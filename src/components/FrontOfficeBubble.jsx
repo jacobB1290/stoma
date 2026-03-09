@@ -247,34 +247,33 @@ function PillTooltip({ stats, anchorRef }) {
     >
       {/* Header band — theme-matched gradient */}
       <div
-        className="px-4 pt-4 pb-3"
+        className="px-4 pt-3.5 pb-3"
         style={{ background: headerGradient }}
       >
         <p
-          className="text-[10px] font-semibold uppercase tracking-widest mb-1.5"
-          style={{ color: "rgba(255,255,255,0.55)" }}
+          className="text-[9px] font-semibold uppercase tracking-widest mb-2"
+          style={{ color: "rgba(255,255,255,0.50)", letterSpacing: "0.12em" }}
         >
           Case Entry Tracking
         </p>
-        <div className="flex items-baseline gap-2">
+        {/* Number + label stacked cleanly */}
+        <div className="flex items-end gap-2.5">
           <span
-            className="text-3xl font-bold leading-none"
+            className="text-[2.2rem] font-bold leading-none tabular-nums"
             style={{ color: "#ffffff" }}
           >
             {pct}%
           </span>
-          <span
-            className="text-[13px] leading-snug"
-            style={{ color: "rgba(255,255,255,0.75)" }}
-          >
-            added by<br />non-front-office
-          </span>
+          <div className="mb-0.5 flex flex-col" style={{ color: "rgba(255,255,255,0.70)" }}>
+            <span className="text-[11px] font-medium leading-tight">added by</span>
+            <span className="text-[11px] font-medium leading-tight">non-front-office</span>
+          </div>
         </div>
       </div>
 
       {/* Body */}
       <div className="px-4 py-3.5 space-y-3">
-        {/* Bar */}
+        {/* Bar — normalised to 10% max so the scale is meaningful */}
         <div>
           <div className="flex justify-between text-[11px] mb-1.5" style={{ color: textMuted }}>
             <span>Front Office — {foCount} cases</span>
@@ -283,9 +282,16 @@ function PillTooltip({ stats, anchorRef }) {
           <div className="h-1.5 rounded-full overflow-hidden" style={{ background: trackBg }}>
             <div
               className="h-full rounded-full"
-              style={{ width: `${pct}%`, background: barColor, transition: "width 0.4s ease" }}
+              style={{
+                width: `${Math.min(pct / 10 * 100, 100)}%`,
+                background: barColor,
+                transition: "width 0.4s ease",
+              }}
             />
           </div>
+          <p className="text-[10px] mt-1" style={{ color: textMuted, opacity: 0.6 }}>
+            Scale: 0 – 10%
+          </p>
         </div>
 
         {/* Explanation */}
