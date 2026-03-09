@@ -15,6 +15,9 @@ configureLLM({
   apiKey: process.env.REACT_APP_OPENAI_API_KEY || "",
 });
 
+// Note: Front office list DB sync is initialised inside DataProvider (DataContext.jsx)
+// so it has access to the Supabase client and proper React lifecycle cleanup.
+
 // Strip the _deep_refresh marker so it never persists in the address bar
 // or bookmarks after a cache-busting reload.
 if (window.location.search.includes("_deep_refresh")) {

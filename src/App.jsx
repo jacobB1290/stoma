@@ -23,7 +23,47 @@ import { LiteModeProvider } from "./LiteModePerformancePatch";
 import Editor from "./components/Editor";
 import SettingsModal from "./components/SettingsModal";
 import SystemManagementScreen from "./components/SystemManagementScreen";
+import FrontOfficePill from "./components/FrontOfficeBubble";
 import { startVersionPolling } from "./services/versionCheckService";
+
+/* =============================
+   Shared pill styling helper
+   Gives all three header pills the same height + theme-aware
+   background / border so they look identical on every theme.
+   ============================= */
+function getThemeKey() {
+  const cl = document.documentElement.classList;
+  if (cl.contains("theme-white")) return "white";
+  if (cl.contains("theme-pink"))  return "pink";
+  if (cl.contains("theme-dark"))  return "dark";
+  return "blue";
+}
+
+function getHeaderPillStyle(theme) {
+  if (theme === "white") return {
+    background: "rgba(22,82,95,0.08)",
+    border: "1px solid rgba(22,82,95,0.22)",
+  };
+  if (theme === "pink") return {
+    background: "rgba(157,75,108,0.09)",
+    border: "1px solid rgba(157,75,108,0.24)",
+  };
+  // dark / blue (default) — dark teal header
+  return {
+    background: "rgba(255,255,255,0.10)",
+    border: "1px solid rgba(255,255,255,0.20)",
+  };
+}
+
+function getHeaderPillTextColor(theme) {
+  if (theme === "white") return "#16525f";
+  if (theme === "pink")  return "#9d4b6c";
+  return "rgba(255,255,255,0.90)";
+}
+
+// Shared pill className — no bg/border (handled via style), just shape + height
+const PILL_BASE = "flex items-center gap-2 px-3 rounded-full backdrop-blur shadow-sm transition-all";
+const PILL_H    = "36px";   // locked height — same for all three header pills
 
 /* =============================
    Week Navigation Component
@@ -36,7 +76,7 @@ function WeekNavigation({
   isMobile = false,
 }) {
   if (isMobile) {
-    // Mobile: Fixed position bottom right
+    // Mobile: Fixed position bottom right — keep existing styling
     return (
       <div className="fixed bottom-4 right-4 z-40 flex items-center bg-white/10 backdrop-blur-md rounded-full p-1 border border-white/20 shadow-lg">
         <button
@@ -107,25 +147,30 @@ function WeekNavigation({
     );
   }
 
-  // Desktop: In header
+  // Desktop: In header — matching pill container
+  const theme    = getThemeKey();
+  const pillSt   = getHeaderPillStyle(theme);
+  const pillText = getHeaderPillTextColor(theme);
+
   return (
-    <div className="flex items-center">
+    <div
+      className={PILL_BASE}
+      style={{ ...pillSt, height: PILL_H }}
+    >
       <button
         onClick={onPrev}
         disabled={weekOffset === 0}
         className={clsx(
-          "p-1.5 rounded-lg transition-all",
+          "p-0.5 rounded-full transition-all",
           weekOffset === 0
             ? "opacity-30 cursor-not-allowed"
-            : "hover:bg-white/20 active:scale-95"
+            : "active:scale-95"
         )}
         aria-label="Previous week"
       >
         <svg
-          className={clsx(
-            "w-4 h-4",
-            isLightTheme ? "text-gray-700" : "text-white"
-          )}
+          className="w-4 h-4"
+          style={{ color: pillText }}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -139,29 +184,25 @@ function WeekNavigation({
         </svg>
       </button>
 
-      {/* Fixed width container so arrows don't move */}
-      <div className="w-8 flex items-center justify-center">
-        <span
-          className={clsx(
-            "text-xs font-medium transition-opacity duration-150",
-            isLightTheme ? "text-gray-600" : "text-white/80",
-            weekOffset > 0 ? "opacity-100" : "opacity-0"
-          )}
-        >
-          +{weekOffset}
-        </span>
-      </div>
+      {/* Offset indicator — hidden when at current week */}
+      <span
+        className="text-xs font-medium select-none min-w-[1rem] text-center transition-opacity duration-150"
+        style={{
+          color: pillText,
+          opacity: weekOffset > 0 ? 1 : 0,
+        }}
+      >
+        +{weekOffset}
+      </span>
 
       <button
         onClick={onNext}
-        className="p-1.5 rounded-lg hover:bg-white/20 active:scale-95 transition-all"
+        className="p-0.5 rounded-full active:scale-95 transition-all"
         aria-label="Next week"
       >
         <svg
-          className={clsx(
-            "w-4 h-4",
-            isLightTheme ? "text-gray-700" : "text-white"
-          )}
+          className="w-4 h-4"
+          style={{ color: pillText }}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -183,41 +224,40 @@ function WeekNavigation({
    ============================= */
 function SettingsPill({ onClick, className, isMobile = false }) {
   const { name } = useContext(UserCtx);
-  const isLightTheme =
-    document.documentElement.classList.contains("theme-white") ||
-    document.documentElement.classList.contains("theme-pink");
   const [isMobileView, setIsMobileView] = useState(window.innerWidth < 768);
+  const [theme, setTheme] = useState(getThemeKey);
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobileView(window.innerWidth < 768);
-    };
-
+    const handleResize = () => setIsMobileView(window.innerWidth < 768);
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // React to live theme changes (user switches in settings)
+  useEffect(() => {
+    const obs = new MutationObserver(() => setTheme(getThemeKey()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
   }, []);
 
   if (isMobile && !isMobileView) return null;
   if (!isMobile && isMobileView) return null;
 
+  const pillSt   = getHeaderPillStyle(theme);
+  const textColor = getHeaderPillTextColor(theme);
+
   return (
     <button
       onClick={onClick}
-      className={clsx(
-        "flex items-center gap-2 px-3 py-1.5 rounded-full transition-all",
-        "bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20",
-        "shadow-sm hover:shadow-md",
-        className
-      )}
+      className={clsx(PILL_BASE, "hover:shadow-md", className)}
+      style={{ ...pillSt, height: PILL_H }}
       aria-label="Settings"
     >
-      <span className="text-lg">⚙️</span>
+      <span className="text-lg leading-none">⚙️</span>
       {name && (
         <span
-          className={clsx(
-            "text-xs font-medium max-w-[100px] truncate",
-            isLightTheme ? "text-gray-700" : "text-white/90"
-          )}
+          className="text-xs font-medium max-w-[100px] truncate"
+          style={{ color: textColor }}
         >
           {name}
         </span>
@@ -1130,6 +1170,13 @@ function Inner({
               isLightTheme={isLightTheme}
               isMobile={false}
             />
+          </div>
+        )}
+
+        {/* Front Office Pill - Desktop, Manage Cases view only (replaces week nav) */}
+        {!showWeekNav && !isMobileView && (
+          <div className="absolute right-4 top-1/2 -translate-y-1/2">
+            <FrontOfficePill isLightTheme={isLightTheme} />
           </div>
         )}
 

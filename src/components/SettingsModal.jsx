@@ -3,6 +3,7 @@ import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 import { useUser } from "../context/UserContext";
 import { useLiteMode } from "../LiteModePerformancePatch";
 import { deepRefresh } from "../utils/deepRefresh";
+import { FO_PILL_DISABLED_KEY } from "./FrontOfficeBubble";
 
 /* ─── fluid animation presets ─── */
 const SHEET = {
@@ -390,6 +391,12 @@ export default function SettingsModal({
     JSON.parse(localStorage.getItem("disableAutomations") ?? "true")
   );
 
+  /* --- Front Office Pill toggle --- */
+  const [foPillDisabled, setFoPillDisabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(FO_PILL_DISABLED_KEY) ?? "false"); }
+    catch { return false; }
+  });
+
   /* --- Dark Mode Boost State --- */
   const [boostDarkMode, setBoostDarkMode] = useState(() =>
     JSON.parse(localStorage.getItem("boostDarkMode") ?? "false")
@@ -757,6 +764,18 @@ export default function SettingsModal({
                   onChange={handleToggleMobileBoardView}
                   label="Mobile Board View"
                   description="Show optimized board layout on small screens"
+                />
+
+                <ToggleSwitch
+                  enabled={!foPillDisabled}
+                  onChange={() => {
+                    const next = !foPillDisabled;
+                    setFoPillDisabled(!next);
+                    localStorage.setItem(FO_PILL_DISABLED_KEY, JSON.stringify(!next));
+                    window.dispatchEvent(new Event("fo-pill-toggle"));
+                  }}
+                  label="Staff-Entry Indicator"
+                  description="Show % of cases entered by non-front-office staff in the header"
                 />
 
                 <Divider />
