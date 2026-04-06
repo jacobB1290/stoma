@@ -82,9 +82,9 @@ html.theme-pink {
   --newaccount-sheen-blur: 11px;
   --newaccount-sheen-speed: 8.5s;
 
-  --w-ring-priority: #f87171;
-  --w-ring-rush: #fb923c;
-  --w-ring-hold: #f59e0b;
+  --w-ring-priority: #c4707890;
+  --w-ring-rush: #c89a6a90;
+  --w-ring-hold: #c4a04e90;
 
   --w-panel-overdue: var(--w-overdue-surface-2);
   --w-panel-hold: #f7e8d4;

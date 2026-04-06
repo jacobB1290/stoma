@@ -81,9 +81,9 @@ html.theme-white {
   --newaccount-sheen-blur: 10px;
   --newaccount-sheen-speed: 7s;
 
-  --w-ring-priority: #f87171;
-  --w-ring-rush: #fb923c;
-  --w-ring-hold: #f59e0b;
+  --w-ring-priority: #e8849090;
+  --w-ring-rush: #e8a56a90;
+  --w-ring-hold: #d4a94890;
 
   --w-panel-overdue: var(--w-overdue-surface-2);
   --w-panel-hold: #f1e0c4;
