@@ -82,9 +82,9 @@ html.theme-pink {
   --newaccount-sheen-blur: 11px;
   --newaccount-sheen-speed: 8.5s;
 
-  --w-ring-priority: var(--w-priority-surface-2);
-  --w-ring-rush: var(--w-rush-surface-2);
-  --w-ring-hold: var(--w-hold-surface);
+  --w-ring-priority: #c4707890;
+  --w-ring-rush: #c89a6a90;
+  --w-ring-hold: #c4a04e90;
 
   --w-panel-overdue: var(--w-overdue-surface-2);
   --w-panel-hold: #f7e8d4;
@@ -314,19 +314,6 @@ html.theme-pink :is(.border-teal-600, .border-teal-700) {
   border-color: var(--w-accent-border);
 }
 
-/* ───────── rings ───────── */
-html.theme-pink .ring-red-500 {
-  --tw-ring-color: var(--w-ring-priority);
-}
-
-html.theme-pink .ring-orange-400 {
-  --tw-ring-color: var(--w-ring-rush);
-}
-
-html.theme-pink .ring-amber-400 {
-  --tw-ring-color: var(--w-ring-hold);
-}
-
 html.theme-pink :is(.ring-red-500\/30, .ring-blue-500\/30) {
   --tw-ring-color: #9d4b6c38;
 }
@@ -386,6 +373,33 @@ html.theme-pink .bg-\[\#C75A9E\] {
 html.theme-pink .bg-\[\#6F5BA8\] {
   background: var(--w-row-stage2);
   border-color: #9b6bc92e;
+}
+
+/* ───────── PRIORITY/RUSH RINGS (must come after case cards to win cascade) ───────── */
+html.theme-pink .ring-red-500,
+html.theme-pink .ring-red-400,
+html.theme-pink [class*="ring-red"]:not([class*="ring-red-500\/"]) {
+  --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0
+    var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+  --tw-ring-shadow: var(--tw-ring-inset) 0 0 0
+    calc(3px + var(--tw-ring-offset-width)) var(--w-ring-priority);
+  box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow),
+    var(--w-row-shadow);
+}
+
+html.theme-pink .ring-orange-400,
+html.theme-pink .ring-orange-500,
+html.theme-pink [class*="ring-orange"]:not([class*="ring-orange-500\/"]) {
+  --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0
+    var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+  --tw-ring-shadow: var(--tw-ring-inset) 0 0 0
+    calc(3px + var(--tw-ring-offset-width)) var(--w-ring-rush);
+  box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow),
+    var(--w-row-shadow);
+}
+
+html.theme-pink .ring-amber-400 {
+  --tw-ring-color: var(--w-ring-hold);
 }
 
 /* ───────── white opacity backgrounds - now pink tinted ───────── */
