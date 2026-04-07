@@ -196,7 +196,7 @@ export function useFrontOfficeStats() {
 // Color helper — deliberately muted, matching system tones
 // ─────────────────────────────────────────────────────────────────────────────
 function getPillAccent(pct) {
-  if (pct > 10) return { dot: "rgba(239,68,68,0.75)", level: "red" };
+  if (pct > 10) return { dot: "rgba(220,38,38,0.95)", level: "red" };
   if (pct >= 5) return { dot: "rgba(245,158,11,0.90)", level: "amber" };
   return           { dot: "rgba(255,255,255,0.30)", level: "normal" };
 }
@@ -246,9 +246,21 @@ function PillTooltip({ stats, anchorRef }) {
                         "linear-gradient(135deg, #103E48 0%, #16525F 100%)"; // blue default
 
   const barColor =
-    pct > 10 ? "rgba(239,68,68,0.70)" :
+    pct > 10 ? "rgba(220,38,38,0.85)" :
     pct >= 5 ? "rgba(245,158,11,0.70)" :
                "rgba(34,197,94,0.65)";
+
+  // Header gradient turns red when >10% — this is a serious problem
+  const headerGradientFinal =
+    pct > 10
+      ? "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)"
+      : headerGradient;
+
+  // Status message based on severity
+  const statusMsg =
+    pct > 10 ? { text: "This needs immediate attention. Cases are being missed at intake.", color: "rgba(252,165,165,1)" } :
+    pct >= 5 ? { text: "Trending in the wrong direction — review intake process.", color: "rgba(253,224,171,1)" } :
+    null;
 
   return createPortal(
     <motion.div
@@ -268,10 +280,10 @@ function PillTooltip({ stats, anchorRef }) {
         border: `1px solid ${surfaceBorder}`,
       }}
     >
-      {/* Header band — theme-matched gradient */}
+      {/* Header band — turns red when >10% */}
       <div
         className="px-4 pt-3.5 pb-3"
-        style={{ background: headerGradient }}
+        style={{ background: headerGradientFinal }}
       >
         <p
           className="text-[9px] font-semibold uppercase tracking-widest mb-2"
@@ -288,10 +300,18 @@ function PillTooltip({ stats, anchorRef }) {
             {pct}%
           </span>
           <div className="mb-0.5 flex flex-col" style={{ color: "rgba(255,255,255,0.70)" }}>
-            <span className="text-[11px] font-medium leading-tight">added by</span>
-            <span className="text-[11px] font-medium leading-tight">non-front-office</span>
+            <span className="text-[11px] font-medium leading-tight">missed by</span>
+            <span className="text-[11px] font-medium leading-tight">front office</span>
           </div>
         </div>
+        {statusMsg && (
+          <p
+            className="text-[10px] font-semibold mt-2 leading-snug"
+            style={{ color: statusMsg.color }}
+          >
+            {statusMsg.text}
+          </p>
+        )}
       </div>
 
       {/* Body */}
@@ -319,20 +339,28 @@ function PillTooltip({ stats, anchorRef }) {
 
         {/* Explanation */}
         <p className="text-[12px] leading-relaxed" style={{ color: textMuted }}>
-          Front office is responsible for entering{" "}
-          <strong style={{ color: textPrimary }}>all cases</strong>. When staff
-          add cases, it means they noticed one wasn't logged — a sign that a
-          front office intake was missed.
+          Every case should be entered by front office at intake.
+          When staff enter cases instead, it means{" "}
+          <strong style={{ color: textPrimary }}>
+            a case came in and front office didn't log it
+          </strong>
+          . The goal is <strong style={{ color: textPrimary }}>0%</strong>.
         </p>
 
         {pct === 0 ? (
           <p className="text-[11px] font-medium" style={{ color: "rgba(34,197,94,0.85)" }}>
-            ✓ All cases this month were entered by front office.
+            ✓ Perfect — every case this month was entered by front office.
+          </p>
+        ) : pct > 10 ? (
+          <p className="text-[11px] leading-relaxed font-medium" style={{ color: "rgba(239,68,68,0.90)" }}>
+            {staffCount} cases this month were not entered at intake.
+            That's {staffCount} time{staffCount !== 1 ? "s" : ""} a case
+            slipped through without being logged.
           </p>
         ) : (
           <p className="text-[11px] leading-relaxed" style={{ color: textMuted }}>
             {staffCount} of {totalCount} cases this month were
-            entered by staff rather than front office.
+            entered by staff — {staffCount} missed intake{staffCount !== 1 ? "s" : ""}.
           </p>
         )}
 
@@ -405,11 +433,11 @@ export default function FrontOfficePill() {
   } : {};
 
   const redPillOverrides = accent.level === "red" ? {
-    background: theme === "white" ? "rgba(239,68,68,0.08)" :
-                theme === "pink"  ? "rgba(239,68,68,0.10)" :
-                                    "rgba(239,68,68,0.12)",
-    border: `1px solid rgba(239,68,68,0.30)`,
-    boxShadow: "0 0 8px rgba(239,68,68,0.12)",
+    background: theme === "white" ? "rgba(220,38,38,0.12)" :
+                theme === "pink"  ? "rgba(220,38,38,0.15)" :
+                                    "rgba(220,38,38,0.18)",
+    border: `1px solid rgba(220,38,38,0.50)`,
+    boxShadow: "0 0 12px rgba(220,38,38,0.25), 0 0 4px rgba(220,38,38,0.15)",
   } : {};
 
   const handleMouseEnter = () => {
@@ -430,7 +458,13 @@ export default function FrontOfficePill() {
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={
-          accent.level === "amber"
+          accent.level === "red"
+            ? { opacity: 1, scale: 1, boxShadow: [
+                "0 0 8px rgba(220,38,38,0.15)",
+                "0 0 20px rgba(220,38,38,0.40)",
+                "0 0 8px rgba(220,38,38,0.15)",
+              ] }
+            : accent.level === "amber"
             ? { opacity: 1, scale: 1, boxShadow: [
                 "0 0 6px rgba(245,158,11,0.10)",
                 "0 0 14px rgba(245,158,11,0.25)",
@@ -439,7 +473,10 @@ export default function FrontOfficePill() {
             : { opacity: 1, scale: 1 }
         }
         transition={
-          accent.level === "amber"
+          accent.level === "red"
+            ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
+                boxShadow: { duration: 2, repeat: Infinity, ease: "easeInOut" } }
+            : accent.level === "amber"
             ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
                 boxShadow: { duration: 3, repeat: Infinity, ease: "easeInOut" } }
             : { type: "spring", stiffness: 400, damping: 26, delay: 0.15 }
