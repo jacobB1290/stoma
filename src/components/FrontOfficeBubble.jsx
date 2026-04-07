@@ -9,7 +9,7 @@
  * a case wasn't logged yet and stepped in — that's a gap worth tracking.
  *
  * Color thresholds (muted — blends with the system):
- *   ≤5%   → ghost/neutral (normal variance, no action needed)
+ *   <5%   → ghost/neutral (normal variance, no action needed)
  *   5–10% → soft amber
  *   >10%  → soft red
  *
@@ -140,7 +140,8 @@ export function useFrontOfficeStats() {
         if (!isFrontOfficeStaff(canonical)) staffCount++;
       }
 
-      const pct = Math.round((staffCount / total) * 100);
+      const rawPct = (staffCount / total) * 100;
+      const pct = Math.round(rawPct * 10) / 10;
       if (mountedRef.current) {
         setStats({ pct, staffCount, totalCount: total });
         setLoading(false);
@@ -174,7 +175,7 @@ export function useFrontOfficeStats() {
 // ─────────────────────────────────────────────────────────────────────────────
 function getPillAccent(pct) {
   if (pct > 10) return { dot: "rgba(239,68,68,0.75)" };   // muted red
-  if (pct > 5)  return { dot: "rgba(245,158,11,0.80)" };  // muted amber
+  if (pct >= 5) return { dot: "rgba(245,158,11,0.80)" };  // muted amber (starts at 5%)
   return           { dot: "rgba(255,255,255,0.30)" };      // ghost dot
 }
 
@@ -224,7 +225,7 @@ function PillTooltip({ stats, anchorRef }) {
 
   const barColor =
     pct > 10 ? "rgba(239,68,68,0.70)" :
-    pct > 5  ? "rgba(245,158,11,0.70)" :
+    pct >= 5 ? "rgba(245,158,11,0.70)" :
                "rgba(34,197,94,0.65)";
 
   return createPortal(
