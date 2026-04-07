@@ -273,10 +273,11 @@ function PillTooltip({ stats, anchorRef }) {
       ? "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)"
       : headerGradient;
 
-  // Status message based on severity
+  // Short status line for the header
   const statusMsg =
-    pct > 10 ? { text: "This needs immediate attention. Cases are being missed at intake.", color: "rgba(252,165,165,1)" } :
-    pct >= 5 ? { text: "Trending in the wrong direction — review intake process.", color: "rgba(253,224,171,1)" } :
+    pct > 10 ? { text: "Needs attention", color: "rgba(252,165,165,1)" } :
+    pct >= 5 ? { text: "Trending up — review intake", color: "rgba(253,224,171,1)" } :
+    pct > 0  ? { text: `${staffCount} case${staffCount !== 1 ? "s" : ""} not logged at intake`, color: "rgba(255,255,255,0.55)" } :
     null;
 
   return createPortal(
@@ -285,7 +286,7 @@ function PillTooltip({ stats, anchorRef }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -6, scale: 0.97 }}
       transition={{ type: "spring", stiffness: 500, damping: 32 }}
-      className="fixed z-[9999] w-[17rem] rounded-2xl overflow-hidden"
+      className="fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden"
       style={{
         top: pos.top,
         right: pos.right,
@@ -332,81 +333,106 @@ function PillTooltip({ stats, anchorRef }) {
       </div>
 
       {/* Body */}
-      <div className="px-4 py-3.5 space-y-3">
-        {/* Bar — normalised to 10% max so the scale is meaningful */}
+      <div className="px-4 py-3.5 space-y-2.5">
+
+        {/* ── What this number means ── */}
         <div>
-          <div className="flex justify-between text-[11px] mb-1.5" style={{ color: textMuted }}>
-            <span>Front Office — {foCount} cases</span>
-            <span>Staff — {staffCount}</span>
-          </div>
-          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: trackBg }}>
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.min(pct / 10 * 100, 100)}%`,
-                background: barColor,
-                transition: "width 0.4s ease",
-              }}
-            />
-          </div>
-          <p className="text-[10px] mt-1" style={{ color: textMuted, opacity: 0.6 }}>
-            Scale: 0 – 10%
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+             style={{ color: textMuted, letterSpacing: "0.06em" }}>
+            What this means
           </p>
+          {pct === 0 ? (
+            <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
+              Every case this month was logged at intake. Keep it up.
+            </p>
+          ) : (
+            <p className="text-[12px] leading-relaxed" style={{ color: textMuted }}>
+              <strong style={{ color: textPrimary }}>{staffCount} case{staffCount !== 1 ? "s" : ""}</strong> came
+              in this month and {staffCount !== 1 ? "were" : "was"} not entered by front office.
+              Staff had to enter {staffCount !== 1 ? "them" : "it"} later.
+              The target is <strong style={{ color: textPrimary }}>0%</strong>.
+            </p>
+          )}
         </div>
 
-        {/* Explanation */}
-        <p className="text-[12px] leading-relaxed" style={{ color: textMuted }}>
-          Every case should be entered by front office at intake.
-          When staff enter cases instead, it means{" "}
-          <strong style={{ color: textPrimary }}>
-            a case came in and front office didn't log it
-          </strong>
-          . The goal is <strong style={{ color: textPrimary }}>0%</strong>.
-        </p>
-
-        {pct === 0 ? (
-          <p className="text-[11px] font-medium" style={{ color: "rgba(34,197,94,0.85)" }}>
-            ✓ Perfect — every case this month was entered by front office.
-          </p>
-        ) : pct > 10 ? (
-          <p className="text-[11px] leading-relaxed font-medium" style={{ color: "rgba(239,68,68,0.90)" }}>
-            {staffCount} cases this month were not entered at intake.
-            That's {staffCount} time{staffCount !== 1 ? "s" : ""} a case
-            slipped through without being logged.
-          </p>
-        ) : (
-          <p className="text-[11px] leading-relaxed" style={{ color: textMuted }}>
-            {staffCount} of {totalCount} cases this month were
-            entered by staff — {staffCount} missed intake{staffCount !== 1 ? "s" : ""}.
-          </p>
-        )}
-
-        {/* Department breakdown — only show if there are missed intakes */}
+        {/* ── Where — department breakdown ── */}
         {deptBreakdown && deptBreakdown.length > 0 && (
           <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
             <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5"
                style={{ color: textMuted, letterSpacing: "0.06em" }}>
-              Missed by department
+              Where
             </p>
-            <div className="space-y-1">
-              {deptBreakdown.map(d => (
-                <div key={d.dept} className="flex items-center justify-between text-[11px]">
-                  <span style={{ color: textPrimary }}>{d.dept}</span>
-                  <span style={{ color: d.pct > 10 ? "rgba(220,38,38,0.90)" : textMuted }}>
-                    <strong>{d.staff}</strong> missed ({d.pct}%)
-                  </span>
-                </div>
-              ))}
+            <div className="space-y-1.5">
+              {deptBreakdown.map(d => {
+                const isHigh = d.pct > 10;
+                return (
+                  <div key={d.dept}>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span style={{ color: textPrimary, fontWeight: 500 }}>{d.dept}</span>
+                      <span style={{ color: isHigh ? "rgba(220,38,38,0.90)" : textMuted }}>
+                        {d.staff} of {d.total} ({d.pct}%)
+                      </span>
+                    </div>
+                    {/* Mini bar for each department */}
+                    <div className="h-1 rounded-full overflow-hidden mt-0.5" style={{ background: trackBg }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(d.pct / 15 * 100, 100)}%`,
+                          background: isHigh ? "rgba(220,38,38,0.70)" : barColor,
+                          transition: "width 0.4s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.625rem" }}>
+        {/* ── Why + What to do ── */}
+        {pct > 0 && (
+          <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+               style={{ color: textMuted, letterSpacing: "0.06em" }}>
+              Common causes
+            </p>
+            <ul className="text-[11px] leading-relaxed space-y-0.5 pl-3"
+                style={{ color: textMuted, listStyleType: "disc" }}>
+              <li>Case dropped off or delivered without paperwork</li>
+              <li>Front office was busy and planned to enter it later</li>
+              <li>Intake happened outside of normal front office hours</li>
+            </ul>
+          </div>
+        )}
+
+        {pct > 0 && (
+          <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+               style={{ color: textMuted, letterSpacing: "0.06em" }}>
+              What to check
+            </p>
+            <ul className="text-[11px] leading-relaxed space-y-0.5 pl-3"
+                style={{ color: textMuted, listStyleType: "disc" }}>
+              {deptBreakdown && deptBreakdown.length === 1 ? (
+                <li>Focus on <strong style={{ color: textPrimary }}>{deptBreakdown[0].dept}</strong> — all missed intakes are coming from there</li>
+              ) : deptBreakdown && deptBreakdown.length > 1 && (
+                <li>Start with <strong style={{ color: textPrimary }}>{deptBreakdown[0].dept}</strong> — highest number of missed intakes</li>
+              )}
+              <li>Confirm whether cases were dropped off without front office seeing them</li>
+              <li>Check if specific times of day have more gaps</li>
+            </ul>
+          </div>
+        )}
+
+        {/* ── Footer ── */}
+        <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
           <p className="text-[11px]" style={{ color: textMuted }}>
             {monthLabel} · {totalCount} total cases
           </p>
           <p className="text-[10px] mt-1" style={{ color: textMuted, opacity: 0.7 }}>
-            {year} year-to-date: {yearPct}% staff-entered ({yearStaffCount} of {yearTotalCount})
+            {year} overall: {yearPct}% ({yearStaffCount} of {yearTotalCount} cases)
           </p>
         </div>
       </div>
