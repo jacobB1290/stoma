@@ -259,7 +259,7 @@ function getPillAccent(pct) {
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
-  const { pct, staffCount, totalCount, deptBreakdown, yearDeptAvg, enteredBy, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+  const { pct, staffCount, totalCount, deptBreakdown, enteredBy, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const foCount = totalCount - staffCount;
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
@@ -306,6 +306,63 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
 
   // Display name mapping
   const deptDisplayName = (name) => name === "General" ? "Digital" : name;
+
+  // Count business days from start of month to today
+  const businessDaysSoFar = (() => {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth();
+    let count = 0;
+    for (let d = 1; d <= now.getDate(); d++) {
+      const dow = new Date(y, m, d).getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  })();
+
+  // Build contextual insight sentences
+  const buildInsight = () => {
+    if (pct === 0) return null;
+    const lines = [];
+    const perDay = staffCount / Math.max(businessDaysSoFar, 1);
+
+    // Per-day framing
+    if (perDay >= 2) {
+      lines.push(`That's about ${Math.round(perDay)} cases missed per business day.`);
+    } else if (perDay >= 1) {
+      lines.push("That's more than 1 case missed per business day on average.");
+    } else if (staffCount > 1 && businessDaysSoFar > 1) {
+      lines.push(`About 1 case every ${Math.round(businessDaysSoFar / staffCount)} business days.`);
+    }
+
+    // Ratio framing for worst department
+    if (deptBreakdown && deptBreakdown.length > 0) {
+      const worst = deptBreakdown[0];
+      const ratio = Math.round(worst.total / worst.staff);
+      if (ratio <= 10) {
+        lines.push(`1 in ${ratio} ${deptDisplayName(worst.dept)} cases wasn't logged at intake.`);
+      }
+    }
+
+    // Staff concentration
+    if (enteredBy && enteredBy.length > 0 && staffCount >= 3) {
+      const top = enteredBy[0];
+      if (top.count >= staffCount * 0.6) {
+        lines.push(`${top.name} entered ${top.count} of the ${staffCount} — they're catching most of the gaps.`);
+      }
+    }
+
+    // Day pattern
+    if (dayBreakdown) {
+      const max = dayBreakdown.reduce((a, b) => b.count > a.count ? b : a, dayBreakdown[0]);
+      if (max.count >= 2 && max.count >= staffCount * 0.4) {
+        lines.push(`${max.day}s have the most missed cases this month.`);
+      }
+    }
+
+    return lines;
+  };
+
+  const insights = buildInsight();
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -376,23 +433,25 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── What this number means ── */}
+        {/* ── Contextual insight ── */}
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide mb-1"
-             style={{ color: textMuted, letterSpacing: "0.06em" }}>
-            What this means
-          </p>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
           ) : (
-            <p className="text-[12px] leading-relaxed" style={{ color: textMuted }}>
-              <strong style={{ color: textPrimary }}>{staffCount} case{staffCount !== 1 ? "s" : ""}</strong> came
-              in this month and {staffCount !== 1 ? "were" : "was"} not entered by front office.
-              Staff had to enter {staffCount !== 1 ? "them" : "it"} later.
-              The target is <strong style={{ color: textPrimary }}>0%</strong>.
-            </p>
+            <div className="space-y-1.5">
+              <p className="text-[12px] leading-relaxed" style={{ color: textMuted }}>
+                <strong style={{ color: textPrimary }}>{staffCount} case{staffCount !== 1 ? "s" : ""}</strong>{" "}
+                not entered at intake this month.{" "}
+                {insights && insights.length > 0 && insights[0]}
+              </p>
+              {insights && insights.slice(1).map((line, i) => (
+                <p key={i} className="text-[11px] leading-relaxed" style={{ color: textMuted }}>
+                  {line}
+                </p>
+              ))}
+            </div>
           )}
         </div>
 
@@ -405,22 +464,15 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
             </p>
             <div className="space-y-2">
               {deptBreakdown.map(d => {
-                const avg = yearDeptAvg?.[d.dept];
-                const hasAvg = avg != null && avg > 0;
-                const delta = hasAvg ? d.pct - avg : 0;
-                const aboveBelowColor =
-                  delta > 1  ? "rgba(220,38,38,0.80)" :
-                  delta < -1 ? "rgba(34,197,94,0.80)" :
-                               textMuted;
                 const deptBarColor =
-                  delta > 1  ? "rgba(220,38,38,0.65)" :
-                  delta < -1 ? "rgba(34,197,94,0.60)" :
-                               "rgba(245,158,11,0.60)";
+                  d.pct > 10 ? "rgba(220,38,38,0.70)" :
+                  d.pct > 5  ? "rgba(245,158,11,0.65)" :
+                               "rgba(245,158,11,0.45)";
                 return (
                   <div key={d.dept}>
                     <div className="flex items-center justify-between text-[11px]">
                       <span style={{ color: textPrimary, fontWeight: 500 }}>{deptDisplayName(d.dept)}</span>
-                      <span style={{ color: textMuted }}>
+                      <span style={{ color: d.pct > 10 ? "rgba(220,38,38,0.80)" : textMuted }}>
                         {d.staff} of {d.total} ({d.pct}%)
                       </span>
                     </div>
@@ -435,14 +487,6 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
                         }}
                       />
                     </div>
-                    {/* Month vs yearly average */}
-                    {hasAvg && (
-                      <p className="text-[10px] mt-0.5" style={{ color: aboveBelowColor, fontWeight: 500 }}>
-                        {delta > 1 ? "▲" : delta < -1 ? "▼" : "—"}{" "}
-                        {delta > 1 ? "above" : delta < -1 ? "below" : "near"}{" "}
-                        {avg}% avg
-                      </p>
-                    )}
                   </div>
                 );
               })}
