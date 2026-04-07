@@ -141,16 +141,12 @@ export function useFrontOfficeStats() {
       const tally = (list) => {
         let staff = 0;
         const byDept = {};    // { dept: { staff, total } }
-        const byStaff = {};   // { userName: count }  — who entered the missed ones
         const byDay = {};     // { dayName: count }   — when gaps happen
         for (const entry of list) {
           const canonical = getCanonicalName(entry.user_name || "");
           const isStaff = !isFrontOfficeStaff(canonical);
           if (isStaff) {
             staff++;
-            // Track which staff member entered it
-            const name = entry.user_name || "Unknown";
-            byStaff[name] = (byStaff[name] || 0) + 1;
             // Track which day of week
             const day = DAY_NAMES[new Date(entry.created_at).getDay()];
             byDay[day] = (byDay[day] || 0) + 1;
@@ -180,15 +176,11 @@ export function useFrontOfficeStats() {
             total: v.total,
             pct: v.total > 0 ? Math.round((v.staff / v.total) * 1000) / 10 : 0,
           }));
-        // Staff who entered — most first
-        const enteredBy = Object.entries(byStaff)
-          .map(([name, count]) => ({ name, count }))
-          .sort((a, b) => b.count - a.count);
         // Day-of-week breakdown — ordered Mon–Sun
         const dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         const dayBreakdown = dayOrder
           .map(d => ({ day: d, count: byDay[d] || 0 }));
-        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll, enteredBy, dayBreakdown };
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll, dayBreakdown };
       };
 
       const monthly = tally(monthEntries);
@@ -211,8 +203,6 @@ export function useFrontOfficeStats() {
           staffCount: monthly.staffCount,
           totalCount: monthly.totalCount,
           deptBreakdown: monthly.deptBreakdown,
-          yearDeptAvg,
-          enteredBy: monthly.enteredBy,
           dayBreakdown: monthly.dayBreakdown,
           yearPct: yearly.pct,
           yearStaffCount: yearly.staffCount,
@@ -259,8 +249,7 @@ function getPillAccent(pct) {
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
-  const { pct, staffCount, totalCount, deptBreakdown, enteredBy, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
-  const foCount = totalCount - staffCount;
+  const { pct, staffCount, totalCount, deptBreakdown, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
 
@@ -340,14 +329,6 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       const ratio = Math.round(worst.total / worst.staff);
       if (ratio <= 10) {
         lines.push(`1 in ${ratio} ${deptDisplayName(worst.dept)} cases wasn't logged at intake.`);
-      }
-    }
-
-    // Staff concentration
-    if (enteredBy && enteredBy.length > 0 && staffCount >= 3) {
-      const top = enteredBy[0];
-      if (top.count >= staffCount * 0.6) {
-        lines.push(`${top.name} entered ${top.count} of the ${staffCount} — they're catching most of the gaps.`);
       }
     }
 
@@ -490,24 +471,6 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
                   </div>
                 );
               })}
-            </div>
-          </div>
-        )}
-
-        {/* ── Who entered them ── */}
-        {enteredBy && enteredBy.length > 0 && (
-          <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5"
-               style={{ color: textMuted, letterSpacing: "0.06em" }}>
-              Entered by
-            </p>
-            <div className="space-y-0.5">
-              {enteredBy.map(s => (
-                <div key={s.name} className="flex items-center justify-between text-[11px]">
-                  <span style={{ color: textPrimary }}>{s.name}</span>
-                  <span style={{ color: textMuted }}>{s.count}</span>
-                </div>
-              ))}
             </div>
           </div>
         )}
