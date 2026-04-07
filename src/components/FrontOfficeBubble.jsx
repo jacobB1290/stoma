@@ -243,7 +243,7 @@ function getPillAccent(pct) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
-function PillTooltip({ stats, anchorRef }) {
+function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   const { pct, staffCount, totalCount, deptBreakdown, enteredBy, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const foCount = totalCount - staffCount;
   const [pos, setPos] = useState({ top: 0, right: 16 });
@@ -289,6 +289,17 @@ function PillTooltip({ stats, anchorRef }) {
     pct >= 5 ? "rgba(245,158,11,0.70)" :
                "rgba(34,197,94,0.65)";
 
+  // Display name mapping
+  const deptDisplayName = (name) => name === "General" ? "Digital" : name;
+
+  // Per-department severity label
+  const deptSeverity = (dpct) =>
+    dpct > 15 ? { label: "Critical", color: "rgba(220,38,38,0.90)" } :
+    dpct > 10 ? { label: "High",     color: "rgba(220,38,38,0.75)" } :
+    dpct > 5  ? { label: "Elevated", color: "rgba(245,158,11,0.85)" } :
+    dpct > 0  ? { label: "Low",      color: "rgba(34,197,94,0.75)" } :
+                null;
+
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
     pct > 10
@@ -308,14 +319,15 @@ function PillTooltip({ stats, anchorRef }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -6, scale: 0.97 }}
       transition={{ type: "spring", stiffness: 500, damping: 32 }}
-      className="fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden"
+      className="fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden max-h-[85vh]"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       style={{
         top: pos.top,
         right: pos.right,
         boxShadow: light
           ? "0 12px 40px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)"
           : "0 12px 40px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.25)",
-        pointerEvents: "none",
         background: surfaceBg,
         border: `1px solid ${surfaceBorder}`,
       }}
@@ -355,7 +367,7 @@ function PillTooltip({ stats, anchorRef }) {
       </div>
 
       {/* Body */}
-      <div className="px-4 py-3.5 space-y-2.5">
+      <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
         {/* ── What this number means ── */}
         <div>
@@ -384,28 +396,35 @@ function PillTooltip({ stats, anchorRef }) {
                style={{ color: textMuted, letterSpacing: "0.06em" }}>
               Where
             </p>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {deptBreakdown.map(d => {
-                const isHigh = d.pct > 10;
+                const sev = deptSeverity(d.pct);
                 return (
                   <div key={d.dept}>
                     <div className="flex items-center justify-between text-[11px]">
-                      <span style={{ color: textPrimary, fontWeight: 500 }}>{d.dept}</span>
-                      <span style={{ color: isHigh ? "rgba(220,38,38,0.90)" : textMuted }}>
+                      <span style={{ color: textPrimary, fontWeight: 500 }}>{deptDisplayName(d.dept)}</span>
+                      <span style={{ color: sev?.color || textMuted }}>
                         {d.staff} of {d.total} ({d.pct}%)
                       </span>
                     </div>
-                    {/* Mini bar for each department */}
+                    {/* Mini bar */}
                     <div className="h-1 rounded-full overflow-hidden mt-0.5" style={{ background: trackBg }}>
                       <div
                         className="h-full rounded-full"
                         style={{
-                          width: `${Math.min(d.pct / 15 * 100, 100)}%`,
-                          background: isHigh ? "rgba(220,38,38,0.70)" : barColor,
+                          width: `${Math.min(d.pct / 20 * 100, 100)}%`,
+                          background: sev?.color || barColor,
                           transition: "width 0.4s ease",
                         }}
                       />
                     </div>
+                    {/* Severity label */}
+                    {sev && (
+                      <p className="text-[10px] mt-0.5" style={{ color: sev.color, fontWeight: 500 }}>
+                        {sev.label}
+                        {d.pct > 10 && " — 1 in " + Math.round(d.total / d.staff) + " cases missed"}
+                      </p>
+                    )}
                   </div>
                 );
               })}
@@ -466,13 +485,36 @@ function PillTooltip({ stats, anchorRef }) {
           </div>
         )}
 
-        {/* ── Footer ── */}
-        <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
+        {/* ── Year-to-date ── */}
+        <div style={{
+          borderTop: `1px solid ${dividerColor}`,
+          paddingTop: "0.5rem",
+          background: light ? "rgba(0,0,0,0.02)" : "rgba(255,255,255,0.03)",
+          margin: "0 -1rem",
+          padding: "0.5rem 1rem 0",
+        }}>
+          <div className="flex items-baseline justify-between mb-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide"
+               style={{ color: textMuted, letterSpacing: "0.06em" }}>
+              {year} Year-to-date
+            </p>
+            <span className="text-[13px] font-bold tabular-nums" style={{
+              color: yearPct > 10 ? "rgba(220,38,38,0.90)" :
+                     yearPct >= 5 ? "rgba(245,158,11,0.85)" :
+                                    "rgba(34,197,94,0.80)",
+            }}>
+              {yearPct}%
+            </span>
+          </div>
           <p className="text-[11px]" style={{ color: textMuted }}>
-            {monthLabel} · {totalCount} total cases
+            {yearStaffCount} of {yearTotalCount} cases entered by staff
           </p>
-          <p className="text-[10px] mt-1" style={{ color: textMuted, opacity: 0.7 }}>
-            {year} overall: {yearPct}% ({yearStaffCount} of {yearTotalCount} cases)
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ paddingTop: "0.375rem" }}>
+          <p className="text-[10px]" style={{ color: textMuted, opacity: 0.6 }}>
+            {monthLabel} · {totalCount} cases this month
           </p>
         </div>
       </div>
@@ -612,7 +654,7 @@ export default function FrontOfficePill() {
       </motion.div>
 
       <AnimatePresence>
-        {hovered && <PillTooltip stats={stats} anchorRef={pillRef} />}
+        {hovered && <PillTooltip stats={stats} anchorRef={pillRef} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave} />}
       </AnimatePresence>
     </div>
   );
