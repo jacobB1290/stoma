@@ -401,20 +401,17 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     // Close with the target
     parts.push(`The target is ${b("0%")}.`);
 
-    return parts.join(" ");
+    return parts;
   };
 
-  const summary = buildSummary();
+  const summaryLines = buildSummary();
 
-  // Progressive fade-in sweep (~1.5s total)
+  // Line-by-line reveal — count up to total lines
   useEffect(() => {
-    if (!summary || revealProgress >= 1) return;
-    const DURATION = 1500; // ms
-    const STEP = 16; // ~60fps
-    const increment = STEP / DURATION;
-    const timer = setTimeout(() => setRevealProgress(p => Math.min(p + increment, 1)), STEP);
+    if (!summaryLines || revealProgress >= summaryLines.length) return;
+    const timer = setTimeout(() => setRevealProgress(p => p + 1), 250);
     return () => clearTimeout(timer);
-  }, [summary, revealProgress]);
+  }, [summaryLines, revealProgress]);
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -485,24 +482,25 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary with progressive fade-in ── */}
+        {/* ── Summary with line-by-line fade-in ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
-          ) : summary ? (
-            <p
-              className="text-[12px] leading-[1.6]"
-              style={{
-                color: textMuted,
-                maskImage: revealProgress >= 1 ? "none" :
-                  `linear-gradient(to right, rgba(0,0,0,1) ${revealProgress * 100 - 5}%, rgba(0,0,0,0) ${revealProgress * 100 + 15}%)`,
-                WebkitMaskImage: revealProgress >= 1 ? "none" :
-                  `linear-gradient(to right, rgba(0,0,0,1) ${revealProgress * 100 - 5}%, rgba(0,0,0,0) ${revealProgress * 100 + 15}%)`,
-              }}
-              dangerouslySetInnerHTML={{ __html: summary }}
-            />
+          ) : summaryLines ? (
+            <div className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
+              {summaryLines.map((line, i) => (
+                <span
+                  key={i}
+                  style={{
+                    opacity: i < revealProgress ? 1 : 0,
+                    transition: "opacity 0.4s ease",
+                  }}
+                  dangerouslySetInnerHTML={{ __html: (i > 0 ? " " : "") + line }}
+                />
+              ))}
+            </div>
           ) : null}
         </div>
 
