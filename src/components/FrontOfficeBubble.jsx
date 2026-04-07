@@ -9,7 +9,7 @@
  * a case wasn't logged yet and stepped in — that's a gap worth tracking.
  *
  * Color thresholds (muted — blends with the system):
- *   ≤5%   → ghost/neutral (normal variance, no action needed)
+ *   <5%   → ghost/neutral (normal variance, no action needed)
  *   5–10% → soft amber
  *   >10%  → soft red
  *
@@ -140,7 +140,8 @@ export function useFrontOfficeStats() {
         if (!isFrontOfficeStaff(canonical)) staffCount++;
       }
 
-      const pct = Math.round((staffCount / total) * 100);
+      const rawPct = (staffCount / total) * 100;
+      const pct = Math.round(rawPct * 10) / 10;
       if (mountedRef.current) {
         setStats({ pct, staffCount, totalCount: total });
         setLoading(false);
@@ -173,9 +174,9 @@ export function useFrontOfficeStats() {
 // Color helper — deliberately muted, matching system tones
 // ─────────────────────────────────────────────────────────────────────────────
 function getPillAccent(pct) {
-  if (pct > 10) return { dot: "rgba(239,68,68,0.75)" };   // muted red
-  if (pct > 5)  return { dot: "rgba(245,158,11,0.80)" };  // muted amber
-  return           { dot: "rgba(255,255,255,0.30)" };      // ghost dot
+  if (pct > 10) return { dot: "rgba(239,68,68,0.75)", level: "red" };
+  if (pct >= 5) return { dot: "rgba(245,158,11,0.90)", level: "amber" };
+  return           { dot: "rgba(255,255,255,0.30)", level: "normal" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,7 +225,7 @@ function PillTooltip({ stats, anchorRef }) {
 
   const barColor =
     pct > 10 ? "rgba(239,68,68,0.70)" :
-    pct > 5  ? "rgba(245,158,11,0.70)" :
+    pct >= 5 ? "rgba(245,158,11,0.70)" :
                "rgba(34,197,94,0.65)";
 
   return createPortal(
@@ -367,7 +368,24 @@ export default function FrontOfficePill() {
   const textColor = getHeaderPillTextColor(theme);
 
   // Icon color: use accent dot color when it's visible; otherwise use text color
-  const iconColor = accent.dot !== "rgba(255,255,255,0.30)" ? accent.dot : textColor;
+  const iconColor = accent.level !== "normal" ? accent.dot : textColor;
+
+  // Amber-level pill overrides — warm tint so it's not ignorable
+  const amberPillOverrides = accent.level === "amber" ? {
+    background: theme === "white" ? "rgba(245,158,11,0.10)" :
+                theme === "pink"  ? "rgba(245,158,11,0.12)" :
+                                    "rgba(245,158,11,0.14)",
+    border: `1px solid rgba(245,158,11,0.35)`,
+    boxShadow: "0 0 8px rgba(245,158,11,0.15)",
+  } : {};
+
+  const redPillOverrides = accent.level === "red" ? {
+    background: theme === "white" ? "rgba(239,68,68,0.08)" :
+                theme === "pink"  ? "rgba(239,68,68,0.10)" :
+                                    "rgba(239,68,68,0.12)",
+    border: `1px solid rgba(239,68,68,0.30)`,
+    boxShadow: "0 0 8px rgba(239,68,68,0.12)",
+  } : {};
 
   const handleMouseEnter = () => {
     clearTimeout(hoverTimerRef.current);
@@ -386,10 +404,23 @@ export default function FrontOfficePill() {
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ type: "spring", stiffness: 400, damping: 26, delay: 0.15 }}
+        animate={
+          accent.level === "amber"
+            ? { opacity: 1, scale: 1, boxShadow: [
+                "0 0 6px rgba(245,158,11,0.10)",
+                "0 0 14px rgba(245,158,11,0.25)",
+                "0 0 6px rgba(245,158,11,0.10)",
+              ] }
+            : { opacity: 1, scale: 1 }
+        }
+        transition={
+          accent.level === "amber"
+            ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
+                boxShadow: { duration: 3, repeat: Infinity, ease: "easeInOut" } }
+            : { type: "spring", stiffness: 400, damping: 26, delay: 0.15 }
+        }
         className="flex items-center gap-2 px-3 rounded-full backdrop-blur shadow-sm cursor-default select-none"
-        style={{ ...pillSt, height: PILL_H }}
+        style={{ ...pillSt, ...amberPillOverrides, ...redPillOverrides, height: PILL_H }}
       >
         {/* Bar-chart icon — same 18px as ⚙️ in SettingsPill */}
         <svg
@@ -407,9 +438,11 @@ export default function FrontOfficePill() {
         {/* Label */}
         <span
           className="text-xs font-medium"
-          style={{ color: textColor }}
+          style={{ color: accent.level === "amber" ? accent.dot
+                        : accent.level === "red"   ? accent.dot
+                        : textColor }}
         >
-          {pct}% staff-entered
+          {Math.round(pct)}% staff-entered
         </span>
       </motion.div>
 
