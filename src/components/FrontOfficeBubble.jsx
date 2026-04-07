@@ -238,10 +238,27 @@ export function useFrontOfficeStats() {
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener("fo-list-updated", compute);
+
+    // Re-run when a new case_history row is inserted (case created)
+    let debounceTimer;
+    const ch = db
+      .channel("fo-pill-history")
+      .on(
+        "postgres_changes",
+        { schema: "public", table: "case_history", event: "INSERT" },
+        () => {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(compute, 1500);
+        }
+      )
+      .subscribe();
+
     return () => {
       mountedRef.current = false;
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("fo-list-updated", compute);
+      clearTimeout(debounceTimer);
+      db.removeChannel(ch);
     };
   }, [compute]);
 
@@ -263,11 +280,9 @@ function getPillAccent(pct) {
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
 
-  // Typewriter animation with fade-in trail
-  const [visibleChars, setVisibleChars] = useState(0);
-  useEffect(() => {
-    setVisibleChars(0);
-  }, [pct, staffCount]);
+  // Word fade-in counter
+  const [wordsVisible, setWordsVisible] = useState(0);
+  useEffect(() => { setWordsVisible(0); }, [pct, staffCount]);
 
   // Trend hover state
   const [trendHover, setTrendHover] = useState(null);
@@ -329,42 +344,65 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     return count;
   })();
 
-  // Build a single flowing paragraph (HTML) from the data
-  const b = (v) => `<strong style="color:${textPrimary}">${v}</strong>`;
+  // Build summary as array of { text, bold } word tokens
   const buildSummary = () => {
     if (pct === 0) return null;
-    const parts = [];
+    // Each segment is either plain text or { bold: "text" }
+    const segments = [];
+    const push = (...items) => segments.push(...items);
+    const B = (v) => ({ bold: String(v) });
     const perDay = staffCount / Math.max(businessDaysSoFar, 1);
     const s = staffCount !== 1;
 
     // Opening — what happened + pace
+    push("So far this month,");
+    push(B(staffCount));
+    push(s ? "cases were" : "case was");
+    push("not entered by front office at intake —");
     if (perDay >= 2) {
-      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — about ${b(Math.round(perDay) + " per business day")}.`);
+      push("about");
+      push(B(Math.round(perDay) + " per business day."));
     } else if (perDay >= 1) {
-      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — ${b("more than 1 per business day")}.`);
+      push(B("more than 1 per business day."));
     } else if (staffCount > 1 && businessDaysSoFar > 1) {
-      parts.push(`So far this month, ${b(staffCount)} cases were not entered by front office at intake — roughly ${b("1 every " + Math.round(businessDaysSoFar / staffCount) + " business days")}.`);
+      push("roughly");
+      push(B("1 every " + Math.round(businessDaysSoFar / staffCount) + " business days."));
     } else {
-      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake.`);
+      // trim trailing " —" from opening
+      segments[segments.length - 1] = segments[segments.length - 1].replace(/ —$/, ".");
     }
 
     // Department focus
     if (deptBreakdown && deptBreakdown.length > 0) {
       const worst = deptBreakdown[0];
       const wName = deptDisplayName(worst.dept);
+      const ratio = Math.round(worst.total / worst.staff);
       if (deptBreakdown.length === 1) {
-        const ratio = Math.round(worst.total / worst.staff);
+        push("All");
+        push(B(staffCount));
+        push("came from");
+        push(B(wName));
         if (ratio <= 10) {
-          parts.push(`All ${b(staffCount)} came from ${b(wName)}, where ${b("1 in every " + ratio)} cases wasn't logged.`);
+          push("— where");
+          push(B("1 in every " + ratio));
+          push("cases wasn't logged.");
         } else {
-          parts.push(`All ${b(staffCount)} came from ${b(wName)}.`);
+          // replace last segment to end with period
+          segments[segments.length - 1] = typeof segments[segments.length - 1] === "object"
+            ? { bold: segments[segments.length - 1].bold + "." }
+            : segments[segments.length - 1] + ".";
         }
       } else {
-        const ratio = Math.round(worst.total / worst.staff);
+        push("Most are in");
+        push(B(wName));
+        push("—");
         if (ratio <= 10) {
-          parts.push(`Most are in ${b(wName)} — ${b("1 in every " + ratio)} cases there wasn't logged.`);
+          push(B("1 in every " + ratio));
+          push("cases there wasn't logged.");
         } else {
-          parts.push(`${b(wName)} has the most at ${b(worst.staff)} missed.`);
+          push("at");
+          push(B(worst.staff));
+          push("missed.");
         }
       }
     }
@@ -375,38 +413,39 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       const firstHalf = trend.slice(0, mid).reduce((a, p) => a + p.pct, 0) / mid;
       const secondHalf = trend.slice(mid).reduce((a, p) => a + p.pct, 0) / (trend.length - mid);
       if (secondHalf > firstHalf + 1.5) {
-        parts.push(`The trend is going ${b("up")} — it's getting worse as the month goes on.`);
+        push("The trend is going");
+        push(B("up"));
+        push("— it's getting worse as the month goes on.");
       } else if (secondHalf < firstHalf - 1.5) {
-        parts.push(`The rate has been ${b("coming down")} over the month.`);
+        push("The rate has been");
+        push(B("coming down"));
+        push("over the month.");
       }
     }
 
-    // Close with the target
-    parts.push(`The target is ${b("0%")}.`);
+    push("The target is");
+    push(B("0%."));
 
-    return parts.join(" ");
+    // Flatten segments into individual words with bold flag
+    const words = [];
+    for (const seg of segments) {
+      const isBold = typeof seg === "object";
+      const text = isBold ? seg.bold : seg;
+      for (const w of text.split(/\s+/).filter(Boolean)) {
+        words.push({ text: w, bold: isBold });
+      }
+    }
+    return words;
   };
 
-  const summary = buildSummary();
+  const summaryWords = buildSummary();
 
-  // Typewriter tick — reveal chars progressively
+  // Tick words visible
   useEffect(() => {
-    if (!summary) return;
-    if (visibleChars >= summary.length) return;
-    // Skip HTML tags instantly so they don't slow the animation
-    const nextVisible = (() => {
-      let pos = visibleChars;
-      // If we're inside a tag, skip to end of tag
-      if (summary[pos] === "<") {
-        const close = summary.indexOf(">", pos);
-        if (close !== -1) return close + 1;
-      }
-      return pos + 1;
-    })();
-    const speed = visibleChars < 30 ? 10 : 6;
-    const timer = setTimeout(() => setVisibleChars(nextVisible), speed);
+    if (!summaryWords || !summaryWords.length || wordsVisible >= summaryWords.length) return;
+    const timer = setTimeout(() => setWordsVisible(v => v + 1), 40);
     return () => clearTimeout(timer);
-  }, [summary, visibleChars]);
+  }, [summaryWords, wordsVisible]);
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -427,7 +466,7 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -6, scale: 0.97 }}
       transition={{ type: "spring", stiffness: 500, damping: 32 }}
-      className="fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden max-h-[85vh]"
+      className="fo-pill-tooltip fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden max-h-[85vh]"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={{
@@ -477,41 +516,25 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary with typewriter + fade trail ── */}
+        {/* ── Summary — word-by-word fade in ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
-          ) : summary ? (
+          ) : summaryWords && summaryWords.length > 0 ? (
             <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
-              {(() => {
-                const done = visibleChars >= summary.length;
-                const visible = summary.slice(0, visibleChars);
-                // Split into solid portion and a fading tail (~20 chars)
-                const FADE_LEN = 20;
-                if (done) {
-                  return <span dangerouslySetInnerHTML={{ __html: visible }} />;
-                }
-                // Find a safe split point that doesn't break HTML tags
-                let splitAt = Math.max(0, visibleChars - FADE_LEN);
-                // Don't split inside an HTML tag
-                const lastOpenBefore = visible.lastIndexOf("<", splitAt);
-                const lastCloseBefore = visible.lastIndexOf(">", splitAt);
-                if (lastOpenBefore > lastCloseBefore) splitAt = lastOpenBefore;
-                const solid = visible.slice(0, splitAt);
-                const fade = visible.slice(splitAt);
-                return (
-                  <>
-                    <span dangerouslySetInnerHTML={{ __html: solid }} />
-                    <span style={{
-                      maskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
-                      WebkitMaskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
-                    }} dangerouslySetInnerHTML={{ __html: fade }} />
-                    <span style={{ opacity: 0.3, marginLeft: 1 }}>|</span>
-                  </>
-                );
-              })()}
+              {summaryWords.map((w, i) => (
+                <span
+                  key={i}
+                  style={{
+                    opacity: i < wordsVisible ? 1 : 0,
+                    transition: "opacity 0.3s ease",
+                    fontWeight: w.bold ? 600 : 400,
+                    color: w.bold ? textPrimary : undefined,
+                  }}
+                >{i > 0 ? " " : ""}{w.text}</span>
+              ))}
             </p>
           ) : null}
         </div>
@@ -689,6 +712,21 @@ export default function FrontOfficePill() {
   const [theme, setTheme] = useState(getThemeKey);
   const pillRef = useRef(null);
   const hoverTimerRef = useRef(null);
+  const [pinned, setPinned] = useState(false);
+
+  // Close on click outside when pinned
+  useEffect(() => {
+    if (!pinned) return;
+    const handleOutside = (e) => {
+      if (pillRef.current && !pillRef.current.contains(e.target) &&
+          !e.target.closest(".fo-pill-tooltip")) {
+        setPinned(false);
+        setHovered(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [pinned]);
 
   // React to theme changes
   useEffect(() => {
@@ -746,7 +784,12 @@ export default function FrontOfficePill() {
     setHovered(true);
   };
   const handleMouseLeave = () => {
+    if (pinned) return;
     hoverTimerRef.current = setTimeout(() => setHovered(false), 120);
+  };
+  const handleClick = () => {
+    setPinned(p => !p);
+    setHovered(true);
   };
 
   return (
@@ -755,6 +798,7 @@ export default function FrontOfficePill() {
       className="relative flex items-center"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
@@ -782,7 +826,7 @@ export default function FrontOfficePill() {
                 boxShadow: { duration: 3, repeat: Infinity, ease: "easeInOut" } }
             : { type: "spring", stiffness: 400, damping: 26, delay: 0.15 }
         }
-        className="flex items-center gap-2 px-3 rounded-full backdrop-blur shadow-sm cursor-default select-none"
+        className="flex items-center gap-2 px-3 rounded-full backdrop-blur shadow-sm cursor-pointer select-none"
         style={{ ...pillSt, ...amberPillOverrides, ...redPillOverrides, height: PILL_H }}
       >
         {/* Bar-chart icon — same 18px as ⚙️ in SettingsPill */}
