@@ -238,10 +238,27 @@ export function useFrontOfficeStats() {
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener("fo-list-updated", compute);
+
+    // Re-run when a new case_history row is inserted (case created)
+    let debounceTimer;
+    const ch = db
+      .channel("fo-pill-history")
+      .on(
+        "postgres_changes",
+        { schema: "public", table: "case_history", event: "INSERT" },
+        () => {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(compute, 1500);
+        }
+      )
+      .subscribe();
+
     return () => {
       mountedRef.current = false;
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("fo-list-updated", compute);
+      clearTimeout(debounceTimer);
+      db.removeChannel(ch);
     };
   }, [compute]);
 
@@ -263,10 +280,10 @@ function getPillAccent(pct) {
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
 
-  // Typewriter animation with fade-in trail
-  const [visibleChars, setVisibleChars] = useState(0);
+  // Fade-in reveal animation progress (0 → 1)
+  const [revealProgress, setRevealProgress] = useState(0);
   useEffect(() => {
-    setVisibleChars(0);
+    setRevealProgress(0);
   }, [pct, staffCount]);
 
   // Trend hover state
@@ -389,24 +406,15 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
 
   const summary = buildSummary();
 
-  // Typewriter tick — reveal chars progressively
+  // Progressive fade-in sweep (~1.5s total)
   useEffect(() => {
-    if (!summary) return;
-    if (visibleChars >= summary.length) return;
-    // Skip HTML tags instantly so they don't slow the animation
-    const nextVisible = (() => {
-      let pos = visibleChars;
-      // If we're inside a tag, skip to end of tag
-      if (summary[pos] === "<") {
-        const close = summary.indexOf(">", pos);
-        if (close !== -1) return close + 1;
-      }
-      return pos + 1;
-    })();
-    const speed = visibleChars < 30 ? 10 : 6;
-    const timer = setTimeout(() => setVisibleChars(nextVisible), speed);
+    if (!summary || revealProgress >= 1) return;
+    const DURATION = 1500; // ms
+    const STEP = 16; // ~60fps
+    const increment = STEP / DURATION;
+    const timer = setTimeout(() => setRevealProgress(p => Math.min(p + increment, 1)), STEP);
     return () => clearTimeout(timer);
-  }, [summary, visibleChars]);
+  }, [summary, revealProgress]);
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -477,42 +485,24 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary with typewriter + fade trail ── */}
+        {/* ── Summary with progressive fade-in ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
           ) : summary ? (
-            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
-              {(() => {
-                const done = visibleChars >= summary.length;
-                const visible = summary.slice(0, visibleChars);
-                // Split into solid portion and a fading tail (~20 chars)
-                const FADE_LEN = 20;
-                if (done) {
-                  return <span dangerouslySetInnerHTML={{ __html: visible }} />;
-                }
-                // Find a safe split point that doesn't break HTML tags
-                let splitAt = Math.max(0, visibleChars - FADE_LEN);
-                // Don't split inside an HTML tag
-                const lastOpenBefore = visible.lastIndexOf("<", splitAt);
-                const lastCloseBefore = visible.lastIndexOf(">", splitAt);
-                if (lastOpenBefore > lastCloseBefore) splitAt = lastOpenBefore;
-                const solid = visible.slice(0, splitAt);
-                const fade = visible.slice(splitAt);
-                return (
-                  <>
-                    <span dangerouslySetInnerHTML={{ __html: solid }} />
-                    <span style={{
-                      maskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
-                      WebkitMaskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
-                    }} dangerouslySetInnerHTML={{ __html: fade }} />
-                    <span style={{ opacity: 0.3, marginLeft: 1 }}>|</span>
-                  </>
-                );
-              })()}
-            </p>
+            <p
+              className="text-[12px] leading-[1.6]"
+              style={{
+                color: textMuted,
+                maskImage: revealProgress >= 1 ? "none" :
+                  `linear-gradient(to right, rgba(0,0,0,1) ${revealProgress * 100 - 5}%, rgba(0,0,0,0) ${revealProgress * 100 + 15}%)`,
+                WebkitMaskImage: revealProgress >= 1 ? "none" :
+                  `linear-gradient(to right, rgba(0,0,0,1) ${revealProgress * 100 - 5}%, rgba(0,0,0,0) ${revealProgress * 100 + 15}%)`,
+              }}
+              dangerouslySetInnerHTML={{ __html: summary }}
+            />
           ) : null}
         </div>
 
