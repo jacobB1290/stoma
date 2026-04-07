@@ -401,10 +401,10 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     // Close with the target
     parts.push(`The target is ${b("0%")}.`);
 
-    return parts.join(" ");
+    return parts;
   };
 
-  const summary = buildSummary();
+  const summaryLines = buildSummary();
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -422,18 +422,19 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   return createPortal(
     <>
     <style>{`
-      @keyframes foRevealSweep {
-        0%   { mask-position: -150% -150%; -webkit-mask-position: -150% -150%; }
-        100% { mask-position: 0% 0%;       -webkit-mask-position: 0% 0%;       }
+      @keyframes foLineSweep {
+        0%   { mask-position: -200% 0%; -webkit-mask-position: -200% 0%; opacity: 1; }
+        100% { mask-position: 0% 0%;    -webkit-mask-position: 0% 0%;    opacity: 1; }
       }
-      .fo-pill-reveal {
-        mask-image: linear-gradient(135deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 70%);
-        -webkit-mask-image: linear-gradient(135deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 70%);
-        mask-size: 250% 250%;
-        -webkit-mask-size: 250% 250%;
+      .fo-line-reveal {
+        mask-image: linear-gradient(to right, rgba(0,0,0,1) 40%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
+        -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1) 40%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
+        mask-size: 200% 100%;
+        -webkit-mask-size: 200% 100%;
         mask-repeat: no-repeat;
         -webkit-mask-repeat: no-repeat;
-        animation: foRevealSweep 1.2s ease-out forwards;
+        opacity: 0;
+        animation: foLineSweep 0.6s ease-out forwards;
       }
     `}</style>
     <motion.div
@@ -491,19 +492,23 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary with smooth waterfall fade-in ── */}
+        {/* ── Summary with waterfall line-by-line sweep ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
-          ) : summary ? (
-            <p
-              key={revealKey}
-              className="text-[12px] leading-[1.6] fo-pill-reveal"
-              style={{ color: textMuted }}
-              dangerouslySetInnerHTML={{ __html: summary }}
-            />
+          ) : summaryLines ? (
+            <div key={revealKey} className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
+              {summaryLines.map((line, i) => (
+                <span
+                  key={i}
+                  className="fo-line-reveal"
+                  style={{ display: "block", animationDelay: `${i * 0.55}s` }}
+                  dangerouslySetInnerHTML={{ __html: line }}
+                />
+              ))}
+            </div>
           ) : null}
         </div>
 
