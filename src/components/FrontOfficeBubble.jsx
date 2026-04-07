@@ -280,10 +280,10 @@ function getPillAccent(pct) {
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
 
-  // Fade-in reveal animation progress (0 → 1)
-  const [revealProgress, setRevealProgress] = useState(0);
+  // Smooth waterfall reveal — CSS animation key
+  const [revealKey, setRevealKey] = useState(0);
   useEffect(() => {
-    setRevealProgress(0);
+    setRevealKey(k => k + 1);
   }, [pct, staffCount]);
 
   // Trend hover state
@@ -401,17 +401,10 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     // Close with the target
     parts.push(`The target is ${b("0%")}.`);
 
-    return parts;
+    return parts.join(" ");
   };
 
-  const summaryLines = buildSummary();
-
-  // Line-by-line reveal — count up to total lines
-  useEffect(() => {
-    if (!summaryLines || revealProgress >= summaryLines.length) return;
-    const timer = setTimeout(() => setRevealProgress(p => p + 1), 250);
-    return () => clearTimeout(timer);
-  }, [summaryLines, revealProgress]);
+  const summary = buildSummary();
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -427,6 +420,22 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     null;
 
   return createPortal(
+    <>
+    <style>{`
+      @keyframes foRevealSweep {
+        0%   { mask-size: 100% 0%;   -webkit-mask-size: 100% 0%;   }
+        100% { mask-size: 100% 200%; -webkit-mask-size: 100% 200%; }
+      }
+      .fo-pill-reveal {
+        mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%);
+        -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%);
+        mask-position: top left;
+        -webkit-mask-position: top left;
+        mask-repeat: no-repeat;
+        -webkit-mask-repeat: no-repeat;
+        animation: foRevealSweep 1.2s ease-out forwards;
+      }
+    `}</style>
     <motion.div
       initial={{ opacity: 0, y: -6, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -482,25 +491,19 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary with line-by-line fade-in ── */}
+        {/* ── Summary with smooth waterfall fade-in ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
-          ) : summaryLines ? (
-            <div className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
-              {summaryLines.map((line, i) => (
-                <span
-                  key={i}
-                  style={{
-                    opacity: i < revealProgress ? 1 : 0,
-                    transition: "opacity 0.4s ease",
-                  }}
-                  dangerouslySetInnerHTML={{ __html: (i > 0 ? " " : "") + line }}
-                />
-              ))}
-            </div>
+          ) : summary ? (
+            <p
+              key={revealKey}
+              className="text-[12px] leading-[1.6] fo-pill-reveal"
+              style={{ color: textMuted }}
+              dangerouslySetInnerHTML={{ __html: summary }}
+            />
           ) : null}
         </div>
 
@@ -662,7 +665,8 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
           </p>
         </div>
       </div>
-    </motion.div>,
+    </motion.div>
+    </>,
     document.body
   );
 }
