@@ -712,6 +712,21 @@ export default function FrontOfficePill() {
   const [theme, setTheme] = useState(getThemeKey);
   const pillRef = useRef(null);
   const hoverTimerRef = useRef(null);
+  const [pinned, setPinned] = useState(false);
+
+  // Close on click outside when pinned
+  useEffect(() => {
+    if (!pinned) return;
+    const handleOutside = (e) => {
+      if (pillRef.current && !pillRef.current.contains(e.target) &&
+          !e.target.closest(".fo-pill-tooltip")) {
+        setPinned(false);
+        setHovered(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [pinned]);
 
   // React to theme changes
   useEffect(() => {
@@ -764,21 +779,6 @@ export default function FrontOfficePill() {
     boxShadow: "0 0 12px rgba(220,38,38,0.25), 0 0 4px rgba(220,38,38,0.15)",
   } : {};
 
-  const [pinned, setPinned] = useState(false);
-
-  // Close on click outside when pinned
-  useEffect(() => {
-    if (!pinned) return;
-    const handleOutside = (e) => {
-      if (pillRef.current && !pillRef.current.contains(e.target) &&
-          !e.target.closest(".fo-pill-tooltip")) {
-        setPinned(false);
-        setHovered(false);
-      }
-    };
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [pinned]);
   const handleMouseEnter = () => {
     clearTimeout(hoverTimerRef.current);
     setHovered(true);
