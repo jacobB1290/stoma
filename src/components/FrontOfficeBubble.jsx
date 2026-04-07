@@ -466,7 +466,7 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -6, scale: 0.97 }}
       transition={{ type: "spring", stiffness: 500, damping: 32 }}
-      className="fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden max-h-[85vh]"
+      className="fo-pill-tooltip fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden max-h-[85vh]"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={{
@@ -764,12 +764,32 @@ export default function FrontOfficePill() {
     boxShadow: "0 0 12px rgba(220,38,38,0.25), 0 0 4px rgba(220,38,38,0.15)",
   } : {};
 
+  const [pinned, setPinned] = useState(false);
+
+  // Close on click outside when pinned
+  useEffect(() => {
+    if (!pinned) return;
+    const handleOutside = (e) => {
+      if (pillRef.current && !pillRef.current.contains(e.target) &&
+          !e.target.closest(".fo-pill-tooltip")) {
+        setPinned(false);
+        setHovered(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [pinned]);
   const handleMouseEnter = () => {
     clearTimeout(hoverTimerRef.current);
     setHovered(true);
   };
   const handleMouseLeave = () => {
+    if (pinned) return;
     hoverTimerRef.current = setTimeout(() => setHovered(false), 120);
+  };
+  const handleClick = () => {
+    setPinned(p => !p);
+    setHovered(true);
   };
 
   return (
@@ -778,6 +798,7 @@ export default function FrontOfficePill() {
       className="relative flex items-center"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
@@ -805,7 +826,7 @@ export default function FrontOfficePill() {
                 boxShadow: { duration: 3, repeat: Infinity, ease: "easeInOut" } }
             : { type: "spring", stiffness: 400, damping: 26, delay: 0.15 }
         }
-        className="flex items-center gap-2 px-3 rounded-full backdrop-blur shadow-sm cursor-default select-none"
+        className="flex items-center gap-2 px-3 rounded-full backdrop-blur shadow-sm cursor-pointer select-none"
         style={{ ...pillSt, ...amberPillOverrides, ...redPillOverrides, height: PILL_H }}
       >
         {/* Bar-chart icon — same 18px as ⚙️ in SettingsPill */}
