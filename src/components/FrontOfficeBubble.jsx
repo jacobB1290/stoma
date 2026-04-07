@@ -280,11 +280,9 @@ function getPillAccent(pct) {
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
 
-  // Smooth waterfall reveal — CSS animation key
-  const [revealKey, setRevealKey] = useState(0);
-  useEffect(() => {
-    setRevealKey(k => k + 1);
-  }, [pct, staffCount]);
+  // Word fade-in counter
+  const [wordsVisible, setWordsVisible] = useState(0);
+  useEffect(() => { setWordsVisible(0); }, [pct, staffCount]);
 
   // Trend hover state
   const [trendHover, setTrendHover] = useState(null);
@@ -401,10 +399,31 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     // Close with the target
     parts.push(`The target is ${b("0%")}.`);
 
-    return parts;
+    return parts.join(" ");
   };
 
-  const summaryLines = buildSummary();
+  const summary = buildSummary();
+
+  // Split summary into words (strip HTML for counting, keep for render)
+  const summaryWords = React.useMemo(() => {
+    if (!summary) return [];
+    // Split on spaces but keep HTML tags attached to their word
+    return summary.split(/(?<=\s)|(?=\s)/).reduce((acc, token) => {
+      if (token.trim() === "") {
+        if (acc.length > 0) acc[acc.length - 1] += token;
+        return acc;
+      }
+      acc.push(token);
+      return acc;
+    }, []);
+  }, [summary]);
+
+  // Tick words visible
+  useEffect(() => {
+    if (!summaryWords.length || wordsVisible >= summaryWords.length) return;
+    const timer = setTimeout(() => setWordsVisible(v => v + 1), 40);
+    return () => clearTimeout(timer);
+  }, [summaryWords, wordsVisible]);
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -421,22 +440,6 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
 
   return createPortal(
     <>
-    <style>{`
-      @keyframes foLineSweep {
-        0%   { mask-position: -200% 0%; -webkit-mask-position: -200% 0%; opacity: 1; }
-        100% { mask-position: 0% 0%;    -webkit-mask-position: 0% 0%;    opacity: 1; }
-      }
-      .fo-line-reveal {
-        mask-image: linear-gradient(to right, rgba(0,0,0,1) 40%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
-        -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1) 40%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
-        mask-size: 200% 100%;
-        -webkit-mask-size: 200% 100%;
-        mask-repeat: no-repeat;
-        -webkit-mask-repeat: no-repeat;
-        opacity: 0;
-        animation: foLineSweep 0.6s ease-out forwards;
-      }
-    `}</style>
     <motion.div
       initial={{ opacity: 0, y: -6, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -492,23 +495,25 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary with waterfall line-by-line sweep ── */}
+        {/* ── Summary — word-by-word fade in ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
-          ) : summaryLines ? (
-            <div key={revealKey} className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
-              {summaryLines.map((line, i) => (
+          ) : summaryWords.length > 0 ? (
+            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
+              {summaryWords.map((word, i) => (
                 <span
                   key={i}
-                  className="fo-line-reveal"
-                  style={{ display: "block", animationDelay: `${i * 0.55}s` }}
-                  dangerouslySetInnerHTML={{ __html: line }}
+                  style={{
+                    opacity: i < wordsVisible ? 1 : 0,
+                    transition: "opacity 0.3s ease",
+                  }}
+                  dangerouslySetInnerHTML={{ __html: word }}
                 />
               ))}
-            </div>
+            </p>
           ) : null}
         </div>
 
@@ -670,8 +675,7 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
           </p>
         </div>
       </div>
-    </motion.div>
-    </>,
+    </motion.div>,
     document.body
   );
 }
