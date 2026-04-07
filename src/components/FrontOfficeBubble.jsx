@@ -305,12 +305,12 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     });
   }, [anchorRef]);
 
-  const light = theme === "white" || theme === "pink";
+  const light = theme !== "dark";
 
   // Tooltip surface — theme-aware
   const surfaceBg = theme === "pink"  ? "#fdf8fa" :
-                    theme === "white" ? "#ffffff"  :
-                    "#1a2e33";
+                    theme === "dark"  ? "#1a2e33"  :
+                    "#ffffff";
   const surfaceBorder = light ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.10)";
   const textPrimary = light ? "#111827" : "#f1f5f9";
   const textMuted = light ? "#6b7280" : "#94a3b8";
