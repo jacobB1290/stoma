@@ -2,7 +2,8 @@
  * FrontOfficePill
  *
  * Header pill (right side, Manage Cases view) showing the % of cases
- * entered by non-front-office staff over the last 90 days.
+ * entered by non-front-office staff for the current month (resets monthly).
+ * Also shows a year-to-date percentage for reference.
  *
  * Context: The front office is responsible for entering 100% of cases.
  * When this number is above 0% it means a production/staff member noticed
@@ -97,14 +98,16 @@ export function useFrontOfficeStats() {
 
     if (mountedRef.current) setLoading(true);
     try {
-      const since = new Date(
-        Date.now() - 90 * 24 * 60 * 60 * 1000
-      ).toISOString();
+      // Current month start
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      // Current year start
+      const yearStart = new Date(now.getFullYear(), 0, 1).toISOString();
 
       const { data, error } = await db
         .from("case_history")
         .select("user_name, case_id, action, created_at")
-        .gte("created_at", since)
+        .gte("created_at", yearStart)
         .or("action.ilike.%case created%,action.ilike.%created%");
 
       if (error || !data) {
@@ -128,22 +131,41 @@ export function useFrontOfficeStats() {
       }
 
       const entries = Object.values(perCase);
-      const total = entries.length;
-      if (total === 0) {
+
+      // Split into monthly and yearly buckets
+      const monthEntries = entries.filter(e => e.created_at >= monthStart);
+      const yearEntries = entries;
+
+      const tally = (list) => {
+        let staff = 0;
+        for (const entry of list) {
+          const canonical = getCanonicalName(entry.user_name || "");
+          if (!isFrontOfficeStaff(canonical)) staff++;
+        }
+        const total = list.length;
+        const rawPct = total > 0 ? (staff / total) * 100 : 0;
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total };
+      };
+
+      const monthly = tally(monthEntries);
+      const yearly = tally(yearEntries);
+
+      if (monthly.totalCount === 0 && yearly.totalCount === 0) {
         if (mountedRef.current) { setStats(null); setLoading(false); }
         return;
       }
 
-      let staffCount = 0;
-      for (const entry of entries) {
-        const canonical = getCanonicalName(entry.user_name || "");
-        if (!isFrontOfficeStaff(canonical)) staffCount++;
-      }
-
-      const rawPct = (staffCount / total) * 100;
-      const pct = Math.round(rawPct * 10) / 10;
       if (mountedRef.current) {
-        setStats({ pct, staffCount, totalCount: total });
+        setStats({
+          pct: monthly.pct,
+          staffCount: monthly.staffCount,
+          totalCount: monthly.totalCount,
+          yearPct: yearly.pct,
+          yearStaffCount: yearly.staffCount,
+          yearTotalCount: yearly.totalCount,
+          monthLabel: now.toLocaleString("default", { month: "long" }),
+          year: now.getFullYear(),
+        });
         setLoading(false);
       }
     } catch {
@@ -183,7 +205,7 @@ function getPillAccent(pct) {
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef }) {
-  const { pct, staffCount, totalCount } = stats;
+  const { pct, staffCount, totalCount, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const foCount = totalCount - staffCount;
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
@@ -255,7 +277,7 @@ function PillTooltip({ stats, anchorRef }) {
           className="text-[9px] font-semibold uppercase tracking-widest mb-2"
           style={{ color: "rgba(255,255,255,0.50)", letterSpacing: "0.12em" }}
         >
-          Case Entry Tracking
+          {monthLabel} — Case Entry
         </p>
         {/* Number + label stacked cleanly */}
         <div className="flex items-end gap-2.5">
@@ -305,18 +327,21 @@ function PillTooltip({ stats, anchorRef }) {
 
         {pct === 0 ? (
           <p className="text-[11px] font-medium" style={{ color: "rgba(34,197,94,0.85)" }}>
-            ✓ All cases in the last 90 days were entered by front office.
+            ✓ All cases this month were entered by front office.
           </p>
         ) : (
           <p className="text-[11px] leading-relaxed" style={{ color: textMuted }}>
-            {staffCount} of {totalCount} cases over the past 90 days were
+            {staffCount} of {totalCount} cases this month were
             entered by staff rather than front office.
           </p>
         )}
 
         <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.625rem" }}>
           <p className="text-[11px]" style={{ color: textMuted }}>
-            Last 90 days · {totalCount} total cases
+            {monthLabel} · {totalCount} total cases
+          </p>
+          <p className="text-[10px] mt-1" style={{ color: textMuted, opacity: 0.7 }}>
+            {year} year-to-date: {yearPct}% staff-entered ({yearStaffCount} of {yearTotalCount})
           </p>
         </div>
       </div>

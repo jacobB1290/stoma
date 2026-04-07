@@ -1,9 +1,10 @@
-# Release Notes: Staff-Entry Indicator Improvements
+# Release Notes: Monthly Case Entry Tracking
 
 ## What's New ✨
-- The staff-entered warning now kicks in at 5% instead of 6%, so you'll see it sooner
-- Amber warning (5–10%) has a new warm glow and tinted styling so it's easier to spot
-- Hover the pill for a more precise percentage breakdown (e.g. 4.9% instead of just 5%)
+- Case entry tracking now resets at the start of each month instead of using a rolling 90-day window
+- Year-to-date percentage is shown inside the tooltip for long-term reference
 
-## What Got Fixed 🐛
-- Percentages now round properly — 4.9% no longer shows as 4%
+## For Users 👤
+- The staff-entered pill in the header now shows your **current month's** percentage
+- Hover over the pill to see the monthly breakdown and a year-to-date summary
+- Stats reset on the 1st of each month so you can track monthly progress
