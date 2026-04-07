@@ -344,42 +344,65 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     return count;
   })();
 
-  // Build a single flowing paragraph (HTML) from the data
-  const b = (v) => `<strong style="color:${textPrimary}">${v}</strong>`;
+  // Build summary as array of { text, bold } word tokens
   const buildSummary = () => {
     if (pct === 0) return null;
-    const parts = [];
+    // Each segment is either plain text or { bold: "text" }
+    const segments = [];
+    const push = (...items) => segments.push(...items);
+    const B = (v) => ({ bold: String(v) });
     const perDay = staffCount / Math.max(businessDaysSoFar, 1);
     const s = staffCount !== 1;
 
     // Opening — what happened + pace
+    push("So far this month,");
+    push(B(staffCount));
+    push(s ? "cases were" : "case was");
+    push("not entered by front office at intake —");
     if (perDay >= 2) {
-      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — about ${b(Math.round(perDay) + " per business day")}.`);
+      push("about");
+      push(B(Math.round(perDay) + " per business day."));
     } else if (perDay >= 1) {
-      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — ${b("more than 1 per business day")}.`);
+      push(B("more than 1 per business day."));
     } else if (staffCount > 1 && businessDaysSoFar > 1) {
-      parts.push(`So far this month, ${b(staffCount)} cases were not entered by front office at intake — roughly ${b("1 every " + Math.round(businessDaysSoFar / staffCount) + " business days")}.`);
+      push("roughly");
+      push(B("1 every " + Math.round(businessDaysSoFar / staffCount) + " business days."));
     } else {
-      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake.`);
+      // trim trailing " —" from opening
+      segments[segments.length - 1] = segments[segments.length - 1].replace(/ —$/, ".");
     }
 
     // Department focus
     if (deptBreakdown && deptBreakdown.length > 0) {
       const worst = deptBreakdown[0];
       const wName = deptDisplayName(worst.dept);
+      const ratio = Math.round(worst.total / worst.staff);
       if (deptBreakdown.length === 1) {
-        const ratio = Math.round(worst.total / worst.staff);
+        push("All");
+        push(B(staffCount));
+        push("came from");
+        push(B(wName));
         if (ratio <= 10) {
-          parts.push(`All ${b(staffCount)} came from ${b(wName)}, where ${b("1 in every " + ratio)} cases wasn't logged.`);
+          push("— where");
+          push(B("1 in every " + ratio));
+          push("cases wasn't logged.");
         } else {
-          parts.push(`All ${b(staffCount)} came from ${b(wName)}.`);
+          // replace last segment to end with period
+          segments[segments.length - 1] = typeof segments[segments.length - 1] === "object"
+            ? { bold: segments[segments.length - 1].bold + "." }
+            : segments[segments.length - 1] + ".";
         }
       } else {
-        const ratio = Math.round(worst.total / worst.staff);
+        push("Most are in");
+        push(B(wName));
+        push("—");
         if (ratio <= 10) {
-          parts.push(`Most are in ${b(wName)} — ${b("1 in every " + ratio)} cases there wasn't logged.`);
+          push(B("1 in every " + ratio));
+          push("cases there wasn't logged.");
         } else {
-          parts.push(`${b(wName)} has the most at ${b(worst.staff)} missed.`);
+          push("at");
+          push(B(worst.staff));
+          push("missed.");
         }
       }
     }
@@ -390,37 +413,36 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       const firstHalf = trend.slice(0, mid).reduce((a, p) => a + p.pct, 0) / mid;
       const secondHalf = trend.slice(mid).reduce((a, p) => a + p.pct, 0) / (trend.length - mid);
       if (secondHalf > firstHalf + 1.5) {
-        parts.push(`The trend is going ${b("up")} — it's getting worse as the month goes on.`);
+        push("The trend is going");
+        push(B("up"));
+        push("— it's getting worse as the month goes on.");
       } else if (secondHalf < firstHalf - 1.5) {
-        parts.push(`The rate has been ${b("coming down")} over the month.`);
+        push("The rate has been");
+        push(B("coming down"));
+        push("over the month.");
       }
     }
 
-    // Close with the target
-    parts.push(`The target is ${b("0%")}.`);
+    push("The target is");
+    push(B("0%."));
 
-    return parts.join(" ");
+    // Flatten segments into individual words with bold flag
+    const words = [];
+    for (const seg of segments) {
+      const isBold = typeof seg === "object";
+      const text = isBold ? seg.bold : seg;
+      for (const w of text.split(/\s+/).filter(Boolean)) {
+        words.push({ text: w, bold: isBold });
+      }
+    }
+    return words;
   };
 
-  const summary = buildSummary();
-
-  // Split summary into words (strip HTML for counting, keep for render)
-  const summaryWords = React.useMemo(() => {
-    if (!summary) return [];
-    // Split on spaces but keep HTML tags attached to their word
-    return summary.split(/(?<=\s)|(?=\s)/).reduce((acc, token) => {
-      if (token.trim() === "") {
-        if (acc.length > 0) acc[acc.length - 1] += token;
-        return acc;
-      }
-      acc.push(token);
-      return acc;
-    }, []);
-  }, [summary]);
+  const summaryWords = buildSummary();
 
   // Tick words visible
   useEffect(() => {
-    if (!summaryWords.length || wordsVisible >= summaryWords.length) return;
+    if (!summaryWords || !summaryWords.length || wordsVisible >= summaryWords.length) return;
     const timer = setTimeout(() => setWordsVisible(v => v + 1), 40);
     return () => clearTimeout(timer);
   }, [summaryWords, wordsVisible]);
@@ -500,17 +522,18 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
-          ) : summaryWords.length > 0 ? (
+          ) : summaryWords && summaryWords.length > 0 ? (
             <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
-              {summaryWords.map((word, i) => (
+              {summaryWords.map((w, i) => (
                 <span
                   key={i}
                   style={{
                     opacity: i < wordsVisible ? 1 : 0,
                     transition: "opacity 0.3s ease",
+                    fontWeight: w.bold ? 600 : 400,
+                    color: w.bold ? textPrimary : undefined,
                   }}
-                  dangerouslySetInnerHTML={{ __html: word }}
-                />
+                >{i > 0 ? " " : ""}{w.text}</span>
               ))}
             </p>
           ) : null}
