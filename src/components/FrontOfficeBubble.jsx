@@ -381,6 +381,9 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       }
     }
 
+    // Close with the target
+    parts.push(`The target is ${b("0%")}.`);
+
     return parts.join(" ");
   };
 
@@ -660,7 +663,7 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
             </span>
           </div>
           <p className="text-[11px]" style={{ color: textMuted }}>
-            {yearStaffCount} of {yearTotalCount} cases entered by staff
+            {yearStaffCount} of {yearTotalCount} cases not entered by front office
           </p>
         </div>
 
