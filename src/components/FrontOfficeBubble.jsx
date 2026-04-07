@@ -136,21 +136,13 @@ export function useFrontOfficeStats() {
       const monthEntries = entries.filter(e => e.created_at >= monthStart);
       const yearEntries = entries;
 
-      const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
       const tally = (list) => {
         let staff = 0;
         const byDept = {};    // { dept: { staff, total } }
-        const byDay = {};     // { dayName: count }   — when gaps happen
         for (const entry of list) {
           const canonical = getCanonicalName(entry.user_name || "");
           const isStaff = !isFrontOfficeStaff(canonical);
-          if (isStaff) {
-            staff++;
-            // Track which day of week
-            const day = DAY_NAMES[new Date(entry.created_at).getDay()];
-            byDay[day] = (byDay[day] || 0) + 1;
-          }
+          if (isStaff) staff++;
           const dept = entry.cases?.department || "Unknown";
           if (!byDept[dept]) byDept[dept] = { staff: 0, total: 0 };
           byDept[dept].total++;
@@ -176,25 +168,45 @@ export function useFrontOfficeStats() {
             total: v.total,
             pct: v.total > 0 ? Math.round((v.staff / v.total) * 1000) / 10 : 0,
           }));
-        // Day-of-week breakdown — ordered Mon–Sun
-        const dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-        const dayBreakdown = dayOrder
-          .map(d => ({ day: d, count: byDay[d] || 0 }));
-        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll, dayBreakdown };
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll };
+      };
+
+      // Build daily trend for the month — cumulative miss % over time
+      const buildTrend = (entries) => {
+        if (entries.length === 0) return [];
+        // Group all entries by date string
+        const byDate = {};
+        for (const entry of entries) {
+          const d = entry.created_at.slice(0, 10); // "YYYY-MM-DD"
+          if (!byDate[d]) byDate[d] = { total: 0, staff: 0 };
+          byDate[d].total++;
+          const canonical = getCanonicalName(entry.user_name || "");
+          if (!isFrontOfficeStaff(canonical)) byDate[d].staff++;
+        }
+        // Walk each day of the month so far, accumulating
+        const now = new Date();
+        const y = now.getFullYear(), m = now.getMonth();
+        const points = [];
+        let cumTotal = 0, cumStaff = 0;
+        for (let d = 1; d <= now.getDate(); d++) {
+          const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          if (byDate[key]) {
+            cumTotal += byDate[key].total;
+            cumStaff += byDate[key].staff;
+          }
+          const pctVal = cumTotal > 0 ? (cumStaff / cumTotal) * 100 : 0;
+          points.push({ day: d, pct: Math.round(pctVal * 10) / 10 });
+        }
+        return points;
       };
 
       const monthly = tally(monthEntries);
       const yearly = tally(yearEntries);
+      const trend = buildTrend(monthEntries);
 
       if (monthly.totalCount === 0 && yearly.totalCount === 0) {
         if (mountedRef.current) { setStats(null); setLoading(false); }
         return;
-      }
-
-      // Build a lookup: dept → yearly avg pct
-      const yearDeptAvg = {};
-      for (const d of yearly.deptAll) {
-        yearDeptAvg[d.dept] = d.pct;
       }
 
       if (mountedRef.current) {
@@ -203,7 +215,7 @@ export function useFrontOfficeStats() {
           staffCount: monthly.staffCount,
           totalCount: monthly.totalCount,
           deptBreakdown: monthly.deptBreakdown,
-          dayBreakdown: monthly.dayBreakdown,
+          trend,
           yearPct: yearly.pct,
           yearStaffCount: yearly.staffCount,
           yearTotalCount: yearly.totalCount,
@@ -249,7 +261,14 @@ function getPillAccent(pct) {
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
-  const { pct, staffCount, totalCount, deptBreakdown, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+  const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+
+  // Typewriter animation for summary text
+  const [visibleChars, setVisibleChars] = useState(0);
+  const summaryRef = useRef(null);
+  useEffect(() => {
+    setVisibleChars(0);
+  }, [pct, staffCount]); // reset on data change
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
 
@@ -308,7 +327,8 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     return count;
   })();
 
-  // Build a single flowing paragraph from the data
+  // Build a single flowing paragraph (HTML) from the data
+  const b = (v) => `<strong style="color:${textPrimary}">${v}</strong>`;
   const buildSummary = () => {
     if (pct === 0) return null;
     const parts = [];
@@ -317,41 +337,45 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
 
     // Opening — what happened + pace
     if (perDay >= 2) {
-      parts.push(`So far this month, ${staffCount} case${s ? "s were" : " was"} not entered by front office at intake — about ${Math.round(perDay)} per business day.`);
+      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — about ${b(Math.round(perDay) + " per business day")}.`);
     } else if (perDay >= 1) {
-      parts.push(`So far this month, ${staffCount} case${s ? "s were" : " was"} not entered by front office at intake — more than 1 per business day.`);
+      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — ${b("more than 1 per business day")}.`);
     } else if (staffCount > 1 && businessDaysSoFar > 1) {
-      parts.push(`So far this month, ${staffCount} cases were not entered by front office at intake — roughly 1 every ${Math.round(businessDaysSoFar / staffCount)} business days.`);
+      parts.push(`So far this month, ${b(staffCount)} cases were not entered by front office at intake — roughly ${b("1 every " + Math.round(businessDaysSoFar / staffCount) + " business days")}.`);
     } else {
-      parts.push(`So far this month, ${staffCount} case${s ? "s were" : " was"} not entered by front office at intake.`);
+      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake.`);
     }
 
-    // Department focus — where the problem is concentrated
+    // Department focus
     if (deptBreakdown && deptBreakdown.length > 0) {
       const worst = deptBreakdown[0];
       const wName = deptDisplayName(worst.dept);
       if (deptBreakdown.length === 1) {
         const ratio = Math.round(worst.total / worst.staff);
         if (ratio <= 10) {
-          parts.push(`All ${staffCount} came from ${wName}, where 1 in every ${ratio} cases wasn't logged.`);
+          parts.push(`All ${b(staffCount)} came from ${b(wName)}, where ${b("1 in every " + ratio)} cases wasn't logged.`);
         } else {
-          parts.push(`All ${staffCount} came from ${wName}.`);
+          parts.push(`All ${b(staffCount)} came from ${b(wName)}.`);
         }
       } else {
         const ratio = Math.round(worst.total / worst.staff);
         if (ratio <= 10) {
-          parts.push(`Most are in ${wName} — 1 in every ${ratio} cases there wasn't logged.`);
+          parts.push(`Most are in ${b(wName)} — ${b("1 in every " + ratio)} cases there wasn't logged.`);
         } else {
-          parts.push(`${wName} has the most at ${worst.staff} missed.`);
+          parts.push(`${b(wName)} has the most at ${b(worst.staff)} missed.`);
         }
       }
     }
 
-    // Day pattern — when it's happening
-    if (dayBreakdown) {
-      const max = dayBreakdown.reduce((a, b) => b.count > a.count ? b : a, dayBreakdown[0]);
-      if (max.count >= 2 && max.count >= staffCount * 0.4) {
-        parts.push(`${max.day}s have been the most common day for gaps.`);
+    // Trend direction
+    if (trend && trend.length >= 3) {
+      const mid = Math.floor(trend.length / 2);
+      const firstHalf = trend.slice(0, mid).reduce((a, p) => a + p.pct, 0) / mid;
+      const secondHalf = trend.slice(mid).reduce((a, p) => a + p.pct, 0) / (trend.length - mid);
+      if (secondHalf > firstHalf + 1.5) {
+        parts.push(`The trend is going ${b("up")} — it's getting worse as the month goes on.`);
+      } else if (secondHalf < firstHalf - 1.5) {
+        parts.push(`The rate has been ${b("coming down")} over the month.`);
       }
     }
 
@@ -359,6 +383,15 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   };
 
   const summary = buildSummary();
+
+  // Typewriter tick
+  useEffect(() => {
+    if (!summary) return;
+    if (visibleChars >= summary.length) return;
+    const speed = visibleChars < 20 ? 12 : 8; // start slightly slower
+    const timer = setTimeout(() => setVisibleChars(v => v + 1), speed);
+    return () => clearTimeout(timer);
+  }, [summary, visibleChars]);
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -429,17 +462,17 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary ── */}
+        {/* ── Summary with typewriter ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
-          ) : (
-            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
-              {summary}
-            </p>
-          )}
+          ) : summary ? (
+            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}
+               dangerouslySetInnerHTML={{ __html: summary.slice(0, visibleChars) + (visibleChars < summary.length ? '<span style="opacity:0.4">|</span>' : '') }}
+            />
+          ) : null}
         </div>
 
         {/* ── Where — department breakdown ── */}
@@ -481,38 +514,49 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
           </div>
         )}
 
-        {/* ── When — day-of-week pattern ── */}
-        {dayBreakdown && staffCount > 0 && (
+        {/* ── Trend line — cumulative miss % through the month ── */}
+        {trend && trend.length >= 2 && staffCount > 0 && (
           <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5"
-               style={{ color: textMuted, letterSpacing: "0.06em" }}>
-              When
-            </p>
-            <div className="flex items-end gap-1" style={{ height: 32 }}>
-              {(() => {
-                const maxCount = Math.max(...dayBreakdown.map(d => d.count), 1);
-                return dayBreakdown.map(d => (
-                  <div key={d.day} className="flex flex-col items-center flex-1 gap-0.5">
-                    <div
-                      className="w-full rounded-sm"
-                      style={{
-                        height: d.count > 0 ? Math.max((d.count / maxCount) * 24, 3) : 2,
-                        background: d.count > 0 ? barColor : trackBg,
-                        opacity: d.count > 0 ? 1 : 0.4,
-                        transition: "height 0.3s ease",
-                      }}
-                    />
-                    <span className="text-[8px]" style={{
-                      color: d.count > 0 ? textPrimary : textMuted,
-                      fontWeight: d.count > 0 ? 600 : 400,
-                      opacity: d.count > 0 ? 1 : 0.5,
-                    }}>
-                      {d.day}
-                    </span>
-                  </div>
-                ));
-              })()}
+            <div className="flex items-baseline justify-between mb-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wide"
+                 style={{ color: textMuted, letterSpacing: "0.06em" }}>
+                Trend
+              </p>
+              <span className="text-[10px]" style={{ color: textMuted }}>
+                {monthLabel} 1–{trend[trend.length - 1].day}
+              </span>
             </div>
+            {(() => {
+              const W = 220, H = 40, PAD = 2;
+              const maxPct = Math.max(...trend.map(p => p.pct), 1);
+              const pts = trend.map((p, i) => {
+                const x = PAD + (i / (trend.length - 1)) * (W - PAD * 2);
+                const y = H - PAD - ((p.pct / maxPct) * (H - PAD * 2));
+                return { x, y, pct: p.pct, day: p.day };
+              });
+              const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+              // Gradient fill under the line
+              const fillPath = `${linePath} L${pts[pts.length - 1].x},${H} L${pts[0].x},${H} Z`;
+              const lineColor = barColor;
+              const last = pts[pts.length - 1];
+              return (
+                <svg width="100%" viewBox={`0 0 ${W} ${H + 14}`} style={{ display: "block" }}>
+                  {/* Fill under line */}
+                  <path d={fillPath} fill={lineColor} opacity="0.12" />
+                  {/* Line */}
+                  <path d={linePath} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  {/* End dot */}
+                  <circle cx={last.x} cy={last.y} r="2.5" fill={lineColor} />
+                  {/* End label */}
+                  <text x={last.x} y={last.y - 5} textAnchor="end" fill={lineColor} fontSize="8" fontWeight="600">
+                    {last.pct}%
+                  </text>
+                  {/* X-axis labels */}
+                  <text x={PAD} y={H + 10} fill={textMuted} fontSize="7" opacity="0.6">1</text>
+                  <text x={W - PAD} y={H + 10} textAnchor="end" fill={textMuted} fontSize="7" opacity="0.6">{trend[trend.length - 1].day}</text>
+                </svg>
+              );
+            })()}
           </div>
         )}
 
