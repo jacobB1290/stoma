@@ -308,42 +308,57 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     return count;
   })();
 
-  // Build contextual insight sentences
-  const buildInsight = () => {
+  // Build a single flowing paragraph from the data
+  const buildSummary = () => {
     if (pct === 0) return null;
-    const lines = [];
+    const parts = [];
     const perDay = staffCount / Math.max(businessDaysSoFar, 1);
+    const s = staffCount !== 1;
 
-    // Per-day framing
+    // Opening — what happened + pace
     if (perDay >= 2) {
-      lines.push(`That's about ${Math.round(perDay)} cases missed per business day.`);
+      parts.push(`So far this month, ${staffCount} case${s ? "s were" : " was"} not entered by front office at intake — about ${Math.round(perDay)} per business day.`);
     } else if (perDay >= 1) {
-      lines.push("That's more than 1 case missed per business day on average.");
+      parts.push(`So far this month, ${staffCount} case${s ? "s were" : " was"} not entered by front office at intake — more than 1 per business day.`);
     } else if (staffCount > 1 && businessDaysSoFar > 1) {
-      lines.push(`About 1 case every ${Math.round(businessDaysSoFar / staffCount)} business days.`);
+      parts.push(`So far this month, ${staffCount} cases were not entered by front office at intake — roughly 1 every ${Math.round(businessDaysSoFar / staffCount)} business days.`);
+    } else {
+      parts.push(`So far this month, ${staffCount} case${s ? "s were" : " was"} not entered by front office at intake.`);
     }
 
-    // Ratio framing for worst department
+    // Department focus — where the problem is concentrated
     if (deptBreakdown && deptBreakdown.length > 0) {
       const worst = deptBreakdown[0];
-      const ratio = Math.round(worst.total / worst.staff);
-      if (ratio <= 10) {
-        lines.push(`1 in ${ratio} ${deptDisplayName(worst.dept)} cases wasn't logged at intake.`);
+      const wName = deptDisplayName(worst.dept);
+      if (deptBreakdown.length === 1) {
+        const ratio = Math.round(worst.total / worst.staff);
+        if (ratio <= 10) {
+          parts.push(`All ${staffCount} came from ${wName}, where 1 in every ${ratio} cases wasn't logged.`);
+        } else {
+          parts.push(`All ${staffCount} came from ${wName}.`);
+        }
+      } else {
+        const ratio = Math.round(worst.total / worst.staff);
+        if (ratio <= 10) {
+          parts.push(`Most are in ${wName} — 1 in every ${ratio} cases there wasn't logged.`);
+        } else {
+          parts.push(`${wName} has the most at ${worst.staff} missed.`);
+        }
       }
     }
 
-    // Day pattern
+    // Day pattern — when it's happening
     if (dayBreakdown) {
       const max = dayBreakdown.reduce((a, b) => b.count > a.count ? b : a, dayBreakdown[0]);
       if (max.count >= 2 && max.count >= staffCount * 0.4) {
-        lines.push(`${max.day}s have the most missed cases this month.`);
+        parts.push(`${max.day}s have been the most common day for gaps.`);
       }
     }
 
-    return lines;
+    return parts.join(" ");
   };
 
-  const insights = buildInsight();
+  const summary = buildSummary();
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -414,25 +429,16 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Contextual insight ── */}
+        {/* ── Summary ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
           ) : (
-            <div className="space-y-1.5">
-              <p className="text-[12px] leading-relaxed" style={{ color: textMuted }}>
-                <strong style={{ color: textPrimary }}>{staffCount} case{staffCount !== 1 ? "s" : ""}</strong>{" "}
-                not entered at intake this month.{" "}
-                {insights && insights.length > 0 && insights[0]}
-              </p>
-              {insights && insights.slice(1).map((line, i) => (
-                <p key={i} className="text-[11px] leading-relaxed" style={{ color: textMuted }}>
-                  {line}
-                </p>
-              ))}
-            </div>
+            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
+              {summary}
+            </p>
           )}
         </div>
 
