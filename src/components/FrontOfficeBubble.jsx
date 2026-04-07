@@ -136,13 +136,25 @@ export function useFrontOfficeStats() {
       const monthEntries = entries.filter(e => e.created_at >= monthStart);
       const yearEntries = entries;
 
+      const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
       const tally = (list) => {
         let staff = 0;
-        const byDept = {}; // { dept: { staff, total } }
+        const byDept = {};    // { dept: { staff, total } }
+        const byStaff = {};   // { userName: count }  — who entered the missed ones
+        const byDay = {};     // { dayName: count }   — when gaps happen
         for (const entry of list) {
           const canonical = getCanonicalName(entry.user_name || "");
           const isStaff = !isFrontOfficeStaff(canonical);
-          if (isStaff) staff++;
+          if (isStaff) {
+            staff++;
+            // Track which staff member entered it
+            const name = entry.user_name || "Unknown";
+            byStaff[name] = (byStaff[name] || 0) + 1;
+            // Track which day of week
+            const day = DAY_NAMES[new Date(entry.created_at).getDay()];
+            byDay[day] = (byDay[day] || 0) + 1;
+          }
           const dept = entry.cases?.department || "Unknown";
           if (!byDept[dept]) byDept[dept] = { staff: 0, total: 0 };
           byDept[dept].total++;
@@ -150,7 +162,7 @@ export function useFrontOfficeStats() {
         }
         const total = list.length;
         const rawPct = total > 0 ? (staff / total) * 100 : 0;
-        // Build sorted department breakdown (worst first)
+        // Department breakdown — worst first
         const deptBreakdown = Object.entries(byDept)
           .filter(([, v]) => v.staff > 0)
           .map(([dept, v]) => ({
@@ -160,7 +172,15 @@ export function useFrontOfficeStats() {
             pct: Math.round((v.staff / v.total) * 1000) / 10,
           }))
           .sort((a, b) => b.staff - a.staff);
-        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown };
+        // Staff who entered — most first
+        const enteredBy = Object.entries(byStaff)
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count);
+        // Day-of-week breakdown — ordered Mon–Sun
+        const dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        const dayBreakdown = dayOrder
+          .map(d => ({ day: d, count: byDay[d] || 0 }));
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, enteredBy, dayBreakdown };
       };
 
       const monthly = tally(monthEntries);
@@ -177,6 +197,8 @@ export function useFrontOfficeStats() {
           staffCount: monthly.staffCount,
           totalCount: monthly.totalCount,
           deptBreakdown: monthly.deptBreakdown,
+          enteredBy: monthly.enteredBy,
+          dayBreakdown: monthly.dayBreakdown,
           yearPct: yearly.pct,
           yearStaffCount: yearly.staffCount,
           yearTotalCount: yearly.totalCount,
@@ -222,7 +244,7 @@ function getPillAccent(pct) {
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef }) {
-  const { pct, staffCount, totalCount, deptBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+  const { pct, staffCount, totalCount, deptBreakdown, enteredBy, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const foCount = totalCount - staffCount;
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
@@ -391,38 +413,56 @@ function PillTooltip({ stats, anchorRef }) {
           </div>
         )}
 
-        {/* ── Why + What to do ── */}
-        {pct > 0 && (
+        {/* ── Who entered them ── */}
+        {enteredBy && enteredBy.length > 0 && (
           <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5"
                style={{ color: textMuted, letterSpacing: "0.06em" }}>
-              Common causes
+              Entered by
             </p>
-            <ul className="text-[11px] leading-relaxed space-y-0.5 pl-3"
-                style={{ color: textMuted, listStyleType: "disc" }}>
-              <li>Case dropped off or delivered without paperwork</li>
-              <li>Front office was busy and planned to enter it later</li>
-              <li>Intake happened outside of normal front office hours</li>
-            </ul>
+            <div className="space-y-0.5">
+              {enteredBy.map(s => (
+                <div key={s.name} className="flex items-center justify-between text-[11px]">
+                  <span style={{ color: textPrimary }}>{s.name}</span>
+                  <span style={{ color: textMuted }}>{s.count}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {pct > 0 && (
+        {/* ── When — day-of-week pattern ── */}
+        {dayBreakdown && staffCount > 0 && (
           <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5"
                style={{ color: textMuted, letterSpacing: "0.06em" }}>
-              What to check
+              When
             </p>
-            <ul className="text-[11px] leading-relaxed space-y-0.5 pl-3"
-                style={{ color: textMuted, listStyleType: "disc" }}>
-              {deptBreakdown && deptBreakdown.length === 1 ? (
-                <li>Focus on <strong style={{ color: textPrimary }}>{deptBreakdown[0].dept}</strong> — all missed intakes are coming from there</li>
-              ) : deptBreakdown && deptBreakdown.length > 1 && (
-                <li>Start with <strong style={{ color: textPrimary }}>{deptBreakdown[0].dept}</strong> — highest number of missed intakes</li>
-              )}
-              <li>Confirm whether cases were dropped off without front office seeing them</li>
-              <li>Check if specific times of day have more gaps</li>
-            </ul>
+            <div className="flex items-end gap-1" style={{ height: 32 }}>
+              {(() => {
+                const maxCount = Math.max(...dayBreakdown.map(d => d.count), 1);
+                return dayBreakdown.map(d => (
+                  <div key={d.day} className="flex flex-col items-center flex-1 gap-0.5">
+                    <div
+                      className="w-full rounded-sm"
+                      style={{
+                        height: d.count > 0 ? Math.max((d.count / maxCount) * 24, 3) : 2,
+                        background: d.count > 0 ? barColor : trackBg,
+                        opacity: d.count > 0 ? 1 : 0.4,
+                        transition: "height 0.3s ease",
+                      }}
+                    />
+                    <span className="text-[8px]" style={{
+                      color: d.count > 0 ? textPrimary : textMuted,
+                      fontWeight: d.count > 0 ? 600 : 400,
+                      opacity: d.count > 0 ? 1 : 0.5,
+                    }}>
+                      {d.day}
+                    </span>
+                  </div>
+                ));
+              })()}
+            </div>
           </div>
         )}
 
