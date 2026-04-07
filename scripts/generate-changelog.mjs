@@ -26,10 +26,17 @@ const range = latestTag
   ? `${latestTag}..HEAD`
   : `${safeExec('git rev-list --max-parents=0 HEAD')}..HEAD`;
 
-// Check if RELEASE_NOTES_ENTRY.md exists in the working directory
+// Check if RELEASE_NOTES_ENTRY.md exists AND was touched in this release range.
+// Without the range check, a leftover file from a previous PR would be reused
+// on every subsequent deploy, showing stale release notes forever.
 let changes;
-if (existsSync('RELEASE_NOTES_ENTRY.md')) {
-  const releaseNotes = readFileSync('RELEASE_NOTES_ENTRY.md', 'utf-8');
+const releaseNotesFile = 'RELEASE_NOTES_ENTRY.md';
+const releaseNotesIsNew =
+  existsSync(releaseNotesFile) &&
+  safeExec(`git log ${range} --diff-filter=AM -- ${releaseNotesFile}`).length > 0;
+
+if (releaseNotesIsNew) {
+  const releaseNotes = readFileSync(releaseNotesFile, 'utf-8');
   // Extract markdown content and convert to changelog format
   changes = releaseNotes
     .split('\n')
