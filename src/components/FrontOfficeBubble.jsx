@@ -2,7 +2,8 @@
  * FrontOfficePill
  *
  * Header pill (right side, Manage Cases view) showing the % of cases
- * entered by non-front-office staff over the last 90 days.
+ * entered by non-front-office staff for the current month (resets monthly).
+ * Also shows a year-to-date percentage for reference.
  *
  * Context: The front office is responsible for entering 100% of cases.
  * When this number is above 0% it means a production/staff member noticed
@@ -97,14 +98,16 @@ export function useFrontOfficeStats() {
 
     if (mountedRef.current) setLoading(true);
     try {
-      const since = new Date(
-        Date.now() - 90 * 24 * 60 * 60 * 1000
-      ).toISOString();
+      // Current month start
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      // Current year start
+      const yearStart = new Date(now.getFullYear(), 0, 1).toISOString();
 
       const { data, error } = await db
         .from("case_history")
-        .select("user_name, case_id, action, created_at")
-        .gte("created_at", since)
+        .select("user_name, case_id, action, created_at, cases(department)")
+        .gte("created_at", yearStart)
         .or("action.ilike.%case created%,action.ilike.%created%");
 
       if (error || !data) {
@@ -128,22 +131,97 @@ export function useFrontOfficeStats() {
       }
 
       const entries = Object.values(perCase);
-      const total = entries.length;
-      if (total === 0) {
+
+      // Split into monthly and yearly buckets
+      const monthEntries = entries.filter(e => e.created_at >= monthStart);
+      const yearEntries = entries;
+
+      const tally = (list) => {
+        let staff = 0;
+        const byDept = {};    // { dept: { staff, total } }
+        for (const entry of list) {
+          const canonical = getCanonicalName(entry.user_name || "");
+          const isStaff = !isFrontOfficeStaff(canonical);
+          if (isStaff) staff++;
+          const dept = entry.cases?.department || "Unknown";
+          if (!byDept[dept]) byDept[dept] = { staff: 0, total: 0 };
+          byDept[dept].total++;
+          if (isStaff) byDept[dept].staff++;
+        }
+        const total = list.length;
+        const rawPct = total > 0 ? (staff / total) * 100 : 0;
+        // Department breakdown — worst first (only depts with misses)
+        const deptBreakdown = Object.entries(byDept)
+          .filter(([, v]) => v.staff > 0)
+          .map(([dept, v]) => ({
+            dept,
+            staff: v.staff,
+            total: v.total,
+            pct: Math.round((v.staff / v.total) * 1000) / 10,
+          }))
+          .sort((a, b) => b.staff - a.staff);
+        // Full department breakdown (all depts, for yearly baseline)
+        const deptAll = Object.entries(byDept)
+          .map(([dept, v]) => ({
+            dept,
+            staff: v.staff,
+            total: v.total,
+            pct: v.total > 0 ? Math.round((v.staff / v.total) * 1000) / 10 : 0,
+          }));
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll };
+      };
+
+      // Build daily trend for the month — cumulative miss % over time
+      const buildTrend = (entries) => {
+        if (entries.length === 0) return [];
+        // Group all entries by date string
+        const byDate = {};
+        for (const entry of entries) {
+          const d = entry.created_at.slice(0, 10); // "YYYY-MM-DD"
+          if (!byDate[d]) byDate[d] = { total: 0, staff: 0 };
+          byDate[d].total++;
+          const canonical = getCanonicalName(entry.user_name || "");
+          if (!isFrontOfficeStaff(canonical)) byDate[d].staff++;
+        }
+        // Walk each day of the month so far, accumulating
+        const now = new Date();
+        const y = now.getFullYear(), m = now.getMonth();
+        const points = [];
+        let cumTotal = 0, cumStaff = 0;
+        for (let d = 1; d <= now.getDate(); d++) {
+          const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          if (byDate[key]) {
+            cumTotal += byDate[key].total;
+            cumStaff += byDate[key].staff;
+          }
+          const pctVal = cumTotal > 0 ? (cumStaff / cumTotal) * 100 : 0;
+          points.push({ day: d, pct: Math.round(pctVal * 10) / 10 });
+        }
+        return points;
+      };
+
+      const monthly = tally(monthEntries);
+      const yearly = tally(yearEntries);
+      const trend = buildTrend(monthEntries);
+
+      if (monthly.totalCount === 0 && yearly.totalCount === 0) {
         if (mountedRef.current) { setStats(null); setLoading(false); }
         return;
       }
 
-      let staffCount = 0;
-      for (const entry of entries) {
-        const canonical = getCanonicalName(entry.user_name || "");
-        if (!isFrontOfficeStaff(canonical)) staffCount++;
-      }
-
-      const rawPct = (staffCount / total) * 100;
-      const pct = Math.round(rawPct * 10) / 10;
       if (mountedRef.current) {
-        setStats({ pct, staffCount, totalCount: total });
+        setStats({
+          pct: monthly.pct,
+          staffCount: monthly.staffCount,
+          totalCount: monthly.totalCount,
+          deptBreakdown: monthly.deptBreakdown,
+          trend,
+          yearPct: yearly.pct,
+          yearStaffCount: yearly.staffCount,
+          yearTotalCount: yearly.totalCount,
+          monthLabel: now.toLocaleString("default", { month: "long" }),
+          year: now.getFullYear(),
+        });
         setLoading(false);
       }
     } catch {
@@ -174,7 +252,7 @@ export function useFrontOfficeStats() {
 // Color helper — deliberately muted, matching system tones
 // ─────────────────────────────────────────────────────────────────────────────
 function getPillAccent(pct) {
-  if (pct > 10) return { dot: "rgba(239,68,68,0.75)", level: "red" };
+  if (pct > 10) return { dot: "rgba(220,38,38,0.95)", level: "red" };
   if (pct >= 5) return { dot: "rgba(245,158,11,0.90)", level: "amber" };
   return           { dot: "rgba(255,255,255,0.30)", level: "normal" };
 }
@@ -182,9 +260,17 @@ function getPillAccent(pct) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
-function PillTooltip({ stats, anchorRef }) {
-  const { pct, staffCount, totalCount } = stats;
-  const foCount = totalCount - staffCount;
+function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
+  const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+
+  // Typewriter animation with fade-in trail
+  const [visibleChars, setVisibleChars] = useState(0);
+  useEffect(() => {
+    setVisibleChars(0);
+  }, [pct, staffCount]);
+
+  // Trend hover state
+  const [trendHover, setTrendHover] = useState(null);
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
 
@@ -224,9 +310,113 @@ function PillTooltip({ stats, anchorRef }) {
                         "linear-gradient(135deg, #103E48 0%, #16525F 100%)"; // blue default
 
   const barColor =
-    pct > 10 ? "rgba(239,68,68,0.70)" :
+    pct > 10 ? "rgba(220,38,38,0.85)" :
     pct >= 5 ? "rgba(245,158,11,0.70)" :
                "rgba(34,197,94,0.65)";
+
+  // Display name mapping
+  const deptDisplayName = (name) => name === "General" ? "Digital" : name;
+
+  // Count business days from start of month to today
+  const businessDaysSoFar = (() => {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth();
+    let count = 0;
+    for (let d = 1; d <= now.getDate(); d++) {
+      const dow = new Date(y, m, d).getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  })();
+
+  // Build a single flowing paragraph (HTML) from the data
+  const b = (v) => `<strong style="color:${textPrimary}">${v}</strong>`;
+  const buildSummary = () => {
+    if (pct === 0) return null;
+    const parts = [];
+    const perDay = staffCount / Math.max(businessDaysSoFar, 1);
+    const s = staffCount !== 1;
+
+    // Opening — what happened + pace
+    if (perDay >= 2) {
+      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — about ${b(Math.round(perDay) + " per business day")}.`);
+    } else if (perDay >= 1) {
+      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake — ${b("more than 1 per business day")}.`);
+    } else if (staffCount > 1 && businessDaysSoFar > 1) {
+      parts.push(`So far this month, ${b(staffCount)} cases were not entered by front office at intake — roughly ${b("1 every " + Math.round(businessDaysSoFar / staffCount) + " business days")}.`);
+    } else {
+      parts.push(`So far this month, ${b(staffCount)} case${s ? "s were" : " was"} not entered by front office at intake.`);
+    }
+
+    // Department focus
+    if (deptBreakdown && deptBreakdown.length > 0) {
+      const worst = deptBreakdown[0];
+      const wName = deptDisplayName(worst.dept);
+      if (deptBreakdown.length === 1) {
+        const ratio = Math.round(worst.total / worst.staff);
+        if (ratio <= 10) {
+          parts.push(`All ${b(staffCount)} came from ${b(wName)}, where ${b("1 in every " + ratio)} cases wasn't logged.`);
+        } else {
+          parts.push(`All ${b(staffCount)} came from ${b(wName)}.`);
+        }
+      } else {
+        const ratio = Math.round(worst.total / worst.staff);
+        if (ratio <= 10) {
+          parts.push(`Most are in ${b(wName)} — ${b("1 in every " + ratio)} cases there wasn't logged.`);
+        } else {
+          parts.push(`${b(wName)} has the most at ${b(worst.staff)} missed.`);
+        }
+      }
+    }
+
+    // Trend direction
+    if (trend && trend.length >= 3) {
+      const mid = Math.floor(trend.length / 2);
+      const firstHalf = trend.slice(0, mid).reduce((a, p) => a + p.pct, 0) / mid;
+      const secondHalf = trend.slice(mid).reduce((a, p) => a + p.pct, 0) / (trend.length - mid);
+      if (secondHalf > firstHalf + 1.5) {
+        parts.push(`The trend is going ${b("up")} — it's getting worse as the month goes on.`);
+      } else if (secondHalf < firstHalf - 1.5) {
+        parts.push(`The rate has been ${b("coming down")} over the month.`);
+      }
+    }
+
+    return parts.join(" ");
+  };
+
+  const summary = buildSummary();
+
+  // Typewriter tick — reveal chars progressively
+  useEffect(() => {
+    if (!summary) return;
+    if (visibleChars >= summary.length) return;
+    // Skip HTML tags instantly so they don't slow the animation
+    const nextVisible = (() => {
+      let pos = visibleChars;
+      // If we're inside a tag, skip to end of tag
+      if (summary[pos] === "<") {
+        const close = summary.indexOf(">", pos);
+        if (close !== -1) return close + 1;
+      }
+      return pos + 1;
+    })();
+    const speed = visibleChars < 30 ? 10 : 6;
+    const timer = setTimeout(() => setVisibleChars(nextVisible), speed);
+    return () => clearTimeout(timer);
+  }, [summary, visibleChars]);
+
+  // Header gradient turns red when >10% — this is a serious problem
+  const headerGradientFinal =
+    pct > 10
+      ? "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)"
+      : headerGradient;
+
+  // Short status line for the header
+  const statusMsg =
+    pct > 10 ? { text: "Needs attention", color: "rgba(252,165,165,1)" } :
+    pct >= 5 ? { text: "Trending up — review intake", color: "rgba(253,224,171,1)" } :
+    pct > 0  ? { text: `${staffCount} case${staffCount !== 1 ? "s" : ""} not logged at intake`, color: "rgba(255,255,255,0.55)" } :
+    null;
 
   return createPortal(
     <motion.div
@@ -234,28 +424,29 @@ function PillTooltip({ stats, anchorRef }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -6, scale: 0.97 }}
       transition={{ type: "spring", stiffness: 500, damping: 32 }}
-      className="fixed z-[9999] w-[17rem] rounded-2xl overflow-hidden"
+      className="fixed z-[9999] w-[18.5rem] rounded-2xl overflow-hidden max-h-[85vh]"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       style={{
         top: pos.top,
         right: pos.right,
         boxShadow: light
           ? "0 12px 40px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)"
           : "0 12px 40px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.25)",
-        pointerEvents: "none",
         background: surfaceBg,
         border: `1px solid ${surfaceBorder}`,
       }}
     >
-      {/* Header band — theme-matched gradient */}
+      {/* Header band — turns red when >10% */}
       <div
         className="px-4 pt-3.5 pb-3"
-        style={{ background: headerGradient }}
+        style={{ background: headerGradientFinal }}
       >
         <p
           className="text-[9px] font-semibold uppercase tracking-widest mb-2"
           style={{ color: "rgba(255,255,255,0.50)", letterSpacing: "0.12em" }}
         >
-          Case Entry Tracking
+          {monthLabel} — Case Entry
         </p>
         {/* Number + label stacked cleanly */}
         <div className="flex items-end gap-2.5">
@@ -266,57 +457,217 @@ function PillTooltip({ stats, anchorRef }) {
             {pct}%
           </span>
           <div className="mb-0.5 flex flex-col" style={{ color: "rgba(255,255,255,0.70)" }}>
-            <span className="text-[11px] font-medium leading-tight">added by</span>
-            <span className="text-[11px] font-medium leading-tight">non-front-office</span>
+            <span className="text-[11px] font-medium leading-tight">missed by</span>
+            <span className="text-[11px] font-medium leading-tight">front office</span>
           </div>
         </div>
+        {statusMsg && (
+          <p
+            className="text-[10px] font-semibold mt-2 leading-snug"
+            style={{ color: statusMsg.color }}
+          >
+            {statusMsg.text}
+          </p>
+        )}
       </div>
 
       {/* Body */}
-      <div className="px-4 py-3.5 space-y-3">
-        {/* Bar — normalised to 10% max so the scale is meaningful */}
+      <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
+
+        {/* ── Summary with typewriter + fade trail ── */}
         <div>
-          <div className="flex justify-between text-[11px] mb-1.5" style={{ color: textMuted }}>
-            <span>Front Office — {foCount} cases</span>
-            <span>Staff — {staffCount}</span>
+          {pct === 0 ? (
+            <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
+              Every case this month was logged at intake. Keep it up.
+            </p>
+          ) : summary ? (
+            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
+              {(() => {
+                const done = visibleChars >= summary.length;
+                const visible = summary.slice(0, visibleChars);
+                // Split into solid portion and a fading tail (~20 chars)
+                const FADE_LEN = 20;
+                if (done) {
+                  return <span dangerouslySetInnerHTML={{ __html: visible }} />;
+                }
+                // Find a safe split point that doesn't break HTML tags
+                let splitAt = Math.max(0, visibleChars - FADE_LEN);
+                // Don't split inside an HTML tag
+                const lastOpenBefore = visible.lastIndexOf("<", splitAt);
+                const lastCloseBefore = visible.lastIndexOf(">", splitAt);
+                if (lastOpenBefore > lastCloseBefore) splitAt = lastOpenBefore;
+                const solid = visible.slice(0, splitAt);
+                const fade = visible.slice(splitAt);
+                return (
+                  <>
+                    <span dangerouslySetInnerHTML={{ __html: solid }} />
+                    <span style={{
+                      maskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
+                      WebkitMaskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
+                    }} dangerouslySetInnerHTML={{ __html: fade }} />
+                    <span style={{ opacity: 0.3, marginLeft: 1 }}>|</span>
+                  </>
+                );
+              })()}
+            </p>
+          ) : null}
+        </div>
+
+        {/* ── Where — department breakdown ── */}
+        {deptBreakdown && deptBreakdown.length > 0 && (
+          <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5"
+               style={{ color: textMuted, letterSpacing: "0.06em" }}>
+              Where
+            </p>
+            <div className="space-y-2">
+              {deptBreakdown.map(d => {
+                const deptBarColor =
+                  d.pct > 10 ? "rgba(220,38,38,0.70)" :
+                  d.pct > 5  ? "rgba(245,158,11,0.65)" :
+                               "rgba(245,158,11,0.45)";
+                return (
+                  <div key={d.dept}>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span style={{ color: textPrimary, fontWeight: 500 }}>{deptDisplayName(d.dept)}</span>
+                      <span style={{ color: d.pct > 10 ? "rgba(220,38,38,0.80)" : textMuted }}>
+                        {d.staff} of {d.total} ({d.pct}%)
+                      </span>
+                    </div>
+                    {/* Mini bar */}
+                    <div className="h-1 rounded-full overflow-hidden mt-0.5" style={{ background: trackBg }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(d.pct / 20 * 100, 100)}%`,
+                          background: deptBarColor,
+                          transition: "width 0.4s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: trackBg }}>
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.min(pct / 10 * 100, 100)}%`,
-                background: barColor,
-                transition: "width 0.4s ease",
-              }}
-            />
+        )}
+
+        {/* ── Trend line — cumulative miss % through the month ── */}
+        {trend && trend.length >= 2 && staffCount > 0 && (
+          <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
+            <div className="flex items-baseline justify-between mb-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wide"
+                 style={{ color: textMuted, letterSpacing: "0.06em" }}>
+                Trend
+              </p>
+              <span className="text-[10px]" style={{ color: textMuted }}>
+                {monthLabel} 1–{trend[trend.length - 1].day}
+              </span>
+            </div>
+            {(() => {
+              const W = 220, H = 44, PAD = 2, TOP_PAD = 12;
+              const maxPct = Math.max(...trend.map(p => p.pct), 1);
+              const pts = trend.map((p, i) => {
+                const x = PAD + (i / Math.max(trend.length - 1, 1)) * (W - PAD * 2);
+                const y = TOP_PAD + (H - TOP_PAD - PAD) - ((p.pct / maxPct) * (H - TOP_PAD - PAD));
+                return { x, y, pct: p.pct, day: p.day };
+              });
+              const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+              const fillPath = `${linePath} L${pts[pts.length - 1].x},${H} L${pts[0].x},${H} Z`;
+              const lineColor = barColor;
+              const last = pts[pts.length - 1];
+              const hPt = trendHover != null ? pts[trendHover] : null;
+              const sliceW = (W - PAD * 2) / Math.max(trend.length - 1, 1);
+              return (
+                <svg
+                  width="100%"
+                  viewBox={`0 0 ${W} ${H + 14}`}
+                  style={{ display: "block", cursor: "crosshair" }}
+                  onMouseLeave={() => setTrendHover(null)}
+                >
+                  {/* Fill under line */}
+                  <path d={fillPath} fill={lineColor} opacity="0.10" />
+                  {/* Line */}
+                  <path d={linePath} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  {/* End dot (dim when hovering elsewhere) */}
+                  <circle cx={last.x} cy={last.y} r="2.5" fill={lineColor} opacity={hPt && trendHover !== pts.length - 1 ? 0.3 : 1} />
+                  {/* End label (hide when hovering) */}
+                  {!hPt && (
+                    <text x={last.x} y={last.y - 6} textAnchor="end" fill={lineColor} fontSize="8" fontWeight="600">
+                      {last.pct}%
+                    </text>
+                  )}
+                  {/* Hover hit areas — invisible rects for each data point */}
+                  {pts.map((p, i) => (
+                    <rect
+                      key={i}
+                      x={p.x - sliceW / 2}
+                      y={0}
+                      width={sliceW}
+                      height={H}
+                      fill="transparent"
+                      onMouseEnter={() => setTrendHover(i)}
+                    />
+                  ))}
+                  {/* Hover indicator */}
+                  {hPt && (
+                    <>
+                      {/* Vertical guide line */}
+                      <line x1={hPt.x} y1={TOP_PAD} x2={hPt.x} y2={H} stroke={textMuted} strokeWidth="0.5" opacity="0.4" strokeDasharray="2,2" />
+                      {/* Dot */}
+                      <circle cx={hPt.x} cy={hPt.y} r="3" fill={lineColor} stroke={surfaceBg} strokeWidth="1.5" />
+                      {/* Label — day + pct */}
+                      <text
+                        x={hPt.x}
+                        y={Math.max(hPt.y - 7, 9)}
+                        textAnchor={hPt.x < W / 2 ? "start" : "end"}
+                        fill={textPrimary}
+                        fontSize="8"
+                        fontWeight="600"
+                      >
+                        Day {hPt.day}: {hPt.pct}%
+                      </text>
+                    </>
+                  )}
+                  {/* X-axis labels */}
+                  <text x={PAD} y={H + 10} fill={textMuted} fontSize="7" opacity="0.6">1</text>
+                  <text x={W - PAD} y={H + 10} textAnchor="end" fill={textMuted} fontSize="7" opacity="0.6">{trend[trend.length - 1].day}</text>
+                </svg>
+              );
+            })()}
           </div>
-          <p className="text-[10px] mt-1" style={{ color: textMuted, opacity: 0.6 }}>
-            Scale: 0 – 10%
+        )}
+
+        {/* ── Year-to-date ── */}
+        <div style={{
+          borderTop: `1px solid ${dividerColor}`,
+          paddingTop: "0.5rem",
+          background: light ? "rgba(0,0,0,0.02)" : "rgba(255,255,255,0.03)",
+          margin: "0 -1rem",
+          padding: "0.5rem 1rem 0",
+        }}>
+          <div className="flex items-baseline justify-between mb-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide"
+               style={{ color: textMuted, letterSpacing: "0.06em" }}>
+              {year} Year-to-date
+            </p>
+            <span className="text-[13px] font-bold tabular-nums" style={{
+              color: yearPct > 10 ? "rgba(220,38,38,0.90)" :
+                     yearPct >= 5 ? "rgba(245,158,11,0.85)" :
+                                    "rgba(34,197,94,0.80)",
+            }}>
+              {yearPct}%
+            </span>
+          </div>
+          <p className="text-[11px]" style={{ color: textMuted }}>
+            {yearStaffCount} of {yearTotalCount} cases entered by staff
           </p>
         </div>
 
-        {/* Explanation */}
-        <p className="text-[12px] leading-relaxed" style={{ color: textMuted }}>
-          Front office is responsible for entering{" "}
-          <strong style={{ color: textPrimary }}>all cases</strong>. When staff
-          add cases, it means they noticed one wasn't logged — a sign that a
-          front office intake was missed.
-        </p>
-
-        {pct === 0 ? (
-          <p className="text-[11px] font-medium" style={{ color: "rgba(34,197,94,0.85)" }}>
-            ✓ All cases in the last 90 days were entered by front office.
-          </p>
-        ) : (
-          <p className="text-[11px] leading-relaxed" style={{ color: textMuted }}>
-            {staffCount} of {totalCount} cases over the past 90 days were
-            entered by staff rather than front office.
-          </p>
-        )}
-
-        <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.625rem" }}>
-          <p className="text-[11px]" style={{ color: textMuted }}>
-            Last 90 days · {totalCount} total cases
+        {/* ── Footer ── */}
+        <div style={{ paddingTop: "0.375rem" }}>
+          <p className="text-[10px]" style={{ color: textMuted, opacity: 0.6 }}>
+            {monthLabel} · {totalCount} cases this month
           </p>
         </div>
       </div>
@@ -380,11 +731,11 @@ export default function FrontOfficePill() {
   } : {};
 
   const redPillOverrides = accent.level === "red" ? {
-    background: theme === "white" ? "rgba(239,68,68,0.08)" :
-                theme === "pink"  ? "rgba(239,68,68,0.10)" :
-                                    "rgba(239,68,68,0.12)",
-    border: `1px solid rgba(239,68,68,0.30)`,
-    boxShadow: "0 0 8px rgba(239,68,68,0.12)",
+    background: theme === "white" ? "rgba(220,38,38,0.12)" :
+                theme === "pink"  ? "rgba(220,38,38,0.15)" :
+                                    "rgba(220,38,38,0.18)",
+    border: `1px solid rgba(220,38,38,0.50)`,
+    boxShadow: "0 0 12px rgba(220,38,38,0.25), 0 0 4px rgba(220,38,38,0.15)",
   } : {};
 
   const handleMouseEnter = () => {
@@ -405,7 +756,13 @@ export default function FrontOfficePill() {
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={
-          accent.level === "amber"
+          accent.level === "red"
+            ? { opacity: 1, scale: 1, boxShadow: [
+                "0 0 8px rgba(220,38,38,0.15)",
+                "0 0 20px rgba(220,38,38,0.40)",
+                "0 0 8px rgba(220,38,38,0.15)",
+              ] }
+            : accent.level === "amber"
             ? { opacity: 1, scale: 1, boxShadow: [
                 "0 0 6px rgba(245,158,11,0.10)",
                 "0 0 14px rgba(245,158,11,0.25)",
@@ -414,7 +771,10 @@ export default function FrontOfficePill() {
             : { opacity: 1, scale: 1 }
         }
         transition={
-          accent.level === "amber"
+          accent.level === "red"
+            ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
+                boxShadow: { duration: 2, repeat: Infinity, ease: "easeInOut" } }
+            : accent.level === "amber"
             ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
                 boxShadow: { duration: 3, repeat: Infinity, ease: "easeInOut" } }
             : { type: "spring", stiffness: 400, damping: 26, delay: 0.15 }
@@ -447,7 +807,7 @@ export default function FrontOfficePill() {
       </motion.div>
 
       <AnimatePresence>
-        {hovered && <PillTooltip stats={stats} anchorRef={pillRef} />}
+        {hovered && <PillTooltip stats={stats} anchorRef={pillRef} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave} />}
       </AnimatePresence>
     </div>
   );
