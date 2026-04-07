@@ -162,7 +162,7 @@ export function useFrontOfficeStats() {
         }
         const total = list.length;
         const rawPct = total > 0 ? (staff / total) * 100 : 0;
-        // Department breakdown — worst first
+        // Department breakdown — worst first (only depts with misses)
         const deptBreakdown = Object.entries(byDept)
           .filter(([, v]) => v.staff > 0)
           .map(([dept, v]) => ({
@@ -172,6 +172,14 @@ export function useFrontOfficeStats() {
             pct: Math.round((v.staff / v.total) * 1000) / 10,
           }))
           .sort((a, b) => b.staff - a.staff);
+        // Full department breakdown (all depts, for yearly baseline)
+        const deptAll = Object.entries(byDept)
+          .map(([dept, v]) => ({
+            dept,
+            staff: v.staff,
+            total: v.total,
+            pct: v.total > 0 ? Math.round((v.staff / v.total) * 1000) / 10 : 0,
+          }));
         // Staff who entered — most first
         const enteredBy = Object.entries(byStaff)
           .map(([name, count]) => ({ name, count }))
@@ -180,7 +188,7 @@ export function useFrontOfficeStats() {
         const dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         const dayBreakdown = dayOrder
           .map(d => ({ day: d, count: byDay[d] || 0 }));
-        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, enteredBy, dayBreakdown };
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll, enteredBy, dayBreakdown };
       };
 
       const monthly = tally(monthEntries);
@@ -191,12 +199,19 @@ export function useFrontOfficeStats() {
         return;
       }
 
+      // Build a lookup: dept → yearly avg pct
+      const yearDeptAvg = {};
+      for (const d of yearly.deptAll) {
+        yearDeptAvg[d.dept] = d.pct;
+      }
+
       if (mountedRef.current) {
         setStats({
           pct: monthly.pct,
           staffCount: monthly.staffCount,
           totalCount: monthly.totalCount,
           deptBreakdown: monthly.deptBreakdown,
+          yearDeptAvg,
           enteredBy: monthly.enteredBy,
           dayBreakdown: monthly.dayBreakdown,
           yearPct: yearly.pct,
@@ -244,7 +259,7 @@ function getPillAccent(pct) {
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
-  const { pct, staffCount, totalCount, deptBreakdown, enteredBy, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+  const { pct, staffCount, totalCount, deptBreakdown, yearDeptAvg, enteredBy, dayBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const foCount = totalCount - staffCount;
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
@@ -291,14 +306,6 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
 
   // Display name mapping
   const deptDisplayName = (name) => name === "General" ? "Digital" : name;
-
-  // Per-department severity label
-  const deptSeverity = (dpct) =>
-    dpct > 15 ? { label: "Critical", color: "rgba(220,38,38,0.90)" } :
-    dpct > 10 ? { label: "High",     color: "rgba(220,38,38,0.75)" } :
-    dpct > 5  ? { label: "Elevated", color: "rgba(245,158,11,0.85)" } :
-    dpct > 0  ? { label: "Low",      color: "rgba(34,197,94,0.75)" } :
-                null;
 
   // Header gradient turns red when >10% — this is a serious problem
   const headerGradientFinal =
@@ -398,12 +405,22 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
             </p>
             <div className="space-y-2">
               {deptBreakdown.map(d => {
-                const sev = deptSeverity(d.pct);
+                const avg = yearDeptAvg?.[d.dept];
+                const hasAvg = avg != null && avg > 0;
+                const delta = hasAvg ? d.pct - avg : 0;
+                const aboveBelowColor =
+                  delta > 1  ? "rgba(220,38,38,0.80)" :
+                  delta < -1 ? "rgba(34,197,94,0.80)" :
+                               textMuted;
+                const deptBarColor =
+                  delta > 1  ? "rgba(220,38,38,0.65)" :
+                  delta < -1 ? "rgba(34,197,94,0.60)" :
+                               "rgba(245,158,11,0.60)";
                 return (
                   <div key={d.dept}>
                     <div className="flex items-center justify-between text-[11px]">
                       <span style={{ color: textPrimary, fontWeight: 500 }}>{deptDisplayName(d.dept)}</span>
-                      <span style={{ color: sev?.color || textMuted }}>
+                      <span style={{ color: textMuted }}>
                         {d.staff} of {d.total} ({d.pct}%)
                       </span>
                     </div>
@@ -413,16 +430,17 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
                         className="h-full rounded-full"
                         style={{
                           width: `${Math.min(d.pct / 20 * 100, 100)}%`,
-                          background: sev?.color || barColor,
+                          background: deptBarColor,
                           transition: "width 0.4s ease",
                         }}
                       />
                     </div>
-                    {/* Severity label */}
-                    {sev && (
-                      <p className="text-[10px] mt-0.5" style={{ color: sev.color, fontWeight: 500 }}>
-                        {sev.label}
-                        {d.pct > 10 && " — 1 in " + Math.round(d.total / d.staff) + " cases missed"}
+                    {/* Month vs yearly average */}
+                    {hasAvg && (
+                      <p className="text-[10px] mt-0.5" style={{ color: aboveBelowColor, fontWeight: 500 }}>
+                        {delta > 1 ? "▲" : delta < -1 ? "▼" : "—"}{" "}
+                        {delta > 1 ? "above" : delta < -1 ? "below" : "near"}{" "}
+                        {avg}% avg
                       </p>
                     )}
                   </div>
