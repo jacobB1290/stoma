@@ -263,12 +263,14 @@ function getPillAccent(pct) {
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
   const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
 
-  // Typewriter animation for summary text
+  // Typewriter animation with fade-in trail
   const [visibleChars, setVisibleChars] = useState(0);
-  const summaryRef = useRef(null);
   useEffect(() => {
     setVisibleChars(0);
-  }, [pct, staffCount]); // reset on data change
+  }, [pct, staffCount]);
+
+  // Trend hover state
+  const [trendHover, setTrendHover] = useState(null);
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
 
@@ -384,12 +386,22 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
 
   const summary = buildSummary();
 
-  // Typewriter tick
+  // Typewriter tick — reveal chars progressively
   useEffect(() => {
     if (!summary) return;
     if (visibleChars >= summary.length) return;
-    const speed = visibleChars < 20 ? 12 : 8; // start slightly slower
-    const timer = setTimeout(() => setVisibleChars(v => v + 1), speed);
+    // Skip HTML tags instantly so they don't slow the animation
+    const nextVisible = (() => {
+      let pos = visibleChars;
+      // If we're inside a tag, skip to end of tag
+      if (summary[pos] === "<") {
+        const close = summary.indexOf(">", pos);
+        if (close !== -1) return close + 1;
+      }
+      return pos + 1;
+    })();
+    const speed = visibleChars < 30 ? 10 : 6;
+    const timer = setTimeout(() => setVisibleChars(nextVisible), speed);
     return () => clearTimeout(timer);
   }, [summary, visibleChars]);
 
@@ -462,16 +474,42 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
       {/* Body */}
       <div className="px-4 py-3.5 space-y-2.5 overflow-y-auto" style={{ maxHeight: "calc(85vh - 5rem)" }}>
 
-        {/* ── Summary with typewriter ── */}
+        {/* ── Summary with typewriter + fade trail ── */}
         <div>
           {pct === 0 ? (
             <p className="text-[12px] leading-relaxed" style={{ color: "rgba(34,197,94,0.85)" }}>
               Every case this month was logged at intake. Keep it up.
             </p>
           ) : summary ? (
-            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}
-               dangerouslySetInnerHTML={{ __html: summary.slice(0, visibleChars) + (visibleChars < summary.length ? '<span style="opacity:0.4">|</span>' : '') }}
-            />
+            <p className="text-[12px] leading-[1.6]" style={{ color: textMuted }}>
+              {(() => {
+                const done = visibleChars >= summary.length;
+                const visible = summary.slice(0, visibleChars);
+                // Split into solid portion and a fading tail (~20 chars)
+                const FADE_LEN = 20;
+                if (done) {
+                  return <span dangerouslySetInnerHTML={{ __html: visible }} />;
+                }
+                // Find a safe split point that doesn't break HTML tags
+                let splitAt = Math.max(0, visibleChars - FADE_LEN);
+                // Don't split inside an HTML tag
+                const lastOpenBefore = visible.lastIndexOf("<", splitAt);
+                const lastCloseBefore = visible.lastIndexOf(">", splitAt);
+                if (lastOpenBefore > lastCloseBefore) splitAt = lastOpenBefore;
+                const solid = visible.slice(0, splitAt);
+                const fade = visible.slice(splitAt);
+                return (
+                  <>
+                    <span dangerouslySetInnerHTML={{ __html: solid }} />
+                    <span style={{
+                      maskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
+                      WebkitMaskImage: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,1) 100%)",
+                    }} dangerouslySetInnerHTML={{ __html: fade }} />
+                    <span style={{ opacity: 0.3, marginLeft: 1 }}>|</span>
+                  </>
+                );
+              })()}
+            </p>
           ) : null}
         </div>
 
@@ -527,30 +565,70 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
               </span>
             </div>
             {(() => {
-              const W = 220, H = 40, PAD = 2;
+              const W = 220, H = 44, PAD = 2, TOP_PAD = 12;
               const maxPct = Math.max(...trend.map(p => p.pct), 1);
               const pts = trend.map((p, i) => {
-                const x = PAD + (i / (trend.length - 1)) * (W - PAD * 2);
-                const y = H - PAD - ((p.pct / maxPct) * (H - PAD * 2));
+                const x = PAD + (i / Math.max(trend.length - 1, 1)) * (W - PAD * 2);
+                const y = TOP_PAD + (H - TOP_PAD - PAD) - ((p.pct / maxPct) * (H - TOP_PAD - PAD));
                 return { x, y, pct: p.pct, day: p.day };
               });
               const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
-              // Gradient fill under the line
               const fillPath = `${linePath} L${pts[pts.length - 1].x},${H} L${pts[0].x},${H} Z`;
               const lineColor = barColor;
               const last = pts[pts.length - 1];
+              const hPt = trendHover != null ? pts[trendHover] : null;
+              const sliceW = (W - PAD * 2) / Math.max(trend.length - 1, 1);
               return (
-                <svg width="100%" viewBox={`0 0 ${W} ${H + 14}`} style={{ display: "block" }}>
+                <svg
+                  width="100%"
+                  viewBox={`0 0 ${W} ${H + 14}`}
+                  style={{ display: "block", cursor: "crosshair" }}
+                  onMouseLeave={() => setTrendHover(null)}
+                >
                   {/* Fill under line */}
-                  <path d={fillPath} fill={lineColor} opacity="0.12" />
+                  <path d={fillPath} fill={lineColor} opacity="0.10" />
                   {/* Line */}
                   <path d={linePath} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  {/* End dot */}
-                  <circle cx={last.x} cy={last.y} r="2.5" fill={lineColor} />
-                  {/* End label */}
-                  <text x={last.x} y={last.y - 5} textAnchor="end" fill={lineColor} fontSize="8" fontWeight="600">
-                    {last.pct}%
-                  </text>
+                  {/* End dot (dim when hovering elsewhere) */}
+                  <circle cx={last.x} cy={last.y} r="2.5" fill={lineColor} opacity={hPt && trendHover !== pts.length - 1 ? 0.3 : 1} />
+                  {/* End label (hide when hovering) */}
+                  {!hPt && (
+                    <text x={last.x} y={last.y - 6} textAnchor="end" fill={lineColor} fontSize="8" fontWeight="600">
+                      {last.pct}%
+                    </text>
+                  )}
+                  {/* Hover hit areas — invisible rects for each data point */}
+                  {pts.map((p, i) => (
+                    <rect
+                      key={i}
+                      x={p.x - sliceW / 2}
+                      y={0}
+                      width={sliceW}
+                      height={H}
+                      fill="transparent"
+                      onMouseEnter={() => setTrendHover(i)}
+                    />
+                  ))}
+                  {/* Hover indicator */}
+                  {hPt && (
+                    <>
+                      {/* Vertical guide line */}
+                      <line x1={hPt.x} y1={TOP_PAD} x2={hPt.x} y2={H} stroke={textMuted} strokeWidth="0.5" opacity="0.4" strokeDasharray="2,2" />
+                      {/* Dot */}
+                      <circle cx={hPt.x} cy={hPt.y} r="3" fill={lineColor} stroke={surfaceBg} strokeWidth="1.5" />
+                      {/* Label — day + pct */}
+                      <text
+                        x={hPt.x}
+                        y={Math.max(hPt.y - 7, 9)}
+                        textAnchor={hPt.x < W / 2 ? "start" : "end"}
+                        fill={textPrimary}
+                        fontSize="8"
+                        fontWeight="600"
+                      >
+                        Day {hPt.day}: {hPt.pct}%
+                      </text>
+                    </>
+                  )}
                   {/* X-axis labels */}
                   <text x={PAD} y={H + 10} fill={textMuted} fontSize="7" opacity="0.6">1</text>
                   <text x={W - PAD} y={H + 10} textAnchor="end" fill={textMuted} fontSize="7" opacity="0.6">{trend[trend.length - 1].day}</text>
