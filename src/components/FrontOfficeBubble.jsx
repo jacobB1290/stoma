@@ -423,14 +423,14 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
     <>
     <style>{`
       @keyframes foRevealSweep {
-        0%   { mask-size: 100% 0%;   -webkit-mask-size: 100% 0%;   }
-        100% { mask-size: 100% 200%; -webkit-mask-size: 100% 200%; }
+        0%   { mask-position: -150% -150%; -webkit-mask-position: -150% -150%; }
+        100% { mask-position: 0% 0%;       -webkit-mask-position: 0% 0%;       }
       }
       .fo-pill-reveal {
-        mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%);
-        -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%);
-        mask-position: top left;
-        -webkit-mask-position: top left;
+        mask-image: linear-gradient(135deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 70%);
+        -webkit-mask-image: linear-gradient(135deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 70%);
+        mask-size: 250% 250%;
+        -webkit-mask-size: 250% 250%;
         mask-repeat: no-repeat;
         -webkit-mask-repeat: no-repeat;
         animation: foRevealSweep 1.2s ease-out forwards;
