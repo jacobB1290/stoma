@@ -381,12 +381,13 @@ Instead of relying solely on git commit messages for the changelog, you can prov
 
 **Rules:**
 
+- **Always create `RELEASE_NOTES_ENTRY.md`** for every PR — this is required, not optional. Users see these notes in the update notifier, so every release should have clear, human-readable notes ready at merge time.
 - Use **markdown formatting** for readability (headers, lists, bold/italic)
 - Include **sections relevant to your work** — delete sections that don't apply
 - Use **emojis** sparingly but for visual scanning
 - Keep it **concise** — users scan changelogs quickly
 - This file is **committed** as part of your PR (it stays in git history)
-- The file is **optional** — if you don't create it, git commits are used instead
+- If the file is missing, the build falls back to git commits — but this produces poor-quality notes, so always include it
 
 **Why this matters:**
 
