@@ -106,7 +106,7 @@ export function useFrontOfficeStats() {
 
       const { data, error } = await db
         .from("case_history")
-        .select("user_name, case_id, action, created_at")
+        .select("user_name, case_id, action, created_at, cases(department)")
         .gte("created_at", yearStart)
         .or("action.ilike.%case created%,action.ilike.%created%");
 
@@ -138,13 +138,29 @@ export function useFrontOfficeStats() {
 
       const tally = (list) => {
         let staff = 0;
+        const byDept = {}; // { dept: { staff, total } }
         for (const entry of list) {
           const canonical = getCanonicalName(entry.user_name || "");
-          if (!isFrontOfficeStaff(canonical)) staff++;
+          const isStaff = !isFrontOfficeStaff(canonical);
+          if (isStaff) staff++;
+          const dept = entry.cases?.department || "Unknown";
+          if (!byDept[dept]) byDept[dept] = { staff: 0, total: 0 };
+          byDept[dept].total++;
+          if (isStaff) byDept[dept].staff++;
         }
         const total = list.length;
         const rawPct = total > 0 ? (staff / total) * 100 : 0;
-        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total };
+        // Build sorted department breakdown (worst first)
+        const deptBreakdown = Object.entries(byDept)
+          .filter(([, v]) => v.staff > 0)
+          .map(([dept, v]) => ({
+            dept,
+            staff: v.staff,
+            total: v.total,
+            pct: Math.round((v.staff / v.total) * 1000) / 10,
+          }))
+          .sort((a, b) => b.staff - a.staff);
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown };
       };
 
       const monthly = tally(monthEntries);
@@ -160,6 +176,7 @@ export function useFrontOfficeStats() {
           pct: monthly.pct,
           staffCount: monthly.staffCount,
           totalCount: monthly.totalCount,
+          deptBreakdown: monthly.deptBreakdown,
           yearPct: yearly.pct,
           yearStaffCount: yearly.staffCount,
           yearTotalCount: yearly.totalCount,
@@ -205,7 +222,7 @@ function getPillAccent(pct) {
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef }) {
-  const { pct, staffCount, totalCount, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+  const { pct, staffCount, totalCount, deptBreakdown, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const foCount = totalCount - staffCount;
   const [pos, setPos] = useState({ top: 0, right: 16 });
   const [theme, setTheme] = useState(getThemeKey);
@@ -362,6 +379,26 @@ function PillTooltip({ stats, anchorRef }) {
             {staffCount} of {totalCount} cases this month were
             entered by staff — {staffCount} missed intake{staffCount !== 1 ? "s" : ""}.
           </p>
+        )}
+
+        {/* Department breakdown — only show if there are missed intakes */}
+        {deptBreakdown && deptBreakdown.length > 0 && (
+          <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5"
+               style={{ color: textMuted, letterSpacing: "0.06em" }}>
+              Missed by department
+            </p>
+            <div className="space-y-1">
+              {deptBreakdown.map(d => (
+                <div key={d.dept} className="flex items-center justify-between text-[11px]">
+                  <span style={{ color: textPrimary }}>{d.dept}</span>
+                  <span style={{ color: d.pct > 10 ? "rgba(220,38,38,0.90)" : textMuted }}>
+                    <strong>{d.staff}</strong> missed ({d.pct}%)
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.625rem" }}>
