@@ -172,14 +172,14 @@ const InfoRow = React.memo(({ type, title, desc }) => {
   return (
     <motion.div
       className={clsx(
-        "flex items-center gap-3 px-4 py-3 rounded bg-[#4D8490] text-white font-mono h-full",
+        "flex items-center gap-3 px-4 py-3 rounded-xl bg-[#4D8490] text-white font-sans h-full",
         ringClass[type] || ""
       )}
       whileHover={{ y: -2, transition: { duration: 0.2 } }}
     >
       <div className="min-w-0">
-        <div className="font-bold text-white text-sm tracking-wide">{title}</div>
-        <div className="text-xs text-white/80 mt-0.5 font-sans leading-snug">{desc}</div>
+        <div className="font-semibold text-white text-sm">{title}</div>
+        <div className="text-xs text-white/75 mt-0.5 leading-snug">{desc}</div>
       </div>
     </motion.div>
   );
