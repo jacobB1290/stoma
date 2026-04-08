@@ -164,29 +164,22 @@ const DepartmentGlow = ({
 };
 
 const InfoRow = React.memo(({ type, title, desc }) => {
-  const base =
-    "flex items-start space-x-3 p-4 rounded-xl text-white font-sans text-base h-full glass-card-dark";
-  const typeStyles = {
-    priority: "ring-2 ring-red-500/30 bg-red-500/15",
-    rush: "ring-2 ring-orange-500/30 bg-orange-500/15",
-    standard: "ring-2 ring-teal-600/30 bg-teal-600/15",
-  };
-  const iconColors = {
-    priority: "bg-red-500",
-    rush: "bg-orange-500",
-    standard: "bg-teal-600",
+  const ringClass = {
+    priority: "ring-[3px] ring-red-500",
+    rush: "ring-[3px] ring-orange-400",
+    standard: "",
   };
   return (
     <motion.div
-      className={clsx(base, typeStyles[type] || typeStyles.standard)}
+      className={clsx(
+        "flex items-center gap-3 px-4 py-3 rounded bg-[#4D8490] text-white font-mono h-full",
+        ringClass[type] || ""
+      )}
       whileHover={{ y: -2, transition: { duration: 0.2 } }}
     >
-      {type !== "standard" && (
-        <span className={clsx("h-12 w-1 rounded-full", iconColors[type])} />
-      )}
-      <div>
-        <div className="font-medium text-gray-100">{title}</div>
-        <div className="text-sm text-gray-300 mt-0.5">{desc}</div>
+      <div className="min-w-0">
+        <div className="font-bold text-white text-sm tracking-wide">{title}</div>
+        <div className="text-xs text-white/80 mt-0.5 font-sans leading-snug">{desc}</div>
       </div>
     </motion.div>
   );
@@ -3146,17 +3139,17 @@ export default function Editor({ data, deptDefault }) {
             <InfoRow
               type="priority"
               title="Priority"
-              desc="Patient appointment today"
+              desc="Patient scheduled on due date · No flexibility"
             />
             <InfoRow
               type="rush"
               title="Rush"
-              desc="Patient appointment tomorrow"
+              desc="Patient scheduled day after · No flexibility"
             />
             <InfoRow
               type="standard"
               title="Standard"
-              desc="Flexible timeline"
+              desc="Full timeline · Possible flexibility"
             />
           </motion.div>
         )}
