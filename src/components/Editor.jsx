@@ -170,7 +170,7 @@ const infoRingShadow = {
 };
 const InfoRow = React.memo(({ type, title, desc }) => (
   <motion.div
-    className="flex items-center gap-3 px-4 py-3 rounded-xl text-white font-sans h-full"
+    className="flex items-center gap-3 px-4 py-3 rounded-xl font-sans h-full"
     style={{
       backgroundColor: "var(--info-card-bg)",
       boxShadow: infoRingShadow[type] || "none",
@@ -178,8 +178,8 @@ const InfoRow = React.memo(({ type, title, desc }) => (
     whileHover={{ y: -2, transition: { duration: 0.2 } }}
   >
     <div className="min-w-0">
-      <div className="font-semibold text-white text-sm">{title}</div>
-      <div className="text-xs text-white/75 mt-0.5 leading-snug">{desc}</div>
+      <div className="font-semibold text-sm" style={{ color: "var(--info-card-text)" }}>{title}</div>
+      <div className="text-xs mt-0.5 leading-snug" style={{ color: "var(--info-card-text-muted)" }}>{desc}</div>
     </div>
   </motion.div>
 ));

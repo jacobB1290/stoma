@@ -37,7 +37,9 @@ html.theme-white {
   --w-row-shadow: 0 8px 18px #0f172a1f;
 
   /* ───────── info card ───────── */
-  --info-card-bg: var(--w-accent);
+  --info-card-bg: var(--w-accent-surface);
+  --info-card-text: var(--w-accent-ink);
+  --info-card-text-muted: var(--w-text-muted);
 
   /* ───────── row colors ───────── */
   --w-row-blue: #d5e8f9;

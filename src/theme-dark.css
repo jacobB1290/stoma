@@ -30,7 +30,9 @@ html.theme-dark {
   --d-focus: #3ddecf73;
 
   /* ───────── INFO CARD ───────── */
-  --info-card-bg: #4D8490;
+  --info-card-bg: #2d4a4a;
+  --info-card-text: var(--d-text);
+  --info-card-text-muted: var(--d-text-muted);
 
   /* ───────── CASE CARD TINTS ───────── */
   --d-card-teal: #263837;

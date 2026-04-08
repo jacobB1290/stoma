@@ -8,6 +8,11 @@
   --danger: #dc2626;
   --danger-hover: #b91c1c;
 
+  /* Info cards (default / blue theme) */
+  --info-card-bg: #4D8490;
+  --info-card-text: #ffffff;
+  --info-card-text-muted: rgba(255,255,255,0.75);
+
   --gray-50: #f9fafb;
   --gray-100: #f3f4f6;
   --gray-200: #e5e7eb;
