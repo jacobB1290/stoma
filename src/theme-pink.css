@@ -37,6 +37,9 @@ html.theme-pink {
   --w-shadow-3: 0 16px 40px -16px #4a1a2d59;
   --w-row-shadow: 0 8px 18px #4a1a2d1f;
 
+  /* ───────── info card ───────── */
+  --info-card-bg: var(--w-accent);
+
   /* ───────── row colors (harmonious pastels) ───────── */
   --w-row-blue: #e1e8f9;
   --w-row-purple: #ebe1f9;

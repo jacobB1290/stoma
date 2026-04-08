@@ -163,27 +163,26 @@ const DepartmentGlow = ({
   );
 };
 
-const InfoRow = React.memo(({ type, title, desc }) => {
-  const ringClass = {
-    priority: "ring-[3px] ring-red-500",
-    rush: "ring-[3px] ring-orange-400",
-    standard: "",
-  };
-  return (
-    <motion.div
-      className={clsx(
-        "flex items-center gap-3 px-4 py-3 rounded-xl bg-[#4D8490] text-white font-sans h-full",
-        ringClass[type] || ""
-      )}
-      whileHover={{ y: -2, transition: { duration: 0.2 } }}
-    >
-      <div className="min-w-0">
-        <div className="font-semibold text-white text-sm">{title}</div>
-        <div className="text-xs text-white/75 mt-0.5 leading-snug">{desc}</div>
-      </div>
-    </motion.div>
-  );
-});
+const infoRingShadow = {
+  priority: "0 0 0 3px #ef4444",
+  rush: "0 0 0 3px #fb923c",
+  standard: "none",
+};
+const InfoRow = React.memo(({ type, title, desc }) => (
+  <motion.div
+    className="flex items-center gap-3 px-4 py-3 rounded-xl text-white font-sans h-full"
+    style={{
+      backgroundColor: "var(--info-card-bg)",
+      boxShadow: infoRingShadow[type] || "none",
+    }}
+    whileHover={{ y: -2, transition: { duration: 0.2 } }}
+  >
+    <div className="min-w-0">
+      <div className="font-semibold text-white text-sm">{title}</div>
+      <div className="text-xs text-white/75 mt-0.5 leading-snug">{desc}</div>
+    </div>
+  </motion.div>
+));
 InfoRow.displayName = "InfoRow";
 
 const containerVariants = {
