@@ -163,34 +163,26 @@ const DepartmentGlow = ({
   );
 };
 
-const InfoRow = React.memo(({ type, title, desc }) => {
-  const base =
-    "flex items-start space-x-3 p-4 rounded-xl text-white font-sans text-base h-full glass-card-dark";
-  const typeStyles = {
-    priority: "ring-2 ring-red-500/30 bg-red-500/15",
-    rush: "ring-2 ring-orange-500/30 bg-orange-500/15",
-    standard: "ring-2 ring-teal-600/30 bg-teal-600/15",
-  };
-  const iconColors = {
-    priority: "bg-red-500",
-    rush: "bg-orange-500",
-    standard: "bg-teal-600",
-  };
-  return (
-    <motion.div
-      className={clsx(base, typeStyles[type] || typeStyles.standard)}
-      whileHover={{ y: -2, transition: { duration: 0.2 } }}
-    >
-      {type !== "standard" && (
-        <span className={clsx("h-12 w-1 rounded-full", iconColors[type])} />
-      )}
-      <div>
-        <div className="font-medium text-gray-100">{title}</div>
-        <div className="text-sm text-gray-300 mt-0.5">{desc}</div>
-      </div>
-    </motion.div>
-  );
-});
+const infoRingShadow = {
+  priority: "0 0 0 3px #ef4444",
+  rush: "0 0 0 3px #fb923c",
+  standard: "none",
+};
+const InfoRow = React.memo(({ type, title, desc }) => (
+  <motion.div
+    className="flex items-center gap-3 px-4 py-3 rounded-xl font-sans h-full"
+    style={{
+      backgroundColor: "var(--info-card-bg)",
+      boxShadow: infoRingShadow[type] || "none",
+    }}
+    whileHover={{ y: -2, transition: { duration: 0.2 } }}
+  >
+    <div className="min-w-0">
+      <div className="font-semibold text-sm" style={{ color: "var(--info-card-text)" }}>{title}</div>
+      <div className="text-xs mt-0.5 leading-snug" style={{ color: "var(--info-card-text-muted)" }}>{desc}</div>
+    </div>
+  </motion.div>
+));
 InfoRow.displayName = "InfoRow";
 
 const containerVariants = {
@@ -3146,17 +3138,17 @@ export default function Editor({ data, deptDefault }) {
             <InfoRow
               type="priority"
               title="Priority"
-              desc="Patient appointment today"
+              desc="Patient scheduled on due date · No flexibility"
             />
             <InfoRow
               type="rush"
               title="Rush"
-              desc="Patient appointment tomorrow"
+              desc="Patient scheduled day after · No flexibility"
             />
             <InfoRow
               type="standard"
               title="Standard"
-              desc="Flexible timeline"
+              desc="Full timeline · Possible flexibility"
             />
           </motion.div>
         )}

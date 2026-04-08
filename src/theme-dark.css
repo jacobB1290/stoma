@@ -29,6 +29,11 @@ html.theme-dark {
   --d-accent-ink: #f0fdfa;
   --d-focus: #3ddecf73;
 
+  /* ───────── INFO CARD ───────── */
+  --info-card-bg: #2d4a4a;
+  --info-card-text: var(--d-text);
+  --info-card-text-muted: var(--d-text-muted);
+
   /* ───────── CASE CARD TINTS ───────── */
   --d-card-teal: #263837;
   --d-card-teal-border: #345452;
