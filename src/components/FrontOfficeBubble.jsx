@@ -107,7 +107,7 @@ export function useFrontOfficeStats() {
 
       const { data, error } = await db
         .from("case_history")
-        .select("user_name, case_id, action, created_at, cases(department, case_number)")
+        .select("user_name, case_id, action, created_at, cases(department, casenumber)")
         .gte("created_at", yearStart)
         .or("action.ilike.%case created%,action.ilike.%created%");
 
@@ -148,7 +148,7 @@ export function useFrontOfficeStats() {
             staff++;
             missedCases.push({
               id: entry.case_id,
-              caseNumber: entry.cases?.case_number || entry.case_id,
+              caseNumber: entry.cases?.casenumber || entry.case_id,
               dept: entry.cases?.department || "Unknown",
               enteredBy: entry.user_name || "Unknown",
               createdAt: entry.created_at,
