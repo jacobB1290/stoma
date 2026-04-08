@@ -33,6 +33,7 @@ import {
   isFrontOfficeStaff,
 } from "../utils/frontOfficeStaff";
 import { getCanonicalName } from "../utils/nameNormalization";
+import CaseHistory from "./CaseHistory";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage key for the "disabled" preference
@@ -106,7 +107,7 @@ export function useFrontOfficeStats() {
 
       const { data, error } = await db
         .from("case_history")
-        .select("user_name, case_id, action, created_at, cases(department)")
+        .select("user_name, case_id, action, created_at, cases(department, case_number)")
         .gte("created_at", yearStart)
         .or("action.ilike.%case created%,action.ilike.%created%");
 
@@ -139,10 +140,20 @@ export function useFrontOfficeStats() {
       const tally = (list) => {
         let staff = 0;
         const byDept = {};    // { dept: { staff, total } }
+        const missedCases = []; // cases not entered by front office
         for (const entry of list) {
           const canonical = getCanonicalName(entry.user_name || "");
           const isStaff = !isFrontOfficeStaff(canonical);
-          if (isStaff) staff++;
+          if (isStaff) {
+            staff++;
+            missedCases.push({
+              id: entry.case_id,
+              caseNumber: entry.cases?.case_number || entry.case_id,
+              dept: entry.cases?.department || "Unknown",
+              enteredBy: entry.user_name || "Unknown",
+              createdAt: entry.created_at,
+            });
+          }
           const dept = entry.cases?.department || "Unknown";
           if (!byDept[dept]) byDept[dept] = { staff: 0, total: 0 };
           byDept[dept].total++;
@@ -168,7 +179,9 @@ export function useFrontOfficeStats() {
             total: v.total,
             pct: v.total > 0 ? Math.round((v.staff / v.total) * 1000) / 10 : 0,
           }));
-        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll };
+        // Sort missed cases by date descending
+        missedCases.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        return { pct: Math.round(rawPct * 10) / 10, staffCount: staff, totalCount: total, deptBreakdown, deptAll, missedCases };
       };
 
       // Build daily trend for the month — cumulative miss % over time
@@ -215,6 +228,7 @@ export function useFrontOfficeStats() {
           staffCount: monthly.staffCount,
           totalCount: monthly.totalCount,
           deptBreakdown: monthly.deptBreakdown,
+          missedCases: monthly.missedCases,
           trend,
           yearPct: yearly.pct,
           yearStaffCount: yearly.staffCount,
@@ -277,8 +291,9 @@ function getPillAccent(pct) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
-function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
-  const { pct, staffCount, totalCount, deptBreakdown, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase }) {
+  const { pct, staffCount, totalCount, deptBreakdown, missedCases, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
+  const [showMissedList, setShowMissedList] = useState(false);
 
   // Word fade-in counter
   const [wordsVisible, setWordsVisible] = useState(0);
@@ -578,6 +593,67 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave }) {
           </div>
         )}
 
+        {/* ── Missed cases — clickable list ── */}
+        {missedCases && missedCases.length > 0 && (
+          <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
+            <button
+              onClick={() => setShowMissedList(v => !v)}
+              className="w-full flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide cursor-pointer"
+              style={{ color: textMuted, letterSpacing: "0.06em", background: "none", border: "none", padding: 0 }}
+            >
+              <span>Missed Cases ({missedCases.length})</span>
+              <svg
+                width="10" height="10" viewBox="0 0 10 10" fill="currentColor"
+                style={{ transform: showMissedList ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease" }}
+              >
+                <path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <AnimatePresence>
+              {showMissedList && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-1.5 space-y-1 max-h-[140px] overflow-y-auto pr-1" style={{ scrollbarWidth: "thin" }}>
+                    {missedCases.map((c) => {
+                      const displayDept = c.dept === "General" ? "Digital" : c.dept;
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => onOpenCase(c)}
+                          className="w-full flex items-center justify-between rounded-md px-2 py-1 cursor-pointer text-left"
+                          style={{
+                            background: light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)",
+                            border: "none",
+                            transition: "background 0.15s",
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.10)"}
+                          onMouseLeave={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-medium" style={{ color: textPrimary }}>{c.caseNumber}</span>
+                            <span className="text-[9px] px-1 py-0.5 rounded" style={{
+                              color: textMuted,
+                              background: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)",
+                            }}>{displayDept}</span>
+                          </div>
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: textMuted, flexShrink: 0, opacity: 0.5 }}>
+                            <path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
         {/* ── Trend line — cumulative miss % through the month ── */}
         {trend && trend.length >= 2 && staffCount > 0 && (
           <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
@@ -713,6 +789,7 @@ export default function FrontOfficePill() {
   const pillRef = useRef(null);
   const hoverTimerRef = useRef(null);
   const [pinned, setPinned] = useState(false);
+  const [historyCase, setHistoryCase] = useState(null); // { id, caseNumber }
 
   // Close on click outside when pinned
   useEffect(() => {
@@ -849,13 +926,29 @@ export default function FrontOfficePill() {
                         : accent.level === "red"   ? accent.dot
                         : textColor }}
         >
-          {Math.round(pct)}% staff-entered
+          {Math.round(pct)}% missed
         </span>
       </motion.div>
 
       <AnimatePresence>
-        {hovered && <PillTooltip stats={stats} anchorRef={pillRef} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave} />}
+        {hovered && (
+          <PillTooltip
+            stats={stats}
+            anchorRef={pillRef}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            onOpenCase={(c) => setHistoryCase({ id: c.id, caseNumber: c.caseNumber })}
+          />
+        )}
       </AnimatePresence>
+
+      {historyCase && (
+        <CaseHistory
+          id={historyCase.id}
+          caseNumber={historyCase.caseNumber}
+          onClose={() => setHistoryCase(null)}
+        />
+      )}
     </div>
   );
 }
