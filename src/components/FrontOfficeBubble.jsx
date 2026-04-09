@@ -107,7 +107,7 @@ export function useFrontOfficeStats() {
 
       const { data, error } = await db
         .from("case_history")
-        .select("user_name, case_id, action, created_at, cases(department, casenumber, completed_at)")
+        .select("user_name, case_id, action, created_at, cases(department, casenumber)")
         .gte("created_at", yearStart)
         .or("action.ilike.%case created%,action.ilike.%created%");
 
@@ -152,7 +152,7 @@ export function useFrontOfficeStats() {
               dept: entry.cases?.department || "Unknown",
               enteredBy: entry.user_name || "Unknown",
               createdAt: entry.created_at,
-              completedAt: entry.cases?.completed_at || null,
+              completedAt: null,
             });
           }
           const dept = entry.cases?.department || "Unknown";
@@ -217,6 +217,22 @@ export function useFrontOfficeStats() {
       const monthly = tally(monthEntries);
       const yearly = tally(yearEntries);
       const trend = buildTrend(monthEntries);
+
+      // Enrich missed cases with completion status from the cases table
+      const missedIds = monthly.missedCases.map(c => c.id).filter(Boolean);
+      if (missedIds.length > 0) {
+        const { data: caseRows } = await db
+          .from("cases")
+          .select("id, completed_at")
+          .in("id", missedIds);
+        if (caseRows) {
+          const completionMap = {};
+          for (const r of caseRows) completionMap[r.id] = r.completed_at;
+          for (const mc of monthly.missedCases) {
+            mc.completedAt = completionMap[mc.id] || null;
+          }
+        }
+      }
 
       if (monthly.totalCount === 0 && yearly.totalCount === 0) {
         if (mountedRef.current) { setStats(null); setLoading(false); }
