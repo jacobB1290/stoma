@@ -233,7 +233,7 @@ const mapRow = (rec) => {
     hold: mods.includes("hold"),
     newAccount: mods.includes("newaccount"),
     stage2: mods.includes("stage2"),
-    urgent: rec.urgent ?? rec.priority ?? false,
+    urgent: rec.priority ?? false,
     caseNumber: rec.casenumber,
     caseType: mods.includes("bbs")
       ? "bbs"

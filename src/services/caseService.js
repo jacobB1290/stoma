@@ -125,7 +125,7 @@ export const addCase = async ({
       id: uuid(),
       casenumber: caseNumber.trim(),
       department: department === "Digital" ? "General" : department,
-      urgent,
+      priority: urgent,
       modifiers,
       due: `${due}T00:00:00Z`,
       completed: false,
@@ -152,7 +152,7 @@ export const updateCase = async (payload) => {
   const { id } = payload;
   const { data: prev } = await db
     .from("cases")
-    .select("casenumber,department,due,urgent,priority,modifiers")
+    .select("casenumber,department,due,priority,modifiers")
     .eq("id", id)
     .single();
   if (!prev) return { error: new Error("Row not found") };
@@ -186,7 +186,7 @@ export const updateCase = async (payload) => {
           ? "General"
           : payload.department
         : prev.department,
-    urgent: payload.urgent != null ? payload.urgent : (prev.urgent ?? prev.priority),
+    priority: payload.urgent != null ? payload.urgent : prev.priority,
     modifiers: nextMods,
     due: `${payload.due ?? prev.due.slice(0, 10)}T00:00:00Z`,
   };
@@ -222,8 +222,8 @@ export const updateCase = async (payload) => {
     }
   });
 
-  if ((prev.urgent ?? prev.priority) !== nextRow.urgent)
-    logs.push(nextRow.urgent ? "Urgent added" : "Urgent removed");
+  if (prev.priority !== nextRow.priority)
+    logs.push(nextRow.priority ? "Urgent added" : "Urgent removed");
 
   if (prev.casenumber !== nextRow.casenumber)
     logs.push(
@@ -258,7 +258,7 @@ export const toggleStage2 = async ({ id, modifiers = [] }) => {
 
 /* ---------- Simple toggles ---------- */
 export const toggleUrgent = async ({ id, urgent }) => {
-  await db.from("cases").update({ urgent: !urgent }).eq("id", id);
+  await db.from("cases").update({ priority: !urgent }).eq("id", id);
   await logCase(id, !urgent ? "Urgent added" : "Urgent removed");
 };
 
