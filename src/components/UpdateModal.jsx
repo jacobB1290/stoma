@@ -397,6 +397,7 @@ export default function UpdateModal({ open, onClose }) {
         casenumber: "update",
         department: "General",
         urgent: priority === "high" || priority === "force",
+        priority: priority === "high" || priority === "force",
         modifiers: [priority, cleanedNotes].filter(Boolean),
         due: new Date().toISOString(),
         completed: false,
