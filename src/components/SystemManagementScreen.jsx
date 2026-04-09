@@ -40,7 +40,6 @@ async function broadcastFOList() {
       casenumber: "syscmd",
       department: "General",
       urgent: false,
-      priority: false,
       modifiers: [
         "syscmd:settings",
         "target:all",
@@ -2313,7 +2312,6 @@ export default function SystemManagementScreen() {
           casenumber: "force-cmd",
           department: "General",
           urgent: true,
-          priority: true,
           modifiers: [
             `force-syscmd:${cmd}`,
             `target:${selectedUser.key}`,
@@ -2344,7 +2342,6 @@ export default function SystemManagementScreen() {
           casenumber: "update",
           department: "General",
           urgent: priority === "high" || priority === "force",
-          priority: priority === "high" || priority === "force",
           modifiers: [priority, updateNotes.trim()].filter(Boolean),
           due: nowIso(),
           completed: false,

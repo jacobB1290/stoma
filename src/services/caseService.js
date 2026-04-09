@@ -126,7 +126,6 @@ export const addCase = async ({
       casenumber: caseNumber.trim(),
       department: department === "Digital" ? "General" : department,
       urgent,
-      priority: urgent,
       modifiers,
       due: `${due}T00:00:00Z`,
       completed: false,
@@ -188,7 +187,6 @@ export const updateCase = async (payload) => {
           : payload.department
         : prev.department,
     urgent: payload.urgent != null ? payload.urgent : (prev.urgent ?? prev.priority),
-    priority: payload.urgent != null ? payload.urgent : (prev.urgent ?? prev.priority),
     modifiers: nextMods,
     due: `${payload.due ?? prev.due.slice(0, 10)}T00:00:00Z`,
   };
@@ -260,7 +258,7 @@ export const toggleStage2 = async ({ id, modifiers = [] }) => {
 
 /* ---------- Simple toggles ---------- */
 export const toggleUrgent = async ({ id, urgent }) => {
-  await db.from("cases").update({ urgent: !urgent, priority: !urgent }).eq("id", id);
+  await db.from("cases").update({ urgent: !urgent }).eq("id", id);
   await logCase(id, !urgent ? "Urgent added" : "Urgent removed");
 };
 
