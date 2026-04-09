@@ -377,7 +377,7 @@ export const CaseManagementModal = ({ show, onClose, stage, stageStats }) => {
                 timeInStage: stageData.adjustedWorkingTime,
                 visitCount: stageData.visitCount,
                 isActive: stageData.isActive && !caseItem.completed,
-                priority: caseItem.priority,
+                urgent: caseItem.urgent,
                 rush: caseItem.modifiers?.includes("rush"),
                 modifiers: caseItem.modifiers || [],
                 exclusionType: caseItem.modifiers?.includes("stats-exclude:all")
@@ -506,7 +506,7 @@ export const CaseManagementModal = ({ show, onClose, stage, stageStats }) => {
         exclusionReason,
         isExcluded: true,
         modifiers: modifiers,
-        priority: excludedCase.priority || false,
+        urgent: excludedCase.urgent || false,
         rush: excludedCase.rush || false,
       });
     });
@@ -584,7 +584,7 @@ export const CaseManagementModal = ({ show, onClose, stage, stageStats }) => {
               timeInStage: stageData.adjustedWorkingTime,
               visitCount: stageData.visitCount,
               isActive: stageData.isActive,
-              priority: caseItem.priority,
+              urgent: caseItem.urgent,
               rush: caseItem.modifiers?.includes("rush"),
               modifiers: caseItem.modifiers || [],
               exclusionType,
@@ -1098,9 +1098,9 @@ export const CaseManagementModal = ({ show, onClose, stage, stageStats }) => {
                               <span className="font-mono text-sm font-medium">
                                 {caseData.caseNumber}
                               </span>
-                              {caseData.priority && (
+                              {caseData.urgent && (
                                 <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">
-                                  Priority
+                                  Urgent
                                 </span>
                               )}
                               {caseData.rush && (

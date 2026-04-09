@@ -1937,10 +1937,10 @@ export default function SystemInsightsPanel({
           }
 
           // Apply changes
-          if (changes?.priority !== undefined) {
-            await CaseService.togglePriority({
+          if (changes?.urgent !== undefined) {
+            await CaseService.toggleUrgent({
               id: caseData.id,
-              priority: !changes.priority,
+              urgent: !changes.urgent,
             });
           }
           if (changes?.rush !== undefined) {
@@ -2042,11 +2042,11 @@ export default function SystemInsightsPanel({
 
             try {
               // Apply changes based on the changes object or action string
-              if (changes?.priority !== undefined) {
-                if (changes.priority !== caseData.priority) {
-                  await CaseService.togglePriority({
+              if (changes?.urgent !== undefined) {
+                if (changes.urgent !== caseData.urgent) {
+                  await CaseService.toggleUrgent({
                     id: caseData.id,
-                    priority: caseData.priority,
+                    urgent: caseData.urgent,
                   });
                 }
               }
@@ -2087,19 +2087,19 @@ export default function SystemInsightsPanel({
               // Handle legacy action string format
               if (action) {
                 switch (action) {
-                  case "set_priority":
-                    if (!caseData.priority) {
-                      await CaseService.togglePriority({
+                  case "set_urgent":
+                    if (!caseData.urgent) {
+                      await CaseService.toggleUrgent({
                         id: caseData.id,
-                        priority: false,
+                        urgent: false,
                       });
                     }
                     break;
-                  case "remove_priority":
-                    if (caseData.priority) {
-                      await CaseService.togglePriority({
+                  case "remove_urgent":
+                    if (caseData.urgent) {
+                      await CaseService.toggleUrgent({
                         id: caseData.id,
-                        priority: true,
+                        urgent: true,
                       });
                     }
                     break;
@@ -2388,7 +2388,7 @@ export default function SystemInsightsPanel({
           active={activeTab === "insights"}
           onClick={() => setActiveTab("insights")}
         >
-          Priority Insights
+          Urgent Insights
         </Tab>
         <Tab
           active={activeTab === "cases"}

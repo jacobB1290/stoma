@@ -547,12 +547,12 @@ const FEATURE_METADATA = {
         : "Tight deadline",
   },
   is_rush: {
-    name: "Rush Priority",
-    description: "Case marked as rush/priority",
-    category: "priority",
+    name: "Rush Urgent",
+    description: "Case marked as rush/urgent",
+    category: "urgent",
     icon: "🚀",
     interpret: (v) =>
-      v > 0 ? "RUSH case - expedited processing" : "Standard priority",
+      v > 0 ? "RUSH case - expedited processing" : "Standard urgency",
   },
   entry_hour_from8: {
     name: "Entry Time",
@@ -671,7 +671,7 @@ const FEATURE_METADATA = {
 const CATEGORY_COLORS = {
   model: { bg: "#f3f4f6", border: "#9ca3af", glow: "#6b7280" },
   time: { bg: "#dbeafe", border: "#3b82f6", glow: "#2563eb" },
-  priority: { bg: "#fae8ff", border: "#c026d3", glow: "#a855f7" },
+  urgent: { bg: "#fae8ff", border: "#c026d3", glow: "#a855f7" },
   history: { bg: "#fef3c7", border: "#f59e0b", glow: "#d97706" },
   blockers: { bg: "#fee2e2", border: "#ef4444", glow: "#dc2626" },
   timing: { bg: "#e0e7ff", border: "#6366f1", glow: "#4f46e5" },
@@ -862,10 +862,10 @@ function getStageEnteredAtFor(c, stage) {
 function featureVector(c, stage, entry, dueEodDate, extra = {}) {
   const mods = strSet(c.modifiers);
   const isRush = !!(
-    c.priority ||
+    c.urgent ||
     c.rush ||
     mods.has("rush") ||
-    mods.has("priority")
+    mods.has("urgent")
   );
   const allowedWH = dueEodDate ? businessHoursBetween(entry, dueEodDate) : 0;
   const hour = entry.getHours() + entry.getMinutes() / 60;
@@ -1156,12 +1156,12 @@ function capacityAwareStageSchedule(preds, stage, now = getCurrentTime()) {
   const jobs = preds.map((p, i) => ({
     idx: i,
     remaining: Math.max(0.25, Number(p.stageWorkHours) || 0.5),
-    priority:
+    urgent:
       (p.willBeLate ? 2 : 0) + (p.isRush ? 1 : 0) + (p.lateProbability || 0),
   }));
   jobs.sort(
     (a, b) =>
-      b.priority / (b.remaining + 1e-6) - a.priority / (a.remaining + 1e-6)
+      b.urgent / (b.remaining + 1e-6) - a.urgent / (a.remaining + 1e-6)
   );
   const workers = Array.from({ length: k }, () => new Date(now));
   for (const j of jobs) {
@@ -1242,7 +1242,7 @@ export function generateCaseRiskPredictions(
     // Store the original due string for display purposes
     const dueDateDisplay = parseDueDateForDisplay(c.due);
 
-    const isRush = !!(c?.rush || c?.priority);
+    const isRush = !!(c?.rush || c?.urgent);
     const daysUntilDue = dueDate
       ? (dueDate.getTime() - nowTs) / 86_400_000
       : Number.POSITIVE_INFINITY;
@@ -1501,7 +1501,7 @@ function generateRecommendation(p, stageThreshold) {
       : "Urgent attention needed";
   if (p.riskLevel === "high")
     return p.isRush
-      ? "Priority case at risk - reallocate resources"
+      ? "Urgent case at risk - reallocate resources"
       : "Monitor closely - may require intervention";
   if (p.riskLevel === "medium")
     return p.progressPercent > 75
@@ -1937,7 +1937,7 @@ const NeuralNetworkVisualization = ({
   const categoryOrder = [
     "urgency",
     "time",
-    "priority",
+    "urgent",
     "capacity",
     "history",
     "blockers",

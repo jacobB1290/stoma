@@ -354,8 +354,8 @@ export async function calculateVelocityScore_Enhanced(
 /* =================== RUSH REDUCTION FACTOR =================== */
 
 const calculateRushReductionFactor = (cases) => {
-  const standard = (cases || []).filter((c) => !c.priority && !c.rush);
-  const urgent = (cases || []).filter((c) => c.priority || c.rush);
+  const standard = (cases || []).filter((c) => !c.urgent && !c.rush);
+  const urgent = (cases || []).filter((c) => c.urgent || c.rush);
 
   if (standard.length < 5 || urgent.length < 3) return 0.6;
 
@@ -387,7 +387,7 @@ const analyzeStageTransitions = (
   dueDate,
   currentStage = null,
   caseCreatedDate = null,
-  isRushOrPriority = false,
+  isRushOrUrgent = false,
   rushReductionFactor = 0.6
 ) => {
   const analysis = {
@@ -398,7 +398,7 @@ const analyzeStageTransitions = (
     productionBufferHours: null,
     designBufferHours: null,
     adjustedBufferRequirement: null,
-    isRushOrPriority,
+    isRushOrUrgent,
   };
 
   if (!history || history.length === 0) return analysis;
@@ -407,7 +407,7 @@ const analyzeStageTransitions = (
   dueEOD.setHours(23, 59, 59, 999);
 
   let req = { ...CONFIG.BUFFER_REQUIREMENTS };
-  if (isRushOrPriority) {
+  if (isRushOrUrgent) {
     req = {
       design: Math.max(
         0.5,
@@ -524,11 +524,11 @@ const calculateOnTimeDelivery = (
         },
         avgHoursLate: 0,
         criticalViolations: 0,
-        rushPriorityCount: 0,
+        rushUrgentCount: 0,
         rushReductionFactor: 0.6,
       },
       byType: {},
-      byPriority: {},
+      byUrgent: {},
       stageBufferAnalysis: {
         designViolations: 0,
         productionViolations: 0,
@@ -568,14 +568,14 @@ const calculateOnTimeDelivery = (
       const isCompleted = !!completionEntry;
       if (!currentStage && !isCompleted) return null;
 
-      const isRushOrPriority = !!(c.priority || c.rush);
+      const isRushOrUrgent = !!(c.urgent || c.rush);
 
       const stageAnalysis = analyzeStageTransitions(
         c.case_history,
         caseDue,
         currentStage,
         c.created_at,
-        isRushOrPriority,
+        isRushOrUrgent,
         rushReductionFactor
       );
 
@@ -665,7 +665,7 @@ const calculateOnTimeDelivery = (
         id: c.id,
         caseNumber: c.caseNumber || c.casenumber,
         caseType: c.caseType || "general",
-        priority: !!c.priority,
+        urgent: !!c.urgent,
         rush: !!c.rush,
         isCompleted,
         completedDate,
@@ -745,7 +745,7 @@ const calculateOnTimeDelivery = (
       metDesignBuffer: d.stageAnalysis?.metDesignBuffer,
       metProductionBuffer: d.stageAnalysis?.metProductionBuffer,
       rush: d.rush,
-      priority: d.priority,
+      urgent: d.urgent,
       velocityPerformance: d.velocityPerformance,
       velocityPenalty:
         d.velocityPerformance?.status === "missed"
@@ -805,7 +805,7 @@ const calculateOnTimeDelivery = (
           caseNumber: d.caseNumber,
           requiredBuffer: d.stageAnalysis?.requiredDesignBuffer,
           actualBuffer: d.stageAnalysis?.designBufferHours,
-          isRush: d.rush || d.priority,
+          isRush: d.rush || d.urgent,
           bufferShortages: d.bufferShortages,
         })),
       production: stageSpecific
@@ -818,7 +818,7 @@ const calculateOnTimeDelivery = (
           caseNumber: d.caseNumber,
           requiredBuffer: d.stageAnalysis?.requiredProductionBuffer,
           actualBuffer: d.stageAnalysis?.productionBufferHours,
-          isRush: d.rush || d.priority,
+          isRush: d.rush || d.urgent,
           bufferShortages: d.bufferShortages,
         })),
     },
@@ -939,8 +939,8 @@ const calculateOnTimeDelivery = (
         !d.stageAnalysis.metProductionBuffer &&
         d.hoursEarlyLate > 0
     ).length,
-    rushPriorityCount: deliveryData.filter(
-      (d) => d.stageAnalysis?.isRushOrPriority
+    rushUrgentCount: deliveryData.filter(
+      (d) => d.stageAnalysis?.isRushOrUrgent
     ).length,
     rushReductionFactor,
   };
@@ -1011,31 +1011,31 @@ const calculateOnTimeDelivery = (
     }
   });
 
-  const priorityCompleted = deliveryData.filter(
-    (d) => d.isCompleted && (d.priority || d.rush)
+  const urgentCompleted = deliveryData.filter(
+    (d) => d.isCompleted && (d.urgent || d.rush)
   );
-  const byPriority =
-    priorityCompleted.length > 0
+  const byUrgent =
+    urgentCompleted.length > 0
       ? {
-          count: priorityCompleted.length,
-          actualOnTime: priorityCompleted.filter((d) => d.actualDelivery)
+          count: urgentCompleted.length,
+          actualOnTime: urgentCompleted.filter((d) => d.actualDelivery)
             .length,
           actualRate:
-            (priorityCompleted.filter((d) => d.actualDelivery).length /
-              priorityCompleted.length) *
+            (urgentCompleted.filter((d) => d.actualDelivery).length /
+              urgentCompleted.length) *
             100,
           effectiveRate:
-            (priorityCompleted.filter((d) => d.effectiveDelivery).length /
-              priorityCompleted.length) *
+            (urgentCompleted.filter((d) => d.effectiveDelivery).length /
+              urgentCompleted.length) *
             100,
-          avgScore: calculateMean(priorityCompleted.map((d) => d.score)),
+          avgScore: calculateMean(urgentCompleted.map((d) => d.score)),
         }
       : {};
 
   return {
     overall,
     byType,
-    byPriority,
+    byUrgent,
     stageBufferAnalysis: {
       designViolations: deliveryData.filter(
         (d) => !d.stageAnalysis?.metDesignBuffer
@@ -1121,8 +1121,8 @@ const combinedScore = (throughput, onTime, currentStage = null) => {
   }
 
   if ((onTime.overall.avgHoursLate || 0) > 48) base *= 0.95;
-  const priorityOnTime = onTime.byPriority?.actualRate || 0;
-  if (priorityOnTime > 90) base = Math.min(100, base * 1.02);
+  const urgentOnTime = onTime.byUrgent?.actualRate || 0;
+  if (urgentOnTime > 90) base = Math.min(100, base * 1.02);
 
   const criticalRate =
     (onTime.overall.criticalViolations || 0) /
@@ -1191,7 +1191,7 @@ const explanationFor = (
       exp.onTime.push({
         text: `${bc.toFixed(
           0
-        )}% of cases met buffer requirements. Rush/priority cases use ${(
+        )}% of cases met buffer requirements. Rush/urgent cases use ${(
           (onTime.overall.rushReductionFactor || 0.6) * 100
         ).toFixed(0)}% of standard buffer time.`,
         type: bc >= 80 ? "success" : bc >= 60 ? "warning" : "error",
@@ -1421,7 +1421,7 @@ export const calculateDepartmentEfficiency = async (
             currentStage: currentStage,
             timeInStage: excludedCase.timeInStage || 0,
             modifiers: excludedCase.modifiers || [],
-            priority: excludedCase.priority || false,
+            urgent: excludedCase.urgent || false,
             rush: excludedCase.rush || false,
             due: excludedCase.due,
             case_history: excludedCase.case_history || [],

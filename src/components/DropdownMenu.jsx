@@ -11,7 +11,7 @@ export default function DropdownMenu({
   toggleDone,
   toggleHold,
   toggleRush,
-  togglePriority,
+  toggleUrgent,
   toggleStage2 /* NEW prop */,
   remove,
 }) {
@@ -73,10 +73,10 @@ export default function DropdownMenu({
             />
 
             <MenuBtn
-              label={row.priority ? "Remove Priority" : "Set Priority"}
+              label={row.urgent ? "Remove Urgent" : "Set Urgent"}
               color="red"
               onClick={() => {
-                togglePriority(row);
+                toggleUrgent(row);
                 onClose();
               }}
             />

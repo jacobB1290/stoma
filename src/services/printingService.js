@@ -52,9 +52,8 @@ const RUSH_SYNONYMS = [
   "rush",
   "superrush",
   "super-rush",
-  "priority",
-  "stat",
   "urgent",
+  "stat",
   "hot",
 ];
 

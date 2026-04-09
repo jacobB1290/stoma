@@ -183,17 +183,17 @@ const linkedDeptLabel = (workflowStatus, currentId) => {
   return depts.join(", ");
 };
 
-const StagePriorityBar = ({ columnRef, rowRefs, prioIds, stageKey }) => {
+const StageUrgentBar = ({ columnRef, rowRefs, urgentIds, stageKey }) => {
   const barY = useMotionValue(0);
   const barHeight = useMotionValue(0);
   const animationFrame = useRef(null);
 
   const track = useCallback(() => {
-    if (prioIds.length === 0 || !columnRef.current) {
+    if (urgentIds.length === 0 || !columnRef.current) {
       barHeight.set(0);
       return;
     }
-    const firstEl = rowRefs.current[prioIds[0]];
+    const firstEl = rowRefs.current[urgentIds[0]];
     if (!firstEl) {
       barHeight.set(0);
       return;
@@ -202,12 +202,12 @@ const StagePriorityBar = ({ columnRef, rowRefs, prioIds, stageKey }) => {
     const firstRect = firstEl.getBoundingClientRect();
     barY.set(firstRect.top - colRect.top);
     let total = 0;
-    prioIds.forEach((id) => {
+    urgentIds.forEach((id) => {
       const el = rowRefs.current[id];
       if (el) total = el.getBoundingClientRect().bottom - firstRect.top;
     });
     barHeight.set(total);
-  }, [prioIds, columnRef, rowRefs, barY, barHeight]);
+  }, [urgentIds, columnRef, rowRefs, barY, barHeight]);
 
   useLayoutEffect(() => {
     track();
@@ -223,9 +223,9 @@ const StagePriorityBar = ({ columnRef, rowRefs, prioIds, stageKey }) => {
 
   useLayoutEffect(() => {
     track();
-  }, [prioIds, track]);
+  }, [urgentIds, track]);
 
-  if (prioIds.length === 0) return null;
+  if (urgentIds.length === 0) return null;
   return (
     <motion.div
       className="absolute w-2 rounded bg-red-600 z-10"
@@ -262,11 +262,11 @@ export default function DayCol({
 
   const { workflowMap, unlinkFromWorkflow } = useMut();
 
-  const prioIdsByStage = useMemo(() => {
+  const urgentIdsByStage = useMemo(() => {
     if (!showStageDividers) {
       const arr = [];
       for (const r of rows) {
-        if (r.priority && !r.completed) arr.push(r.id);
+        if (r.urgent && !r.completed) arr.push(r.id);
         else break;
       }
       return { all: arr };
@@ -275,29 +275,29 @@ export default function DayCol({
       (r) => r.department === "General" && !r.completed
     );
     const hasMetal = rows.some((r) => r.department === "Metal" && !r.completed);
-    const prioMap = {};
+    const urgentMap = {};
     if (hasDigital) {
       const groups = groupRowsByStage(rows);
       ["design", "production", "finishing", "qc"].forEach((sk) => {
         const sp = [];
         for (const r of groups[sk]) {
-          if (r.priority && !r.completed) sp.push(r.id);
+          if (r.urgent && !r.completed) sp.push(r.id);
           else break;
         }
-        if (sp.length > 0) prioMap[sk] = sp;
+        if (sp.length > 0) urgentMap[sk] = sp;
       });
     } else if (hasMetal) {
       const groups = groupMetalRowsByStage(rows);
       ["development", "finishing"].forEach((sk) => {
         const sp = [];
         for (const r of groups[sk]) {
-          if (r.priority && !r.completed) sp.push(r.id);
+          if (r.urgent && !r.completed) sp.push(r.id);
           else break;
         }
-        if (sp.length > 0) prioMap[sk] = sp;
+        if (sp.length > 0) urgentMap[sk] = sp;
       });
     }
-    const otherPrios = [];
+    const otherUrgent = [];
     const otherRows = rows.filter((r) => {
       if (hasDigital && r.department === "General" && !r.completed)
         return false;
@@ -305,11 +305,11 @@ export default function DayCol({
       return true;
     });
     for (const r of otherRows) {
-      if (r.priority && !r.completed) otherPrios.push(r.id);
+      if (r.urgent && !r.completed) otherUrgent.push(r.id);
       else break;
     }
-    if (otherPrios.length > 0) prioMap.other = otherPrios;
-    return prioMap;
+    if (otherUrgent.length > 0) urgentMap.other = otherUrgent;
+    return urgentMap;
   }, [rows, showStageDividers]);
 
   useLayoutEffect(() => {
@@ -764,24 +764,24 @@ export default function DayCol({
         <div className="relative" ref={columnRef}>
           <AnimatePresence>
             {showStageDividers
-              ? Object.entries(prioIdsByStage).map(
-                  ([sk, pIds]) =>
-                    pIds.length > 0 && (
-                      <StagePriorityBar
+              ? Object.entries(urgentIdsByStage).map(
+                  ([sk, uIds]) =>
+                    uIds.length > 0 && (
+                      <StageUrgentBar
                         key={`pb-${sk}`}
                         columnRef={columnRef}
                         rowRefs={rowRefs}
-                        prioIds={pIds}
+                        urgentIds={uIds}
                         stageKey={sk}
                       />
                     )
                 )
-              : prioIdsByStage.all?.length > 0 && (
-                  <StagePriorityBar
+              : urgentIdsByStage.all?.length > 0 && (
+                  <StageUrgentBar
                     key="pb-all"
                     columnRef={columnRef}
                     rowRefs={rowRefs}
-                    prioIds={prioIdsByStage.all}
+                    urgentIds={urgentIdsByStage.all}
                     stageKey="all"
                   />
                 )}

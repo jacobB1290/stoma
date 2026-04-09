@@ -49,7 +49,7 @@ export default function RowMenu({
   toggleHold,
   toggleNewAccount,
   toggleRush,
-  togglePriority,
+  toggleUrgent,
   toggleStage2,
   onArchive,
 }) {
@@ -137,7 +137,7 @@ export default function RowMenu({
               toggleHold={toggleHold}
               toggleNewAccount={toggleNewAccount}
               toggleRush={toggleRush}
-              togglePriority={togglePriority}
+              toggleUrgent={toggleUrgent}
               toggleStage2={toggleStage2}
               close={() => setOpen(false)}
               showHistory={() => setShowHistory(true)}
@@ -250,7 +250,7 @@ function Dropdown({
   toggleHold,
   toggleNewAccount,
   toggleRush,
-  togglePriority,
+  toggleUrgent,
   toggleStage2,
   close,
   showHistory,
@@ -268,7 +268,7 @@ function Dropdown({
   } = useMut();
 
   // Local state to track toggle states
-  const [localPriority, setLocalPriority] = useState(row.priority);
+  const [localUrgent, setLocalUrgent] = useState(row.urgent);
   const [localRush, setLocalRush] = useState(row.rush);
   const [localHold, setLocalHold] = useState(row.hold);
   const [localNewAccount, setLocalNewAccount] = useState(row.newAccount);
@@ -337,9 +337,9 @@ function Dropdown({
     toggleStage2(row);
   };
 
-  const handleTogglePriority = () => {
-    setLocalPriority(!localPriority);
-    togglePriority(row);
+  const handleToggleUrgent = () => {
+    setLocalUrgent(!localUrgent);
+    toggleUrgent(row);
   };
 
   const handleToggleRush = () => {
@@ -455,12 +455,12 @@ function Dropdown({
         {!completed && (
           <div className="p-1.5 border-t border-gray-100">
             <MenuItem
-              onClick={handleTogglePriority}
+              onClick={handleToggleUrgent}
               color="red"
               toggle
-              active={localPriority}
+              active={localUrgent}
             >
-              Priority
+              Urgent
             </MenuItem>
 
             <MenuItem

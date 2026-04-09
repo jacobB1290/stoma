@@ -164,7 +164,7 @@ const DepartmentGlow = ({
 };
 
 const infoRingShadow = {
-  priority: "0 0 0 3px #ef4444",
+  urgent: "0 0 0 3px #ef4444",
   rush: "0 0 0 3px #fb923c",
   standard: "none",
 };
@@ -203,7 +203,7 @@ export default function Editor({ data, deptDefault }) {
     toggleHold,
     toggleNewAccount,
     toggleRush,
-    togglePriority,
+    toggleUrgent,
     toggleStage2,
     removeCase,
     removeAllCompleted,
@@ -220,7 +220,7 @@ export default function Editor({ data, deptDefault }) {
   const [isReverting, setIsReverting] = useState(false);
   const [dept, setDept] = useState(deptDefault || "Digital");
   const [due, setDue] = useState("");
-  const [priority, setPriority] = useState(false);
+  const [urgent, setUrgent] = useState(false);
   const [rush, setRush] = useState(false);
   const [hold, setHold] = useState(false);
   const [newAccount, setNewAccount] = useState(false);
@@ -230,7 +230,7 @@ export default function Editor({ data, deptDefault }) {
   const [saveError, setSaveError] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [flexDetected, setFlexDetected] = useState(false);
-  const [priorityDetected, setPriorityDetected] = useState(false);
+  const [urgentDetected, setUrgentDetected] = useState(false);
   const [rushDetected, setRushDetected] = useState(false);
   const [bbsDetected, setBbsDetected] = useState(false);
 
@@ -318,7 +318,7 @@ export default function Editor({ data, deptDefault }) {
   const saveButtonRef = useRef(null);
   const caseTypeSelectorRef = useRef(null);
   const flexDetectedTimer = useRef(null);
-  const priorityDetectedTimer = useRef(null);
+  const urgentDetectedTimer = useRef(null);
   const rushDetectedTimer = useRef(null);
   const bbsDetectedTimer = useRef(null);
 
@@ -534,7 +534,7 @@ export default function Editor({ data, deptDefault }) {
       currentCaseNumber !== originalValues.caseNumber ||
       dept !== originalValues.dept ||
       due !== originalValues.due ||
-      priority !== originalValues.priority ||
+      urgent !== originalValues.urgent ||
       rush !== originalValues.rush ||
       hold !== originalValues.hold ||
       newAccount !== originalValues.newAccount ||
@@ -549,7 +549,7 @@ export default function Editor({ data, deptDefault }) {
     showSplitInput,
     dept,
     due,
-    priority,
+    urgent,
     rush,
     hold,
     newAccount,
@@ -817,13 +817,13 @@ export default function Editor({ data, deptDefault }) {
       }
 
       // Scan language almost always means urgency
-      if (!id && checkScanPattern(text) && !priority) {
-        setPriority(true);
-        setPriorityDetected(true);
-        if (priorityDetectedTimer.current)
-          clearTimeout(priorityDetectedTimer.current);
-        priorityDetectedTimer.current = setTimeout(() => {
-          setPriorityDetected(false);
+      if (!id && checkScanPattern(text) && !urgent) {
+        setUrgent(true);
+        setUrgentDetected(true);
+        if (urgentDetectedTimer.current)
+          clearTimeout(urgentDetectedTimer.current);
+        urgentDetectedTimer.current = setTimeout(() => {
+          setUrgentDetected(false);
         }, 1500);
       }
 
@@ -838,13 +838,13 @@ export default function Editor({ data, deptDefault }) {
       } else {
         const hasToday = checkTodayPattern(text);
         const timeResult = checkTimePattern(text);
-        if ((hasToday || timeResult.found) && !priority) {
-          setPriority(true);
-          setPriorityDetected(true);
-          if (priorityDetectedTimer.current)
-            clearTimeout(priorityDetectedTimer.current);
-          priorityDetectedTimer.current = setTimeout(() => {
-            setPriorityDetected(false);
+        if ((hasToday || timeResult.found) && !urgent) {
+          setUrgent(true);
+          setUrgentDetected(true);
+          if (urgentDetectedTimer.current)
+            clearTimeout(urgentDetectedTimer.current);
+          urgentDetectedTimer.current = setTimeout(() => {
+            setUrgentDetected(false);
           }, 1500);
         }
       }
@@ -862,7 +862,7 @@ export default function Editor({ data, deptDefault }) {
       checkTimePattern,
       checkTomorrowPattern,
       checkTodayPattern,
-      priority,
+      urgent,
       rush,
       hold,
       id,
@@ -1057,8 +1057,8 @@ export default function Editor({ data, deptDefault }) {
         notificationResizeObserverRef.current.disconnect();
       if (layoutObserverRef.current) layoutObserverRef.current.disconnect();
       if (flexDetectedTimer.current) clearTimeout(flexDetectedTimer.current);
-      if (priorityDetectedTimer.current)
-        clearTimeout(priorityDetectedTimer.current);
+      if (urgentDetectedTimer.current)
+        clearTimeout(urgentDetectedTimer.current);
       if (rushDetectedTimer.current) clearTimeout(rushDetectedTimer.current);
       if (bbsDetectedTimer.current) clearTimeout(bbsDetectedTimer.current);
     };
@@ -1290,7 +1290,7 @@ export default function Editor({ data, deptDefault }) {
     setIsReverting(false);
     setDept(deptDefault || "Digital");
     setDue(""); // Reset to empty for placeholder
-    setPriority(false);
+    setUrgent(false);
     setRush(false);
     setHold(false);
     setNewAccount(false);
@@ -1301,7 +1301,7 @@ export default function Editor({ data, deptDefault }) {
     setSaveError(null);
     setErrorMessage("");
     setFlexDetected(false);
-    setPriorityDetected(false);
+    setUrgentDetected(false);
     setRushDetected(false);
     setBbsDetected(false);
     setFocusedInput(null);
@@ -1335,7 +1335,7 @@ export default function Editor({ data, deptDefault }) {
           caseNumber: finalCaseNo,
           department: dept,
           due,
-          priority,
+          urgent,
           rush,
           hold,
           newAccount,
@@ -1383,7 +1383,7 @@ export default function Editor({ data, deptDefault }) {
     showSplitInput,
     due,
     dept,
-    priority,
+    urgent,
     rush,
     hold,
     newAccount,
@@ -1414,7 +1414,7 @@ export default function Editor({ data, deptDefault }) {
       }
       setDept(r.department === "General" ? "Digital" : r.department);
       setDue(r.due.slice(0, 10));
-      setPriority(r.priority);
+      setUrgent(r.urgent);
       setRush(r.rush);
       setHold(r.hold);
       setNewAccount(
@@ -1425,7 +1425,7 @@ export default function Editor({ data, deptDefault }) {
         caseNumber: r.caseNumber,
         dept: r.department === "General" ? "Digital" : r.department,
         due: r.due.slice(0, 10),
-        priority: r.priority,
+        urgent: r.urgent,
         rush: r.rush,
         hold: r.hold,
         newAccount:
@@ -1497,15 +1497,15 @@ export default function Editor({ data, deptDefault }) {
       // Skip automations if disabled
       if (disableAutomations) return;
 
-      // If user sets due date to today, auto-trigger Priority + animation
-      if (nextDue && nextDue === todayISO && !priority) {
-        setPriority(true);
-        setPriorityDetected(true);
+      // If user sets due date to today, auto-trigger Urgent + animation
+      if (nextDue && nextDue === todayISO && !urgent) {
+        setUrgent(true);
+        setUrgentDetected(true);
 
-        if (priorityDetectedTimer.current)
-          clearTimeout(priorityDetectedTimer.current);
-        priorityDetectedTimer.current = setTimeout(() => {
-          setPriorityDetected(false);
+        if (urgentDetectedTimer.current)
+          clearTimeout(urgentDetectedTimer.current);
+        urgentDetectedTimer.current = setTimeout(() => {
+          setUrgentDetected(false);
         }, 1500);
       }
 
@@ -1539,12 +1539,12 @@ export default function Editor({ data, deptDefault }) {
         }
       }
     },
-    [id, todayISO, priority, rush, dept, disableAutomations]
+    [id, todayISO, urgent, rush, dept, disableAutomations]
   );
 
   const compare = useCallback((a, b) => {
-    if (a.priority && !b.priority) return -1;
-    if (!a.priority && b.priority) return 1;
+    if (a.urgent && !b.urgent) return -1;
+    if (!a.urgent && b.urgent) return 1;
     const da = new Date(a.due);
     const db = new Date(b.due);
     if (da < db) return -1;
@@ -2393,9 +2393,9 @@ export default function Editor({ data, deptDefault }) {
               )}
             </AnimatePresence>
 
-            {/* Priority detection animation */}
+            {/* Urgent detection animation */}
             <AnimatePresence>
-              {priorityDetected && (
+              {urgentDetected && (
                 <motion.div
                   className="absolute inset-0 pointer-events-none"
                   style={{
@@ -3014,17 +3014,17 @@ export default function Editor({ data, deptDefault }) {
                 <div className="grid grid-cols-4 gap-2">
                   <button
                     type="button"
-                    onClick={() => setPriority(!priority)}
+                    onClick={() => setUrgent(!urgent)}
                     className={clsx(
                       "toggle-button modifier-toggle",
-                      priority
-                        ? priorityDetected
-                          ? "toggle-active toggle-glow-red priority-pulse-animation"
+                      urgent
+                        ? urgentDetected
+                          ? "toggle-active toggle-glow-red urgent-pulse-animation"
                           : "toggle-active toggle-glow-red"
                         : "toggle-inactive text-red-600"
                     )}
                   >
-                    Priority {priority ? "ON" : "OFF"}
+                    Urgent {urgent ? "ON" : "OFF"}
                   </button>
                   <button
                     type="button"
@@ -3136,8 +3136,8 @@ export default function Editor({ data, deptDefault }) {
             animate="visible"
           >
             <InfoRow
-              type="priority"
-              title="Priority"
+              type="urgent"
+              title="Urgent"
               desc="Patient scheduled on due date · No flexibility"
             />
             <InfoRow
@@ -3259,7 +3259,7 @@ export default function Editor({ data, deptDefault }) {
           toggleHold={toggleHold}
           toggleNewAccount={toggleNewAccount}
           toggleRush={toggleRush}
-          togglePriority={togglePriority}
+          toggleUrgent={toggleUrgent}
           toggleStage2={toggleStage2}
           removeCase={removeCase}
           allHistory={() => setShowAllHistory(true)}
@@ -3284,7 +3284,7 @@ export default function Editor({ data, deptDefault }) {
           toggleHold={toggleHold}
           toggleNewAccount={toggleNewAccount}
           toggleRush={toggleRush}
-          togglePriority={togglePriority}
+          toggleUrgent={toggleUrgent}
           toggleStage2={toggleStage2}
           removeCase={removeCase}
           deleteAll={() => setShowDel(true)}
@@ -3494,7 +3494,7 @@ export default function Editor({ data, deptDefault }) {
           }
         }
 
-        .priority-pulse-animation::after {
+        .urgent-pulse-animation::after {
           content: "";
           position: absolute;
           top: 50%;
@@ -3505,11 +3505,11 @@ export default function Editor({ data, deptDefault }) {
           border-radius: calc(var(--radius) + 3px);
           background: transparent;
           box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.35);
-          animation: priority-pulse 0.6s ease-out;
+          animation: urgent-pulse 0.6s ease-out;
           pointer-events: none;
           z-index: -1;
         }
-        @keyframes priority-pulse {
+        @keyframes urgent-pulse {
           0% {
             box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.35);
           }

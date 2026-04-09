@@ -405,7 +405,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
                 getExclusionReason(caseItem.modifiers) || "Manually excluded",
               caseId: caseItem.id,
               modifiers: caseItem.modifiers,
-              priority: caseItem.priority,
+              urgent: caseItem.urgent,
               rush: caseItem.modifiers?.includes("rush"),
             },
           };
@@ -461,7 +461,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
             holdTime: stageData.workingHoldTime,
             visitCount: stageData.visitCount,
             isActive: stageData.isActive,
-            priority: caseItem.priority,
+            urgent: caseItem.urgent,
             rush: caseItem.modifiers?.includes("rush"),
             caseType: caseType,
             visits: stageData.visits,
@@ -608,33 +608,33 @@ async function calculateFinalStatistics(
     const stdDev = calculateStdDev(sorted, mean);
     const velocity = calculateVelocityScore(sorted, median);
 
-    // Priority cases (priority flag, with or without rush)
-    const priorityCases = typeData.cases.filter((c) => c.priority);
-    let priorityStats = null;
+    // Urgent cases (urgent flag, with or without rush)
+    const urgentCases = typeData.cases.filter((c) => c.urgent);
+    let urgentStats = null;
 
-    if (priorityCases.length >= 3) {
-      const priorityTimes = priorityCases
+    if (urgentCases.length >= 3) {
+      const urgentTimes = urgentCases
         .map((c) => c.timeInStage)
         .sort((a, b) => a - b);
 
-      // Standard cases for comparison (no priority, no rush)
+      // Standard cases for comparison (no urgent, no rush)
       const standardCases = typeData.cases.filter(
-        (c) => !c.priority && !c.rush
+        (c) => !c.urgent && !c.rush
       );
       const standardMean =
         standardCases.length > 0
           ? calculateMean(standardCases.map((c) => c.timeInStage))
           : mean;
 
-      priorityStats = {
-        mean: calculateMean(priorityTimes),
-        median: priorityTimes[Math.floor(priorityTimes.length / 2)],
+      urgentStats = {
+        mean: calculateMean(urgentTimes),
+        median: urgentTimes[Math.floor(urgentTimes.length / 2)],
         percentFaster:
           standardMean > 0
-            ? ((standardMean - calculateMean(priorityTimes)) / standardMean) *
+            ? ((standardMean - calculateMean(urgentTimes)) / standardMean) *
               100
             : 0,
-        count: priorityCases.length,
+        count: urgentCases.length,
         standardComparison: {
           standardMean: standardMean,
           standardCount: standardCases.length,
@@ -642,8 +642,8 @@ async function calculateFinalStatistics(
       };
     }
 
-    // Rush cases (rush flag only, no priority)
-    const rushOnlyCases = typeData.cases.filter((c) => c.rush && !c.priority);
+    // Rush cases (rush flag only, no urgent)
+    const rushOnlyCases = typeData.cases.filter((c) => c.rush && !c.urgent);
     let rushStats = null;
 
     if (rushOnlyCases.length >= 3) {
@@ -651,9 +651,9 @@ async function calculateFinalStatistics(
         .map((c) => c.timeInStage)
         .sort((a, b) => a - b);
 
-      // Standard cases for comparison (no priority, no rush)
+      // Standard cases for comparison (no urgent, no rush)
       const standardCases = typeData.cases.filter(
-        (c) => !c.priority && !c.rush
+        (c) => !c.urgent && !c.rush
       );
       const standardMean =
         standardCases.length > 0
@@ -697,7 +697,7 @@ async function calculateFinalStatistics(
         p90: calculatePercentile(sorted, 90),
       },
       velocityScore: velocity,
-      priorityStats,
+      urgentStats,
       rushStats,
       cases: typeData.cases,
       completions,
@@ -903,9 +903,9 @@ export const StageDetailsModal = ({
                           <span className="font-medium text-gray-900">
                             {caseDetail.caseNumber}
                           </span>
-                          {caseDetail.priority && (
+                          {caseDetail.urgent && (
                             <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">
-                              Priority
+                              Urgent
                             </span>
                           )}
                           {caseDetail.rush && (

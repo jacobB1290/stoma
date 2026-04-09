@@ -59,7 +59,7 @@ const getHeatLevel = (count) => {
    SUMMARY BAR - Shows total workload at a glance
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function SummaryBar({ totalCases, overdueCount, priorityCount, todayCount }) {
+function SummaryBar({ totalCases, overdueCount, urgentCount, todayCount }) {
   return (
     <div className="flex items-center justify-between px-3 py-2 bg-[#16525F] border-b border-white/10">
       <div className="flex items-center gap-3">
@@ -78,11 +78,11 @@ function SummaryBar({ totalCases, overdueCount, priorityCount, todayCount }) {
             </span>
           </div>
         )}
-        {priorityCount > 0 && (
+        {urgentCount > 0 && (
           <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-orange-500/20">
             <div className="w-2 h-2 rounded-full bg-orange-400" />
             <span className="text-xs font-medium text-orange-300">
-              {priorityCount}
+              {urgentCount}
             </span>
           </div>
         )}
@@ -173,8 +173,8 @@ function WeekGrid({ horizon, map, today, selectedKey, onSelect }) {
           const count = rows.length;
           const heatLevel = getHeatLevel(count);
           const isSelected = selectedKey === dateKey;
-          const hasPriority = rows.some((r) => r.priority);
-          const hasRush = rows.some((r) => r.rush && !r.priority);
+          const hasUrgent = rows.some((r) => r.urgent);
+          const hasRush = rows.some((r) => r.rush && !r.urgent);
 
           return (
             <motion.button
@@ -226,12 +226,12 @@ function WeekGrid({ horizon, map, today, selectedKey, onSelect }) {
                 </div>
               )}
 
-              {/* Priority/Rush indicator dot */}
-              {(hasPriority || hasRush) && (
+              {/* Urgent/Rush indicator dot */}
+              {(hasUrgent || hasRush) && (
                 <div
                   className={clsx(
                     "absolute top-1 right-1 w-2 h-2 rounded-full",
-                    hasPriority ? "bg-red-400" : "bg-orange-400"
+                    hasUrgent ? "bg-red-400" : "bg-orange-400"
                   )}
                 />
               )}
@@ -406,7 +406,7 @@ function CaseRowMobile({
   onShowHistory,
 }) {
   const [num, desc] = split(row.caseNumber);
-  const isPriority = row?.priority;
+  const isUrgent = row?.urgent;
   const isRush = row?.rush;
   const isBBS = row?.modifiers?.includes("bbs");
   const isFlex = row?.modifiers?.includes("flex");
@@ -434,19 +434,19 @@ function CaseRowMobile({
         "rounded-lg overflow-hidden mb-2",
         rowBgClass,
         // Same ring classes as RowShell
-        isPriority && "ring-[3px] ring-red-500",
-        isRush && !isPriority && "ring-[3px] ring-orange-400"
+        isUrgent && "ring-[3px] ring-red-500",
+        isRush && !isUrgent && "ring-[3px] ring-orange-400"
       )}
       onClick={() => onToggle(row.id)}
     >
       {/* Main row content */}
       <div className="flex items-center px-3 py-2.5">
-        {/* Priority/Rush indicator */}
-        {(isPriority || isRush) && (
+        {/* Urgent/Rush indicator */}
+        {(isUrgent || isRush) && (
           <div
             className={clsx(
               "w-1.5 h-4 rounded-full mr-2.5 flex-shrink-0",
-              isPriority ? "bg-red-400" : "bg-orange-400"
+              isUrgent ? "bg-red-400" : "bg-orange-400"
             )}
           />
         )}
@@ -802,13 +802,13 @@ export default function BoardMobile({
     return total;
   }, [overdue, hold, horizon, map]);
 
-  const priorityCount = useMemo(() => {
+  const urgentCount = useMemo(() => {
     let count = 0;
-    const countPriority = (rows) => rows?.filter((r) => r.priority).length || 0;
-    count += countPriority(overdue);
-    count += countPriority(hold);
+    const countUrgent = (rows) => rows?.filter((r) => r.urgent).length || 0;
+    count += countUrgent(overdue);
+    count += countUrgent(hold);
     horizon.forEach((date) => {
-      count += countPriority(map[iso(date)]);
+      count += countUrgent(map[iso(date)]);
     });
     return count;
   }, [overdue, hold, horizon, map]);
@@ -867,7 +867,7 @@ export default function BoardMobile({
         <SummaryBar
           totalCases={totalCases}
           overdueCount={overdue?.length || 0}
-          priorityCount={priorityCount}
+          urgentCount={urgentCount}
           todayCount={todayCount}
         />
 
