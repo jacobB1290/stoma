@@ -264,7 +264,7 @@ export function RowShell({
   children,
   workflowPending = false,
 }) {
-  const isPriority = row?.priority;
+  const isUrgent = row?.urgent;
   const isRush = row?.rush;
   const isBBS = row?.modifiers?.includes("bbs");
   const isFlex = row?.modifiers?.includes("flex");
@@ -273,11 +273,11 @@ export function RowShell({
 
   /* flashing rules - disable for workflow pending */
   const flashBlue =
-    !workflowPending && isPriority && !row.completed && inBlueWindow(row.due);
+    !workflowPending && isUrgent && !row.completed && inBlueWindow(row.due);
   const flashRed =
     !workflowPending &&
     ((!row.completed && metaColor === "red") ||
-      (isPriority && !row.completed && inRedWindow(row.due)));
+      (isUrgent && !row.completed && inRedWindow(row.due)));
 
   /* base tint */
   let bg = "bg-[#4D8490]";
@@ -311,7 +311,7 @@ export function RowShell({
   /* rings - muted for pending */
   const ringClass = workflowPending
     ? ""
-    : isPriority
+    : isUrgent
     ? "ring-[3px] ring-red-500"
     : isRush
     ? "ring-[3px] ring-orange-400"

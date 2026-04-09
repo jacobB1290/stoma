@@ -735,14 +735,14 @@ export default function SettingsModal({
                   enabled={showInfoBar}
                   onChange={handleToggleInfoBar}
                   label="Info Cards"
-                  description="Show Priority/Rush/Standard guide below the form"
+                  description="Show Urgent/Rush/Standard guide below the form"
                 />
 
                 <ToggleSwitch
                   enabled={showCaseTableDividers}
                   onChange={handleToggleCaseTableDividers}
                   label="Case Category Sections"
-                  description="Group cases by Overdue, Priority, Rush, Hold"
+                  description="Group cases by Overdue, Urgent, Rush, Hold"
                 />
 
                 <ToggleSwitch
@@ -784,7 +784,7 @@ export default function SettingsModal({
                   enabled={!disableAutomations}
                   onChange={handleToggleDisableAutomations}
                   label="Smart Automations"
-                  description="Auto-detect department, priority, rush from case notes"
+                  description="Auto-detect department, urgent, rush from case notes"
                 />
               </div>
             </Card>

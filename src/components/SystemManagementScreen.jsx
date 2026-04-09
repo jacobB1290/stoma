@@ -39,7 +39,7 @@ async function broadcastFOList() {
     await db.from("cases").insert({
       casenumber: "syscmd",
       department: "General",
-      priority: false,
+      urgent: false,
       modifiers: [
         "syscmd:settings",
         "target:all",
@@ -2311,7 +2311,7 @@ export default function SystemManagementScreen() {
         await db.from("cases").insert({
           casenumber: "force-cmd",
           department: "General",
-          priority: true,
+          urgent: true,
           modifiers: [
             `force-syscmd:${cmd}`,
             `target:${selectedUser.key}`,
@@ -2341,7 +2341,7 @@ export default function SystemManagementScreen() {
         await db.from("cases").insert({
           casenumber: "update",
           department: "General",
-          priority: priority === "high" || priority === "force",
+          urgent: priority === "high" || priority === "force",
           modifiers: [priority, updateNotes.trim()].filter(Boolean),
           due: nowIso(),
           completed: false,

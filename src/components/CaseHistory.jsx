@@ -94,10 +94,10 @@ const normDept = (d) => (!d ? "Unknown" : d === "General" ? "Digital" : d);
 /**
  * Returns the due hour (local, 0–23) for a case.
  * If a noteHour was parsed from the case note it takes precedence;
- * otherwise falls back to noon for priority cases and 5 pm for normal.
+ * otherwise falls back to noon for urgent cases and 5 pm for normal.
  */
-const getDueHour = (isPriority, noteHour = null) =>
-  noteHour !== null ? noteHour : isPriority ? 12 : 17;
+const getDueHour = (isUrgent, noteHour = null) =>
+  noteHour !== null ? noteHour : isUrgent ? 12 : 17;
 
 /** Format a local 0-23 hour as "8:00 AM", "2:00 PM", etc. */
 const fmtHour12 = (h) => {
@@ -113,7 +113,7 @@ const fmtHour12 = (h) => {
 const ACTION_TYPE_MAP = {
   "marked done": "complete",
   "undo done": "undo",
-  priority: "priority",
+  urgent: "urgent",
   rush: "rush",
   hold: "hold",
   "due changed": "edit",
@@ -156,7 +156,7 @@ const processActionText = formatHistoryAction;
 const actionColors = {
   complete: "text-blue-600 bg-blue-50 border-blue-200",
   undo: "text-purple-600 bg-purple-50 border-purple-200",
-  priority: "text-red-600 bg-red-50 border-red-200",
+  urgent: "text-red-600 bg-red-50 border-red-200",
   rush: "text-orange-600 bg-orange-50 border-orange-200",
   hold: "text-amber-600 bg-amber-50 border-amber-200",
   edit: "text-purple-600 bg-purple-50 border-purple-200",
@@ -206,7 +206,7 @@ const ACTION_ICONS = {
       />
     </svg>
   ),
-  priority: (
+  urgent: (
     <svg
       className="w-4 h-4"
       fill="none"
@@ -436,12 +436,12 @@ const ActionIcon = React.memo(
 );
 ActionIcon.displayName = "ActionIcon";
 
-const CountdownTimer = React.memo(({ dueDate, isPriority, noteHour = null }) => {
+const CountdownTimer = React.memo(({ dueDate, isUrgent, noteHour = null }) => {
   const computeDisplay = useCallback(() => {
     const now = new Date();
     const [y, m, d] = dueDate.split("T")[0].split("-");
     const due = new Date(y, m - 1, d);
-    due.setHours(getDueHour(isPriority, noteHour), 0, 0, 0);
+    due.setHours(getDueHour(isUrgent, noteHour), 0, 0, 0);
     const diff = due - now;
     const abs = Math.abs(diff);
     const dd = Math.floor(abs / 864e5);
@@ -458,7 +458,7 @@ const CountdownTimer = React.memo(({ dueDate, isPriority, noteHour = null }) => 
       )}`;
     if (diff < 0) display = `-${display}`;
     return display;
-  }, [dueDate, isPriority, noteHour]);
+  }, [dueDate, isUrgent, noteHour]);
 
   const [timeLeft, setTimeLeft] = useState(computeDisplay);
 
@@ -717,12 +717,12 @@ const buildMetalStages = (
   ];
 };
 
-const computeLateness = (completedAt, dueStr, isPriority = false, noteHour = null) => {
+const computeLateness = (completedAt, dueStr, isUrgent = false, noteHour = null) => {
   if (!completedAt || !dueStr) return null;
   const done = new Date(completedAt);
   const [y, m, d] = dueStr.split("T")[0].split("-").map(Number);
   const due = new Date(y, m - 1, d);
-  due.setHours(getDueHour(isPriority, noteHour), 0, 0, 0);
+  due.setHours(getDueHour(isUrgent, noteHour), 0, 0, 0);
   const diff = done - due;
   if (diff <= 0) return null;
   const totalH = diff / 36e5;
@@ -745,7 +745,7 @@ const mapCaseRow = (c) => {
     rush: c.modifiers?.includes("rush") || false,
     hold: c.modifiers?.includes("hold") || false,
     stage2: c.modifiers?.includes("stage2") || false,
-    priority: c.priority || false,
+    urgent: c.urgent || false,
     newAccount: c.modifiers?.includes("newaccount") || false,
     caseType: c.modifiers?.includes("bbs")
       ? "bbs"
@@ -1333,7 +1333,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
           : 0,
         isOverdue: due < todayStart && !rawCase.completed,
         isUrgent:
-          (rawCase.priority || rawCase.modifiers?.includes("rush")) &&
+          (rawCase.urgent || rawCase.modifiers?.includes("rush")) &&
           daysUntilDue <= 1,
       });
 
@@ -1368,7 +1368,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         const doneDate = new Date(doneEntry.created_at);
         const dueDate = new Date(dueY, dueM - 1, dueD);
         dueDate.setHours(
-          getDueHour(rawCase.priority, parseNoteTime(rawCase.casenumber)),
+          getDueHour(rawCase.urgent, parseNoteTime(rawCase.casenumber)),
           0, 0, 0
         );
         const diff = doneDate - dueDate;
@@ -1656,8 +1656,8 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       activeRows.reduce(
         (a, r) => {
           if (r.action.toLowerCase().includes("hold added")) a.holdCount++;
-          if (r.action.toLowerCase().includes("priority added"))
-            a.priorityCount++;
+          if (r.action.toLowerCase().includes("urgent added") || r.action.toLowerCase().includes("priority added"))
+            a.urgentCount++;
           if (r.action.toLowerCase().includes("rush added")) a.rushCount++;
           if (r.actionType === "edit") a.editCount++;
           if (r.actionType === "note") a.noteCount++;
@@ -1666,7 +1666,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         },
         {
           holdCount: 0,
-          priorityCount: 0,
+          urgentCount: 0,
           rushCount: 0,
           editCount: 0,
           noteCount: 0,
@@ -1687,7 +1687,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
 
   const hasBadges =
     caseData &&
-    (caseData.priority ||
+    (caseData.urgent ||
       caseData.rush ||
       caseData.hold ||
       caseData.newAccount);
@@ -1699,7 +1699,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     if (allDone) {
       const lastDoneTs = chainCompletionDates[last.id];
       const lastNoteHour = parseNoteTime(last.casenumber ?? last.caseNumber ?? "");
-      const lateness = computeLateness(lastDoneTs, last.due, last.priority, lastNoteHour);
+      const lateness = computeLateness(lastDoneTs, last.due, last.urgent, lastNoteHour);
       if (lateness)
         return {
           label: "Complete",
@@ -1711,7 +1711,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         const done = new Date(lastDoneTs);
         const [y, m, d] = last.due.split("T")[0].split("-").map(Number);
         const due = new Date(y, m - 1, d);
-        due.setHours(getDueHour(last.priority, lastNoteHour), 0, 0, 0);
+        due.setHours(getDueHour(last.urgent, lastNoteHour), 0, 0, 0);
         const diff = done - due;
         if (diff < 0) {
           const abs = Math.abs(diff);
@@ -1750,7 +1750,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         sub: null,
         showCountdown: true,
         countdownDue: activeCase.due,
-        countdownPriority: activeCase.priority,
+        countdownUrgent: activeCase.urgent,
       };
     const daysLeft = Math.floor((activeDue - new Date()) / 864e5);
     return {
@@ -1759,7 +1759,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       color: daysLeft <= 1 ? "text-orange-600" : "text-blue-600",
       showCountdown: daysLeft <= 1,
       countdownDue: activeCase.due,
-      countdownPriority: activeCase.priority,
+      countdownUrgent: activeCase.urgent,
     };
   }, [showUnified, chainCases, chainCompletionDates]);
 
@@ -1793,7 +1793,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         created: c.created_at,
         createdBy: creationEntry?.user_name || "Unknown",
         due: c.due,
-        priority: c.priority,
+        urgent: c.urgent,
         completed: c.completed,
         completedAt: doneTs,
         isPendingUpstream,
@@ -1826,7 +1826,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         sub: null,
         showCountdown: true,
         countdownDue: caseData.due,
-        countdownPriority: caseData.priority,
+        countdownUrgent: caseData.urgent,
         countdownNoteHour: noteHour,
         type: "single",
       };
@@ -1836,7 +1836,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       color: insights.daysUntilDue <= 1 ? "text-orange-600" : "text-blue-600",
       showCountdown: insights.daysUntilDue <= 1,
       countdownDue: caseData.due,
-      countdownPriority: caseData.priority,
+      countdownUrgent: caseData.urgent,
       countdownNoteHour: noteHour,
       type: "single",
     };
@@ -2033,8 +2033,8 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                         >
                                           <CountdownTimer
                                             dueDate={statusDisplay.countdownDue}
-                                            isPriority={
-                                              statusDisplay.countdownPriority
+                                            isUrgent={
+                                              statusDisplay.countdownUrgent
                                             }
                                             noteHour={statusDisplay.countdownNoteHour ?? null}
                                           />
@@ -2043,9 +2043,9 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                     </div>
                                     {hasBadges && (
                                       <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                                        {caseData.priority && (
+                                        {caseData.urgent && (
                                           <span className="inline-flex items-center px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-semibold bg-red-500 text-white shadow-sm">
-                                            Priority
+                                            Urgent
                                           </span>
                                         )}
                                         {caseData.rush && (
@@ -2173,7 +2173,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                                 ? computeLateness(
                                                     d.completedAt,
                                                     d.due,
-                                                    d.priority
+                                                    d.urgent
                                                   )
                                                 : null;
                                               let statusEl;
@@ -2268,7 +2268,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                                       {fmtDateCompact(d.due)}
                                                     </div>
                                                     <div className="text-[11px] sm:text-xs text-gray-400 leading-tight">
-                                                      {d.priority
+                                                      {d.urgent
                                                         ? "12 PM"
                                                         : "5 PM"}
                                                     </div>
@@ -2331,7 +2331,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                           <div className="text-xs text-gray-500 mt-0.5 sm:mt-1">
                                             {noteHour !== null
                                               ? fmtHour12(noteHour)
-                                              : caseData.priority
+                                              : caseData.urgent
                                               ? "12:00 PM"
                                               : "5:00 PM"}{" "}
                                             MST

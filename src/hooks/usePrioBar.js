@@ -2,11 +2,11 @@ import { useMotionValue, useSpring } from "motion/react";
 import { useEffect, useRef } from "react";
 
 /**
- * Live motion‑values for the priority bar.
+ * Live motion‑values for the urgent bar.
  * Returns { y, h } – both are spring‑animated MotionValues.
  * They update every animation frame without causing React re‑renders.
  */
-export function usePrioBar(colRef, firstRef, lastRef) {
+export function useUrgentBar(colRef, firstRef, lastRef) {
   /* raw motion values */
   const mvY = useMotionValue(0);
   const mvH = useMotionValue(0);
@@ -30,7 +30,7 @@ export function usePrioBar(colRef, firstRef, lastRef) {
         if (Math.abs(mvY.get() - nextY) > 0.5) mvY.set(nextY);
         if (Math.abs(mvH.get() - nextH) > 0.5) mvH.set(nextH);
       } else if (mvH.get() !== 0) {
-        /* no priority rows → collapse */
+        /* no urgent rows → collapse */
         mvH.set(0);
       }
       raf.current = requestAnimationFrame(tick);

@@ -27,7 +27,7 @@ const StatusDot = memo(({ type, pulse }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   const config = {
-    priority: { label: "Priority", bg: "bg-red-500" },
+    urgent: { label: "Urgent", bg: "bg-red-500" },
     rush: { label: "Rush", bg: "bg-orange-500" },
     hold: { label: "Hold", bg: "bg-amber-500" },
     stage2: { label: "Stage 2", bg: "bg-indigo-500" },
@@ -66,7 +66,7 @@ StatusDot.displayName = "StatusDot";
 
 const StatusDotsContainer = memo(({ statuses, pulse }) => {
   const dots = [];
-  if (statuses.priority) dots.push("priority");
+  if (statuses.urgent) dots.push("urgent");
   if (statuses.rush) dots.push("rush");
   if (statuses.hold) dots.push("hold");
   if (statuses.stage2 && statuses.department === "Metal") dots.push("stage2");
@@ -107,7 +107,7 @@ const TableRow = ({
   toggleDone,
   toggleHold,
   toggleRush,
-  togglePriority,
+  toggleUrgent,
   toggleStage2,
   toggleNewAccount,
   removeCase,
@@ -178,7 +178,7 @@ const TableRow = ({
         toggleDone={toggleDone}
         toggleHold={toggleHold}
         toggleRush={toggleRush}
-        togglePriority={togglePriority}
+        toggleUrgent={toggleUrgent}
         toggleStage2={toggleStage2}
         toggleNewAccount={toggleNewAccount}
         removeCase={removeCase}
@@ -197,7 +197,7 @@ const ProgressiveRows = memo(
     toggleDone,
     toggleHold,
     toggleRush,
-    togglePriority,
+    toggleUrgent,
     toggleStage2,
     toggleNewAccount,
     removeCase,
@@ -245,7 +245,7 @@ const ProgressiveRows = memo(
             toggleDone={toggleDone}
             toggleHold={toggleHold}
             toggleRush={toggleRush}
-            togglePriority={togglePriority}
+            toggleUrgent={toggleUrgent}
             toggleStage2={toggleStage2}
             toggleNewAccount={toggleNewAccount}
             removeCase={removeCase}
@@ -283,7 +283,7 @@ const CollapsibleSection = memo(
     toggleDone,
     toggleHold,
     toggleRush,
-    togglePriority,
+    toggleUrgent,
     toggleStage2,
     toggleNewAccount,
     removeCase,
@@ -397,7 +397,7 @@ const CollapsibleSection = memo(
                       toggleDone={toggleDone}
                       toggleHold={toggleHold}
                       toggleRush={toggleRush}
-                      togglePriority={togglePriority}
+                      toggleUrgent={toggleUrgent}
                       toggleStage2={toggleStage2}
                       toggleNewAccount={toggleNewAccount}
                       removeCase={removeCase}
@@ -425,7 +425,7 @@ export default memo(function CaseTable({
   toggleDone,
   toggleHold,
   toggleRush,
-  togglePriority,
+  toggleUrgent,
   toggleStage2,
   toggleNewAccount,
   removeCase,
@@ -463,11 +463,11 @@ export default memo(function CaseTable({
   );
 
   const categorizedRows = useMemo(() => {
-    const c = { overdue: [], priority: [], rush: [], hold: [], regular: [] };
+    const c = { overdue: [], urgent: [], rush: [], hold: [], regular: [] };
     processedRows.forEach((row) => {
       if (row.hold) c.hold.push(row);
       else if (row.isOverdue) c.overdue.push(row);
-      else if (row.priority && !row.completed) c.priority.push(row);
+      else if (row.urgent && !row.completed) c.urgent.push(row);
       else if (row.rush && !row.completed) c.rush.push(row);
       else c.regular.push(row);
     });
@@ -477,8 +477,8 @@ export default memo(function CaseTable({
   const allRowsFlat = useMemo(() => {
     if (showDividers) return null;
     return [...processedRows].sort((a, b) => {
-      if (a.priority && !b.priority) return -1;
-      if (!a.priority && b.priority) return 1;
+      if (a.urgent && !b.urgent) return -1;
+      if (!a.urgent && b.urgent) return 1;
       const da = new Date(a.due);
       const db = new Date(b.due);
       if (da < db) return -1;
@@ -607,7 +607,7 @@ export default memo(function CaseTable({
                         toggleDone={toggleDone}
                         toggleHold={toggleHold}
                         toggleRush={toggleRush}
-                        togglePriority={togglePriority}
+                        toggleUrgent={toggleUrgent}
                         toggleStage2={toggleStage2}
                         toggleNewAccount={toggleNewAccount}
                         removeCase={removeCase}
@@ -633,7 +633,7 @@ export default memo(function CaseTable({
                       toggleDone={toggleDone}
                       toggleHold={toggleHold}
                       toggleRush={toggleRush}
-                      togglePriority={togglePriority}
+                      toggleUrgent={toggleUrgent}
                       toggleStage2={toggleStage2}
                       toggleNewAccount={toggleNewAccount}
                       removeCase={removeCase}
@@ -645,21 +645,21 @@ export default memo(function CaseTable({
                     />
                   )}
 
-                  {categorizedRows.priority.length > 0 && (
+                  {categorizedRows.urgent.length > 0 && (
                     <CollapsibleSection
-                      title="Priority Cases"
-                      count={categorizedRows.priority.length}
+                      title="Urgent Cases"
+                      count={categorizedRows.urgent.length}
                       bgColor="bg-red-200/70"
                       textColor="text-red-900"
                       shadowColor="bg-red-400/40"
-                      rows={categorizedRows.priority}
+                      rows={categorizedRows.urgent}
                       formatDate={formatDate}
                       completed={completed}
                       onEdit={onEdit}
                       toggleDone={toggleDone}
                       toggleHold={toggleHold}
                       toggleRush={toggleRush}
-                      togglePriority={togglePriority}
+                      toggleUrgent={toggleUrgent}
                       toggleStage2={toggleStage2}
                       toggleNewAccount={toggleNewAccount}
                       removeCase={removeCase}
@@ -684,7 +684,7 @@ export default memo(function CaseTable({
                       toggleDone={toggleDone}
                       toggleHold={toggleHold}
                       toggleRush={toggleRush}
-                      togglePriority={togglePriority}
+                      toggleUrgent={toggleUrgent}
                       toggleStage2={toggleStage2}
                       toggleNewAccount={toggleNewAccount}
                       removeCase={removeCase}
@@ -709,7 +709,7 @@ export default memo(function CaseTable({
                       toggleDone={toggleDone}
                       toggleHold={toggleHold}
                       toggleRush={toggleRush}
-                      togglePriority={togglePriority}
+                      toggleUrgent={toggleUrgent}
                       toggleStage2={toggleStage2}
                       toggleNewAccount={toggleNewAccount}
                       removeCase={removeCase}
@@ -751,7 +751,7 @@ export default memo(function CaseTable({
                             toggleDone={toggleDone}
                             toggleHold={toggleHold}
                             toggleRush={toggleRush}
-                            togglePriority={togglePriority}
+                            toggleUrgent={toggleUrgent}
                             toggleStage2={toggleStage2}
                             toggleNewAccount={toggleNewAccount}
                             removeCase={removeCase}

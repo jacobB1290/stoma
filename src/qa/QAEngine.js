@@ -563,7 +563,7 @@ class DBKnowledge {
         "due",
         "completed",
         "department",
-        "priority",
+        "urgent",
         "modifiers",
         "archived",
         "archived_at",
@@ -2701,7 +2701,7 @@ COMPONENTS.register({
       details.push(`department is ${caseData.department}`);
     if (caseType !== "general")
       details.push(`it's a ${caseType.toUpperCase()} case`);
-    if (caseData.priority) details.push("it's marked as priority");
+    if (caseData.urgent) details.push("it's marked as urgent");
 
     const mods = caseData.modifiers || [];
     if (mods.includes("rush")) details.push("it has a rush flag");

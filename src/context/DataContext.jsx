@@ -8,7 +8,7 @@ import React, {
 import {
   addCase,
   updateCase,
-  togglePriority as svcTogglePriority,
+  toggleUrgent as svcToggleUrgent,
   toggleRush as svcToggleRush,
   toggleHold as svcToggleHold,
   toggleNewAccount as svcToggleNewAccount,
@@ -233,7 +233,7 @@ const mapRow = (rec) => {
     hold: mods.includes("hold"),
     newAccount: mods.includes("newaccount"),
     stage2: mods.includes("stage2"),
-    priority: rec.priority ?? false,
+    urgent: rec.urgent ?? false,
     caseNumber: rec.casenumber,
     caseType: mods.includes("bbs")
       ? "bbs"
@@ -337,7 +337,7 @@ export function DataProvider({ activeDept, children }) {
   }, [rows]);
 
   /* ── CRUD helpers ── */
-  const togglePriority = (r) => svcTogglePriority(r).catch(console.error);
+  const toggleUrgent = (r) => svcToggleUrgent(r).catch(console.error);
   const toggleRush = (r) => svcToggleRush(r).catch(console.error);
   const toggleHold = (r) => svcToggleHold(r).catch(console.error);
   const toggleNewAccount = (r) => svcToggleNewAccount(r).catch(console.error);
@@ -500,7 +500,7 @@ export function DataProvider({ activeDept, children }) {
         rows: visible,
         allRows: rows,
         workflowMap,
-        togglePriority,
+        toggleUrgent,
         toggleRush,
         toggleHold,
         toggleNewAccount,

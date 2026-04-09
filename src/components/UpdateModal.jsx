@@ -396,7 +396,7 @@ export default function UpdateModal({ open, onClose }) {
       await db.from("cases").insert({
         casenumber: "update",
         department: "General",
-        priority: priority === "high" || priority === "force",
+        urgent: priority === "high" || priority === "force",
         modifiers: [priority, cleanedNotes].filter(Boolean),
         due: new Date().toISOString(),
         completed: false,

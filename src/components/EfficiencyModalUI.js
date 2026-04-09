@@ -428,8 +428,8 @@ export default function EfficiencyModal({
   const finalScore =
     departmentEfficiency?.score ?? Math.max(0, Math.min(100, afterBuffer));
 
-  // ---------- Stage-aware priority vs standard metric (EXACT logic restored) ----------
-  const priorityMetric = useMemo(() => {
+  // ---------- Stage-aware urgent vs standard metric (EXACT logic restored) ----------
+  const urgentMetric = useMemo(() => {
     // Prefer true stage time from stageStats.validCases (working hours, QC-aware)
     const valid = stageStats?.validCases || [];
 
@@ -441,23 +441,23 @@ export default function EfficiencyModal({
         .filter((t) => t > 0);
 
     // Primary cohorts
-    let priorityTimes = collectTimes((c) => !!c.priority); // explicit priority
-    let standardTimes = collectTimes((c) => !c.priority && !c.rush);
+    let urgentTimes = collectTimes((c) => !!c.urgent); // explicit urgent
+    let standardTimes = collectTimes((c) => !c.urgent && !c.rush);
 
-    // If too few priority samples, allow rush∨priority as "urgent" cohort
-    if (priorityTimes.length < 3 && valid.length > 0) {
-      const urgentTimes = collectTimes((c) => c.priority || c.rush);
-      if (urgentTimes.length >= 3) priorityTimes = urgentTimes;
+    // If too few urgent samples, allow rush∨urgent as "urgent" cohort
+    if (urgentTimes.length < 3 && valid.length > 0) {
+      const rushOrUrgentTimes = collectTimes((c) => c.urgent || c.rush);
+      if (rushOrUrgentTimes.length >= 3) urgentTimes = rushOrUrgentTimes;
     }
 
     const minStandard = 5; // need a reasonable baseline
-    const minPriority = 3;
+    const minUrgent = 3;
 
     if (
-      priorityTimes.length >= minPriority &&
+      urgentTimes.length >= minUrgent &&
       standardTimes.length >= minStandard
     ) {
-      const avgP = mean(priorityTimes);
+      const avgP = mean(urgentTimes);
       const avgS = mean(standardTimes);
 
       // Percent improvement relative to standard time in THIS stage
@@ -473,23 +473,23 @@ export default function EfficiencyModal({
         percent: deltaPct,
         trend: deltaPct > 0 ? Math.round(deltaPct) : undefined,
         samples: {
-          priority: priorityTimes.length,
+          urgent: urgentTimes.length,
           standard: standardTimes.length,
         },
-        avgMs: { priority: avgP, standard: avgS },
+        avgMs: { urgent: avgP, standard: avgS },
         source: "stageStats.validCases",
       };
     }
 
-    // Fallback: try any per-type priorityStats produced upstream
+    // Fallback: try any per-type urgentStats produced upstream
     if (stageStats?.typeStats) {
       for (const type of ["general", "bbs", "flex"]) {
         const t = stageStats.typeStats[type];
         if (
-          t?.priorityStats?.percentFaster !== undefined &&
-          t.priorityStats.count >= 3
+          t?.urgentStats?.percentFaster !== undefined &&
+          t.urgentStats.count >= 3
         ) {
-          const pf = t.priorityStats.percentFaster; // positive = faster
+          const pf = t.urgentStats.percentFaster; // positive = faster
           return {
             display: `${Math.abs(Math.round(pf))}% ${
               pf >= 0 ? "faster" : "slower"
@@ -497,14 +497,14 @@ export default function EfficiencyModal({
             percent: pf,
             trend: pf > 0 ? Math.round(pf) : undefined,
             samples: {
-              priority: t.priorityStats.count,
-              standard: t.priorityStats.standardComparison?.standardCount || 0,
+              urgent: t.urgentStats.count,
+              standard: t.urgentStats.standardComparison?.standardCount || 0,
             },
             avgMs: {
-              priority: t.priorityStats.mean,
-              standard: t.priorityStats.standardComparison?.standardMean || 0,
+              urgent: t.urgentStats.mean,
+              standard: t.urgentStats.standardComparison?.standardMean || 0,
             },
-            source: `typeStats.${type}.priorityStats`,
+            source: `typeStats.${type}.urgentStats`,
           };
         }
       }
@@ -518,15 +518,15 @@ export default function EfficiencyModal({
         .filter(Boolean);
 
       const pTimes = allCases
-        .filter((c) => !!c.priority)
+        .filter((c) => !!c.urgent)
         .map((c) => c.timeInStage || c.rawTimeInStage || 0)
         .filter((t) => t > 0);
       const sTimes = allCases
-        .filter((c) => !c.priority && !c.rush)
+        .filter((c) => !c.urgent && !c.rush)
         .map((c) => c.timeInStage || c.rawTimeInStage || 0)
         .filter((t) => t > 0);
 
-      if (pTimes.length >= minPriority && sTimes.length >= minStandard) {
+      if (pTimes.length >= minUrgent && sTimes.length >= minStandard) {
         const avgP = mean(pTimes);
         const avgS = mean(sTimes);
         const deltaPct = avgS > 0 ? ((avgS - avgP) / avgS) * 100 : 0;
@@ -536,8 +536,8 @@ export default function EfficiencyModal({
           }`,
           percent: deltaPct,
           trend: deltaPct > 0 ? Math.round(deltaPct) : undefined,
-          samples: { priority: pTimes.length, standard: sTimes.length },
-          avgMs: { priority: avgP, standard: avgS },
+          samples: { urgent: pTimes.length, standard: sTimes.length },
+          avgMs: { urgent: avgP, standard: avgS },
           source: "throughput.byType.cases",
         };
       }
@@ -547,7 +547,7 @@ export default function EfficiencyModal({
       display: "N/A",
       percent: 0,
       trend: undefined,
-      samples: { priority: 0, standard: 0 },
+      samples: { urgent: 0, standard: 0 },
       source: "none",
     };
   }, [stageStats, departmentEfficiency]);
@@ -579,13 +579,13 @@ export default function EfficiencyModal({
         departmentEfficiency?.activeCases ||
         predictions?.predictions?.length ||
         0,
-      priorityCompletion: priorityMetric.display,
-      priorityPercentFaster: priorityMetric.percent,
-      rushCompletion: pct(onTimeDelivery?.byPriority?.actualRate ?? 0),
+      urgentCompletion: urgentMetric.display,
+      urgentPercentFaster: urgentMetric.percent,
+      rushCompletion: pct(onTimeDelivery?.byUrgent?.actualRate ?? 0),
       criticalCases: criticalCount,
       highCases: highCount,
     };
-  }, [departmentEfficiency, stageStats, priorityMetric]);
+  }, [departmentEfficiency, stageStats, urgentMetric]);
 
   if (!showEfficiencyModal || !departmentEfficiency) return null;
 
@@ -689,10 +689,10 @@ export default function EfficiencyModal({
                       />
                       <StatCard
                         icon={<Icon.Flag />}
-                        label="Priority"
-                        value={stats.priorityCompletion}
+                        label="Urgent"
+                        value={stats.urgentCompletion}
                         subtext="vs standard cases"
-                        trend={priorityMetric.trend}
+                        trend={urgentMetric.trend}
                       />
                       <StatCard
                         icon={<Icon.Warning />}

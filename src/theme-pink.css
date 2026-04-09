@@ -49,13 +49,13 @@ html.theme-pink {
   --w-row-stage2: #f5e8ff;
 
   /* ───────── status colors ───────── */
-  --w-priority-surface: #ffe4e6;
-  --w-priority-surface-2: #fecdd3;
-  --w-priority-border: #e8466438;
-  --w-priority-ink: #9f1239;
-  --w-priority-dot: #fda4af;
-  --w-priority-bar: #fda4af;
-  --w-priority-flash: #f87171;
+  --w-urgent-surface: #ffe4e6;
+  --w-urgent-surface-2: #fecdd3;
+  --w-urgent-border: #e8466438;
+  --w-urgent-ink: #9f1239;
+  --w-urgent-dot: #fda4af;
+  --w-urgent-bar: #fda4af;
+  --w-urgent-flash: #f87171;
 
   --w-overdue-surface: #fee2e2;
   --w-overdue-surface-2: #fecaca;
@@ -87,7 +87,7 @@ html.theme-pink {
   --newaccount-sheen-blur: 11px;
   --newaccount-sheen-speed: 8.5s;
 
-  --w-ring-priority: #c4707890;
+  --w-ring-urgent: #c4707890;
   --w-ring-rush: #c89a6a90;
   --w-ring-hold: #c4a04e90;
 
@@ -226,9 +226,9 @@ html.theme-pink .toggle-active {
 }
 
 html.theme-pink .toggle-glow-red {
-  background: var(--w-priority-surface-2);
-  color: var(--w-priority-ink);
-  border-color: var(--w-priority-border);
+  background: var(--w-urgent-surface-2);
+  color: var(--w-urgent-ink);
+  border-color: var(--w-urgent-border);
 }
 
 html.theme-pink .toggle-glow-orange {
@@ -251,7 +251,7 @@ html.theme-pink .toggle-glow-pink {
 
 /* ───────── status text colors ───────── */
 html.theme-pink :is(.text-red-500, .text-red-600, .text-red-700) {
-  color: var(--w-priority-ink);
+  color: var(--w-urgent-ink);
 }
 
 html.theme-pink :is(.text-orange-500, .text-orange-600) {
@@ -272,7 +272,7 @@ html.theme-pink :is(.text-pink-500, .text-pink-600, .text-pink-700) {
 
 /* ───────── status backgrounds ───────── */
 html.theme-pink :is(.bg-red-50, .bg-red-100, .bg-red-200) {
-  background: var(--w-priority-surface);
+  background: var(--w-urgent-surface);
 }
 
 html.theme-pink :is(.bg-orange-50, .bg-orange-100) {
@@ -299,10 +299,10 @@ html.theme-pink .bg-teal-100 {
   background: var(--w-accent-surface-2);
 }
 
-/* ───────── PRIORITY/RUSH INDICATOR BARS (pastel) ───────── */
+/* ───────── URGENT/RUSH INDICATOR BARS (pastel) ───────── */
 html.theme-pink .bg-red-500,
 html.theme-pink .bg-red-600 {
-  background: var(--w-priority-bar) !important;
+  background: var(--w-urgent-bar) !important;
 }
 
 html.theme-pink .bg-orange-500,
@@ -380,14 +380,14 @@ html.theme-pink .bg-\[\#6F5BA8\] {
   border-color: #9b6bc92e;
 }
 
-/* ───────── PRIORITY/RUSH RINGS (must come after case cards to win cascade) ───────── */
+/* ───────── URGENT/RUSH RINGS (must come after case cards to win cascade) ───────── */
 html.theme-pink .ring-red-500,
 html.theme-pink .ring-red-400,
 html.theme-pink [class*="ring-red"]:not([class*="ring-red-500\/"]) {
   --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0
     var(--tw-ring-offset-width) var(--tw-ring-offset-color);
   --tw-ring-shadow: var(--tw-ring-inset) 0 0 0
-    calc(3px + var(--tw-ring-offset-width)) var(--w-ring-priority);
+    calc(3px + var(--tw-ring-offset-width)) var(--w-ring-urgent);
   box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow),
     var(--w-row-shadow);
 }
@@ -632,7 +632,7 @@ html.theme-pink
 html.theme-pink :is(.pulse-red, .flash-red)::after {
   animation: row-pulse-lite 1.5s ease-in-out infinite;
   animation-delay: var(--pulse-clock, 0s);
-  background: var(--w-priority-flash) !important;
+  background: var(--w-urgent-flash) !important;
   mix-blend-mode: multiply;
 }
 

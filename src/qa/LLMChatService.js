@@ -261,7 +261,7 @@ const DB_SCHEMA = {
       modifiers: "JSON array - contains stage, flags, and type info",
       due_time: "string - time component",
       hold_started: "timestamp - when hold was activated (if any)",
-      priority: "boolean - is priority flagged",
+      urgent: "boolean - is urgent flagged",
       archived: "boolean - is archived",
       archived_at: "timestamp - when archived",
     },
@@ -273,7 +273,7 @@ const DB_SCHEMA = {
         "stage-qc",
         "stage2",
       ],
-      flags: ["rush", "hold", "priority", "newaccount"],
+      flags: ["rush", "hold", "urgent", "newaccount"],
       types: ["flex", "bbs"],
       exclusions: ["stats-exclude:design", "stats-exclude:all"],
     },
@@ -296,6 +296,8 @@ const DB_SCHEMA = {
       "Moved from Design to Production stage",
       "Moved from Production to Finishing stage",
       "Moved from Finishing to Quality Control",
+      "Urgent added",
+      "Urgent removed",
       "Priority added",
       "Priority removed",
       "rush added",
@@ -479,7 +481,7 @@ async function loadFullDatabase(forceRefresh = false) {
       department: c.department,
       modifiers: mods,
       hold_started: c.hold_started,
-      priority: Boolean(c.priority),
+      urgent: Boolean(c.urgent),
       archived,
       archived_at: c.archived_at,
 
@@ -539,7 +541,7 @@ async function loadFullDatabase(forceRefresh = false) {
       byStage,
       overdue: activeCases.filter((c) => c.isOverdue),
       rush: activeCases.filter((c) => c.isRush),
-      priority: activeCases.filter((c) => c.priority),
+      urgent: activeCases.filter((c) => c.urgent),
       hold: activeCases.filter((c) => c.isHold),
       statsExcludedActive: activeCases.filter((c) => c.statsExcluded),
       activeForStats,
@@ -558,8 +560,8 @@ async function loadFullDatabase(forceRefresh = false) {
       overdueForStats: activeForStats.filter((c) => c.isOverdue).length,
       rush: activeCases.filter((c) => c.isRush).length,
       rushForStats: activeForStats.filter((c) => c.isRush).length,
-      priority: activeCases.filter((c) => c.priority).length,
-      priorityForStats: activeForStats.filter((c) => c.priority).length,
+      urgent: activeCases.filter((c) => c.urgent).length,
+      urgentForStats: activeForStats.filter((c) => c.urgent).length,
       hold: activeCases.filter((c) => c.isHold).length,
       holdForStats: activeForStats.filter((c) => c.isHold).length,
       byDepartment: Object.fromEntries(
@@ -637,7 +639,7 @@ STAGES (from modifiers):
 
 FLAGS:
 - rush, hold, newaccount, flex, bbs are in the modifiers array
-- priority is a boolean column on the case (not a modifier)
+- urgent is a boolean column on the case (not a modifier)
 
 DUE DATES:
 - due is stored at midnight UTC in the DB
@@ -647,7 +649,7 @@ FILTER OPTIONS:
 - department: exact match ("Metal", "General", "C&B")
 - stage: "design", "production", "finishing", "qc", "stage2", "all"
 - status: "active" (default), "overdue", "completed", "archived", "hold", "all"
-- priority: true/false
+- urgent: true/false
 - rush: true/false
 - risk_level: "critical", "high", "medium", "low"
 - due_within_days: number (cases due in next N days, excluding overdue)
@@ -670,7 +672,7 @@ RETURNS: { count, cases[], summary }`,
           type: "string",
           enum: ["active", "overdue", "completed", "archived", "hold", "all"],
         },
-        priority: { type: "boolean" },
+        urgent: { type: "boolean" },
         rush: { type: "boolean" },
         risk_level: {
           type: "string",
@@ -794,7 +796,7 @@ RETURNS: {
   active,                   // Currently active (not archived/completed)
   archived,                 // Archived cases
   completed,                // Completed but not archived
-  overdue, rush, priority, hold,
+  overdue, rush, urgent, hold,
   byDepartment: { Metal, General, "C&B" },
   byStage: { design, production, finishing, qc, stage2 },
   risk: { critical, high, medium, low }
@@ -840,12 +842,12 @@ Includes cached recent history and may not include the full history table. For f
     
 Optionally filter by:
 - user_name: who performed the action
-- action_type: type of action (e.g., "Case created", "Marked done", "Priority added")
+- action_type: type of action (e.g., "Case created", "Marked done", "Urgent added")
 - case_id: specific case UUID
 
 COMMON ACTIONS:
 "Case created", "Marked done", "Case archived", "Moved to Stage 2",
-"Moved from Design to Production stage", "Priority added", "rush added", "hold added"`,
+"Moved from Design to Production stage", "Urgent added", "rush added", "hold added"`,
     parameters: {
       type: "object",
       properties: {
@@ -871,7 +873,7 @@ You have access to:
 - data.active: non-archived, non-completed cases
 - data.raw.cases: raw DB records
 - data.raw.history: recent history records
-- data.indexes: pre-built indexes (byDepartment, byStage, overdue, rush, priority, hold, critical, highRisk)
+- data.indexes: pre-built indexes (byDepartment, byStage, overdue, rush, urgent, hold, critical, highRisk)
 - data.summary: pre-computed counts
 
 Write a JavaScript expression that will be evaluated with 'data' in scope.
@@ -881,7 +883,7 @@ EXAMPLES:
 - "data.active.filter(c => c.department === 'Metal' && c.isOverdue).length"
 - "data.indexes.byDepartment['General'].filter(c => c.stage === 'production')"
 - "Object.entries(data.indexes.byDepartment).map(([dept, cases]) => ({ dept, overdue: cases.filter(c => c.isOverdue).length }))"
-- "data.raw.history.filter(h => h.action.includes('Priority')).slice(0, 20)"`,
+- "data.raw.history.filter(h => h.action.includes('Urgent') || h.action.includes('Priority')).slice(0, 20)"`,
     parameters: {
       type: "object",
       properties: {
@@ -1075,7 +1077,7 @@ SCOPE:
     description: `Propose a data change. User must confirm before execution.
     
 ACTIONS:
-- set_priority / remove_priority
+- set_urgent / remove_urgent
 - set_rush / remove_rush
 - set_hold / remove_hold
 - move_stage (to: design, production, finishing, qc)
@@ -1087,8 +1089,8 @@ ACTIONS:
         action: {
           type: "string",
           enum: [
-            "set_priority",
-            "remove_priority",
+            "set_urgent",
+            "remove_urgent",
             "set_rush",
             "remove_rush",
             "set_hold",
@@ -1191,7 +1193,7 @@ function buildDefaultDbUIData(dbData, scope = "default") {
       due: c.dueFormatted || c.due,
       daysUntilDue: c.daysUntilDue,
       isOverdue: c.isOverdue,
-      priority: Boolean(c.priority),
+      urgent: Boolean(c.urgent),
       isRush: Boolean(c.isRush),
       isHold: Boolean(c.isHold),
     }));
@@ -1466,7 +1468,7 @@ async function executeToolCall(toolName, args, data) {
             due: c.dueFormatted,
             daysUntilDue: c.daysUntilDue,
             isOverdue: c.isOverdue,
-            priority: c.priority,
+            urgent: c.urgent,
             isRush: c.isRush,
             isHold: c.isHold,
             archived: c.archived,
@@ -1534,8 +1536,8 @@ async function executeToolCall(toolName, args, data) {
           results = results.filter((c) => c.department === args.department);
         if (args.stage && args.stage !== "all")
           results = results.filter((c) => c.stage === args.stage);
-        if (args.priority !== undefined)
-          results = results.filter((c) => c.priority === args.priority);
+        if (args.urgent !== undefined)
+          results = results.filter((c) => c.urgent === args.urgent);
         if (args.rush !== undefined)
           results = results.filter((c) => c.isRush === args.rush);
         if (args.risk_level)
@@ -1629,7 +1631,7 @@ async function executeToolCall(toolName, args, data) {
             due: c.dueFormatted,
             daysUntilDue: c.daysUntilDue,
             isOverdue: c.isOverdue,
-            priority: c.priority,
+            urgent: c.urgent,
             isRush: c.isRush,
             isHold: c.isHold,
             riskLevel: c.riskLevel,
@@ -1637,7 +1639,7 @@ async function executeToolCall(toolName, args, data) {
           summary: {
             overdue: results.filter((c) => c.isOverdue).length,
             rush: results.filter((c) => c.isRush).length,
-            priority: results.filter((c) => c.priority).length,
+            urgent: results.filter((c) => c.urgent).length,
           },
         };
       }
@@ -1654,7 +1656,7 @@ async function executeToolCall(toolName, args, data) {
             total: deptCases.length,
             overdue: deptCases.filter((c) => c.isOverdue).length,
             rush: deptCases.filter((c) => c.isRush).length,
-            priority: deptCases.filter((c) => c.priority).length,
+            urgent: deptCases.filter((c) => c.urgent).length,
             hold: deptCases.filter((c) => c.isHold).length,
             byStage: {
               design: deptCases.filter((c) => c.stage === "design").length,
@@ -1708,7 +1710,7 @@ async function executeToolCall(toolName, args, data) {
               due: c.dueFormatted,
               daysUntilDue: c.daysUntilDue,
               isOverdue: c.isOverdue,
-              priority: c.priority,
+              urgent: c.urgent,
               isRush: c.isRush,
               isHold: c.isHold,
               archived: c.archived,
@@ -1803,7 +1805,7 @@ async function executeToolCall(toolName, args, data) {
             isOverdue: c.isOverdue,
             isRush: c.isRush,
             isHold: c.isHold,
-            priority: c.priority,
+            urgent: c.urgent,
             riskScore: c.riskScore,
             riskLevel: c.riskLevel,
             modifiers: c.modifiers,

@@ -67,7 +67,7 @@ const getStageFromModifiers = (mods = []) => {
 };
 
 const rank = (r) =>
-  r.priority
+  r.urgent
     ? 0
     : r.rush
     ? 1

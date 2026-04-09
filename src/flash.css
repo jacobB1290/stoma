@@ -25,7 +25,7 @@
 }
 
 /* -------------------------------------------------------------- 
-   Red overlay pulse — board card priority / overdue flash.
+   Red overlay pulse — board card urgent / overdue flash.
    ::after pseudo-element so it doesn't affect child layout.
 -------------------------------------------------------------- */
 @keyframes row-pulse-red {
@@ -64,7 +64,7 @@
 }
 
 /* -------------------------------------------------------------- 
-   Critical (high-priority) update flash - RED
+   Critical (high-urgency) update flash - RED
 -------------------------------------------------------------- */
 .flash-critical {
   animation: gentle-flash 1.5s ease-in-out infinite;
@@ -136,7 +136,7 @@
 }
 
 /* -------------------------------------------------------------- 
-   Settings icon flash for high-priority updates
+   Settings icon flash for high-urgency updates
 -------------------------------------------------------------- */
 @keyframes settings-flash-red {
   0%, 100% {
