@@ -152,7 +152,7 @@ export function useFrontOfficeStats() {
               dept: entry.cases?.department || "Unknown",
               enteredBy: entry.user_name || "Unknown",
               createdAt: entry.created_at,
-              completedAt: null,
+              isCompleted: false,
             });
           }
           const dept = entry.cases?.department || "Unknown";
@@ -223,13 +223,13 @@ export function useFrontOfficeStats() {
       if (missedIds.length > 0) {
         const { data: caseRows } = await db
           .from("cases")
-          .select("id, completed_at")
+          .select("id, completed")
           .in("id", missedIds);
         if (caseRows) {
           const completionMap = {};
-          for (const r of caseRows) completionMap[r.id] = r.completed_at;
+          for (const r of caseRows) completionMap[r.id] = !!r.completed;
           for (const mc of monthly.missedCases) {
-            mc.completedAt = completionMap[mc.id] || null;
+            mc.isCompleted = completionMap[mc.id] || false;
           }
         }
       }
@@ -313,8 +313,8 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase 
   const [showCompleted, setShowCompleted] = useState(false);
 
   // Split missed cases into active and completed
-  const activeMissed = (missedCases || []).filter(c => !c.completedAt);
-  const completedMissed = (missedCases || []).filter(c => c.completedAt);
+  const activeMissed = (missedCases || []).filter(c => !c.isCompleted);
+  const completedMissed = (missedCases || []).filter(c => c.isCompleted);
 
   // Word fade-in counter
   const [wordsVisible, setWordsVisible] = useState(0);
