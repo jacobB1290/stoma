@@ -107,7 +107,7 @@ export function useFrontOfficeStats() {
 
       const { data, error } = await db
         .from("case_history")
-        .select("user_name, case_id, action, created_at, cases(department, casenumber)")
+        .select("user_name, case_id, action, created_at, cases(department, casenumber, completed_at)")
         .gte("created_at", yearStart)
         .or("action.ilike.%case created%,action.ilike.%created%");
 
@@ -152,6 +152,7 @@ export function useFrontOfficeStats() {
               dept: entry.cases?.department || "Unknown",
               enteredBy: entry.user_name || "Unknown",
               createdAt: entry.created_at,
+              completedAt: entry.cases?.completed_at || null,
             });
           }
           const dept = entry.cases?.department || "Unknown";
@@ -293,7 +294,12 @@ function getPillAccent(pct) {
 // ─────────────────────────────────────────────────────────────────────────────
 function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase }) {
   const { pct, staffCount, totalCount, deptBreakdown, missedCases, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
-  const [showMissedList, setShowMissedList] = useState(false);
+  const [showMissedList, setShowMissedList] = useState(true);
+  const [showCompleted, setShowCompleted] = useState(false);
+
+  // Split missed cases into active and completed
+  const activeMissed = (missedCases || []).filter(c => !c.completedAt);
+  const completedMissed = (missedCases || []).filter(c => c.completedAt);
 
   // Word fade-in counter
   const [wordsVisible, setWordsVisible] = useState(0);
@@ -593,7 +599,7 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase 
           </div>
         )}
 
-        {/* ── Missed cases — clickable list ── */}
+        {/* ── Missed cases — split into active / completed ── */}
         {missedCases && missedCases.length > 0 && (
           <div style={{ borderTop: `1px solid ${dividerColor}`, paddingTop: "0.5rem" }}>
             <button
@@ -618,36 +624,114 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase 
                   transition={{ duration: 0.2 }}
                   className="overflow-hidden"
                 >
-                  <div className="mt-1.5 space-y-1 max-h-[140px] overflow-y-auto pr-1" style={{ scrollbarWidth: "thin" }}>
-                    {missedCases.map((c) => {
-                      const displayDept = c.dept === "General" ? "Digital" : c.dept;
-                      return (
-                        <button
-                          key={c.id}
-                          onClick={() => onOpenCase(c)}
-                          className="w-full flex items-center justify-between rounded-md px-2 py-1 cursor-pointer text-left"
-                          style={{
-                            background: light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)",
-                            border: "none",
-                            transition: "background 0.15s",
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.10)"}
-                          onMouseLeave={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"}
+                  {/* ── Active cases (always shown when list is open) ── */}
+                  {activeMissed.length > 0 && (
+                    <div className="mt-1.5 space-y-1 max-h-[140px] overflow-y-auto pr-1" style={{ scrollbarWidth: "thin" }}>
+                      {activeMissed.map((c) => {
+                        const displayDept = c.dept === "General" ? "Digital" : c.dept;
+                        return (
+                          <button
+                            key={c.id}
+                            onClick={() => onOpenCase(c)}
+                            className="w-full flex items-center justify-between rounded-md px-2 py-1 cursor-pointer text-left"
+                            style={{
+                              background: light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)",
+                              border: "none",
+                              transition: "background 0.15s",
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.10)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-medium" style={{ color: textPrimary }}>{c.caseNumber}</span>
+                              <span className="text-[9px] px-1 py-0.5 rounded" style={{
+                                color: textMuted,
+                                background: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)",
+                              }}>{displayDept}</span>
+                            </div>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: textMuted, flexShrink: 0, opacity: 0.5 }}>
+                              <path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {activeMissed.length === 0 && (
+                    <p className="mt-1.5 text-[10px] italic" style={{ color: textMuted }}>All missed cases are completed</p>
+                  )}
+
+                  {/* ── Thick divider between active and completed ── */}
+                  {completedMissed.length > 0 && (
+                    <div style={{ margin: "0.5rem 0 0.35rem", borderTop: `2.5px solid ${dividerColor}` }} />
+                  )}
+
+                  {/* ── Completed cases (collapsed by default) ── */}
+                  {completedMissed.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => setShowCompleted(v => !v)}
+                        className="w-full flex items-center justify-between text-[9.5px] font-semibold uppercase tracking-wide cursor-pointer"
+                        style={{ color: textMuted, letterSpacing: "0.06em", background: "none", border: "none", padding: 0 }}
+                      >
+                        <span>Completed ({completedMissed.length})</span>
+                        <svg
+                          width="9" height="9" viewBox="0 0 10 10" fill="currentColor"
+                          style={{ transform: showCompleted ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease" }}
                         >
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-medium" style={{ color: textPrimary }}>{c.caseNumber}</span>
-                            <span className="text-[9px] px-1 py-0.5 rounded" style={{
-                              color: textMuted,
-                              background: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)",
-                            }}>{displayDept}</span>
-                          </div>
-                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: textMuted, flexShrink: 0, opacity: 0.5 }}>
-                            <path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </button>
-                      );
-                    })}
-                  </div>
+                          <path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      <AnimatePresence>
+                        {showCompleted && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="mt-1 space-y-1 max-h-[120px] overflow-y-auto pr-1" style={{ scrollbarWidth: "thin" }}>
+                              {completedMissed.map((c) => {
+                                const displayDept = c.dept === "General" ? "Digital" : c.dept;
+                                return (
+                                  <button
+                                    key={c.id}
+                                    onClick={() => onOpenCase(c)}
+                                    className="w-full flex items-center justify-between rounded-md px-2 py-1 cursor-pointer text-left"
+                                    style={{
+                                      background: light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)",
+                                      border: "none",
+                                      transition: "background 0.15s",
+                                      opacity: 0.6,
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = light ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.10)"; e.currentTarget.style.opacity = "0.85"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.opacity = "0.6"; }}
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[11px] font-medium" style={{ color: textPrimary }}>{c.caseNumber}</span>
+                                      <span className="text-[9px] px-1 py-0.5 rounded" style={{
+                                        color: textMuted,
+                                        background: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)",
+                                      }}>{displayDept}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ color: "rgba(34,197,94,0.7)", flexShrink: 0 }}>
+                                        <path d="M2.5 5.5L4.5 7.5L7.5 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: textMuted, flexShrink: 0, opacity: 0.5 }}>
+                                        <path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
