@@ -410,18 +410,9 @@ function predictStageExitML(c, stage, stageEnteredAt, activeCases, stageStatsFor
 
   // Run XGBoost prediction
   const stageModel = XGB_MODELS?.[stg];
-  let remainingHours;
-  let modelUsed = "xgboost";
-
-  if (stageModel) {
-    const logRemaining = xgbPredict(stageModel, features);
-    remainingHours = Math.max(0, Math.exp(logRemaining) - 1);
-  } else {
-    // Fallback if model not loaded: use remaining budget as estimate
-    const allowedWH = due ? businessHoursBetween(entry, due) : 8;
-    remainingHours = Math.max(0.5, allowedWH - elapsedBH);
-    modelUsed = "fallback";
-  }
+  if (!stageModel) return null;
+  const logRemaining = xgbPredict(stageModel, features);
+  const remainingHours = Math.max(0, Math.exp(logRemaining) - 1);
 
   const totalWorkHours = elapsedBH + remainingHours;
   const absoluteETA = addBusinessHours(now, remainingHours);
@@ -437,7 +428,7 @@ function predictStageExitML(c, stage, stageEnteredAt, activeCases, stageStatsFor
     elapsedWorkHours: elapsedBH,
     k,
     backlogEff: backlog,
-    modelUsed,
+    modelUsed: "xgboost",
     featureArray: features,
     featureNames: V5_FEATURE_NAMES,
     confidenceScore,
@@ -504,6 +495,7 @@ export function generateCaseRiskPredictions(activeCases, throughputAnalysis, sta
     const timeInStageMs = Math.max(0, nowTs - (stageEnteredAt?.getTime?.() || nowTs));
 
     const mlResult = predictStageExitML(c, currentStage, stageEnteredAt, activeCases, stageStats?.stageStats?.[currentStage]);
+    if (!mlResult) return null;
     const expectedCompletionDate = mlResult.eta;
     const dueDate = dueEOD(c.due);
     const dueDateDisplay = parseDueDateForDisplay(c.due);
@@ -576,7 +568,7 @@ export function generateCaseRiskPredictions(activeCases, throughputAnalysis, sta
       featureArray: mlResult.featureArray,
       featureNames: mlResult.featureNames,
     };
-  });
+  }).filter(Boolean);
 
   // Populate risk reasons and recommendations
   for (const p of predictions) {
@@ -624,8 +616,6 @@ function generateRecommendation(p) {
   if (p.riskLevel === "medium") return p.progressPercent > 75 ? "Nearly complete but timing is tight" : "On track but limited buffer";
   return "On schedule";
 }
-
-export const calculateRiskWithVelocityEngine = async () => ({ predictions: [], velocityImpact: null });
 
 /** ======================= DESIGN SYSTEM ======================== **/
 
