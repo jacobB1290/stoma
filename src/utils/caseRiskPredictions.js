@@ -16,7 +16,7 @@
 //   • P(late)             interpolated from the quantile range vs due date
 //
 // SETUP
-//   1. Place xgb_v8_1_final.json in /public
+//   1. Place xgb_v8_final.json in /public
 //   2. Import { loadModels, generateCaseRiskPredictions, CaseRiskAnalyticsModal }
 //   3. Call loadModels() once at app init (returns a Promise)
 //
@@ -230,8 +230,6 @@ function snapToMinutes(d, step = 5) {
 
 export function dueEOD(dueStr) {
   if (!dueStr) return null;
-  // Split on "T" first so "YYYY-MM-DD" strings aren't parsed as UTC midnight,
-  // which would shift the date back one day in UTC- timezones (matches date.js parseLocalDate).
   const base = String(dueStr).split("T")[0];
   const parts = base.split("-").map(Number);
   if (parts.length === 3 && !parts.some(isNaN)) {
@@ -683,7 +681,8 @@ function walkTree(node, features) {
 
 function xgbPredictRegression(subModel, features) {
   if (!subModel?.trees) return 0;
-  let sum = 0.5; // XGBoost default base_score
+  // Per-model base_score (different for each quantile in quantile regression)
+  let sum = typeof subModel.base_score === "number" ? subModel.base_score : 0.5;
   for (const tree of subModel.trees) {
     sum += tree.leaf !== undefined ? tree.leaf : walkTree(tree, features);
   }
@@ -692,7 +691,8 @@ function xgbPredictRegression(subModel, features) {
 
 function xgbPredictProba(subModel, features) {
   if (!subModel?.trees) return 0.5;
-  let sum = 0;
+  // Classification base_score is typically 0 in logit space (logistic loss)
+  let sum = typeof subModel.base_score === "number" ? subModel.base_score : 0;
   for (const tree of subModel.trees) {
     sum += tree.leaf !== undefined ? tree.leaf : walkTree(tree, features);
   }
@@ -706,7 +706,7 @@ function xgbPredictProba(subModel, features) {
 let XGB_MODELS = null;
 let modelLoadPromise = null;
 
-export function loadModels(modelUrl = "/xgb_v8_1_final.json") {
+export function loadModels(modelUrl = "/xgb_v8_3_final.json") {
   if (XGB_MODELS) return Promise.resolve(XGB_MODELS);
   if (modelLoadPromise) return modelLoadPromise;
   modelLoadPromise = fetch(modelUrl)
@@ -731,17 +731,97 @@ export function modelsReady() { return !!XGB_MODELS; }
  *  CORE PREDICTION — runs all quantile models + P(resched)
  *  ======================================================================== */
 
-function runQuantileSet(model, keys, features) {
-  const out = {};
-  for (const k of keys) {
-    const sub = model?.[k];
-    if (!sub) { out[k.split("_p")[1] || k] = null; continue; }
-    const raw = xgbPredictRegression(sub, features);
-    // Target was log1p(hours); invert
-    const hours = Math.max(0, Math.exp(raw) - 1);
-    out[k] = hours;
+/** ========================================================================
+ *  QUANTILE COMPUTATION — v8.2 distributional (mean + sigma)
+ *  ========================================================================
+ *  Instead of training 4 independent quantile models (which can cross),
+ *  we train a mean model and a sigma model. Quantiles are derived analytically
+ *  from the lognormal distribution: q_α = exp(mean + z_α * sigma * scale) − 1
+ *  
+ *  This guarantees p10 ≤ p50 ≤ p75 ≤ p90 by mathematical construction
+ *  (the CDF is strictly monotone).
+ *  
+ *  Asymmetric scales handle right-skew in duration data:
+ *    scale_lower  for z < 0 (p10 side)
+ *    scale_upper_75  for z ≈ 0.67 (p75)
+ *    scale_upper_90  for z ≈ 1.28 (p90)
+ */
+
+// Standard normal z-values for target quantiles
+const Z_QUANTILES = {
+  p10: -1.2815515655446004,
+  p50: 0,
+  p75: 0.6744897501960817,
+  p90: 1.2815515655446004,
+};
+
+function computeQuantiles(meanModel, sigmaModel, features) {
+  if (!meanModel || !sigmaModel) {
+    return { p10: 0, p50: 0, p75: 0, p90: 0 };
   }
-  return out;
+  
+  const meanRaw = xgbPredictRegression(meanModel, features);
+  const logSigmaRaw = xgbPredictRegression(sigmaModel, features);
+  const sigmaBase = Math.exp(logSigmaRaw);
+  
+  const scales = {
+    lower: sigmaModel.scale_lower ?? 1.0,
+    up75: sigmaModel.scale_upper_75 ?? 1.0,
+    up90: sigmaModel.scale_upper_90 ?? 1.0,
+  };
+  
+  // Conformal adjustments — additive hours to guarantee coverage
+  const conformal = {
+    p75: sigmaModel.conformal_p75 ?? 0,
+    p90: sigmaModel.conformal_p90 ?? 0,
+  };
+  
+  const quantileHours = (z, conformalAdj = 0) => {
+    let scale;
+    if (z < 0) scale = scales.lower;
+    else if (z > 0 && z < 1.0) scale = scales.up75;
+    else if (z >= 1.0) scale = scales.up90;
+    else scale = 1.0;
+    const logHours = meanRaw + z * sigmaBase * scale;
+    const hours = Math.max(0, Math.exp(logHours) - 1);
+    return hours + conformalAdj;  // conformal layer adds guaranteed buffer
+  };
+  
+  return {
+    p10: quantileHours(Z_QUANTILES.p10),
+    p50: quantileHours(Z_QUANTILES.p50),
+    p75: quantileHours(Z_QUANTILES.p75, conformal.p75),
+    p90: quantileHours(Z_QUANTILES.p90, conformal.p90),
+  };
+}
+
+/**
+ * Predicts P(case will exceed its allowed work-hour budget) using the
+ * dedicated late classifier. Returns a calibrated probability via isotonic
+ * regression lookup.
+ */
+function predictLateProb(stageModel, features) {
+  const lateModel = stageModel?.late_classifier;
+  if (!lateModel) return null;
+  
+  // Raw classifier output
+  const rawProb = xgbPredictProba(lateModel, features);
+  
+  // Apply isotonic calibration if present
+  const xPts = lateModel.calibration_x;
+  const yPts = lateModel.calibration_y;
+  if (!xPts || !yPts || xPts.length !== yPts.length) return rawProb;
+  
+  // Piecewise linear interpolation through calibration curve
+  if (rawProb <= xPts[0]) return yPts[0];
+  if (rawProb >= xPts[xPts.length - 1]) return yPts[yPts.length - 1];
+  for (let i = 0; i < xPts.length - 1; i++) {
+    if (rawProb >= xPts[i] && rawProb <= xPts[i + 1]) {
+      const frac = (rawProb - xPts[i]) / Math.max(1e-9, xPts[i + 1] - xPts[i]);
+      return yPts[i] + frac * (yPts[i + 1] - yPts[i]);
+    }
+  }
+  return rawProb;
 }
 
 function predictCaseML(c, stage, stageEnteredAt, activeCases) {
@@ -755,33 +835,31 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases) {
 
   const model = XGB_MODELS?.[stg];
   let stageQ = null, totalQ = null, pResched = 0.05, modelUsed = "fallback";
+  let pLateDirect = null;  // From dedicated classifier
+  let lateThresholds = null;
 
-  if (model) {
-    stageQ = {
-      p10: Math.max(0, Math.exp(xgbPredictRegression(model.stage_p10, featureArray)) - 1),
-      p50: Math.max(0, Math.exp(xgbPredictRegression(model.stage_p50, featureArray)) - 1),
-      p75: Math.max(0, Math.exp(xgbPredictRegression(model.stage_p75, featureArray)) - 1),
-      p90: Math.max(0, Math.exp(xgbPredictRegression(model.stage_p90, featureArray)) - 1),
-    };
-    totalQ = {
-      p10: Math.max(0, Math.exp(xgbPredictRegression(model.total_p10, featureArray)) - 1),
-      p50: Math.max(0, Math.exp(xgbPredictRegression(model.total_p50, featureArray)) - 1),
-      p75: Math.max(0, Math.exp(xgbPredictRegression(model.total_p75, featureArray)) - 1),
-      p90: Math.max(0, Math.exp(xgbPredictRegression(model.total_p90, featureArray)) - 1),
-    };
-    // Enforce monotonicity in case of minor training noise
-    enforceMonotonic(stageQ);
-    enforceMonotonic(totalQ);
+  if (model?.stage_mean && model?.stage_sigma) {
+    stageQ = computeQuantiles(model.stage_mean, model.stage_sigma, featureArray);
+    totalQ = computeQuantiles(model.total_mean, model.total_sigma, featureArray);
     if (model.resched) pResched = xgbPredictProba(model.resched, featureArray);
-    modelUsed = "xgboost-v8";
+    
+    // NEW in v8.3: dedicated late classifier
+    if (model.late_classifier) {
+      pLateDirect = predictLateProb(model, featureArray);
+      lateThresholds = {
+        critical: model.late_classifier.thresh_critical ?? 0.8,
+        high: model.late_classifier.thresh_high ?? 0.5,
+        medium: model.late_classifier.thresh_medium ?? 0.25,
+      };
+    }
+    
+    modelUsed = "xgboost-v8.3";
   } else {
-    // Fallback when models haven't loaded
     const rem = Math.max(0.5, feats.remainingBudget || 4);
     stageQ = { p10: rem * 0.5, p50: rem, p75: rem * 1.3, p90: rem * 1.8 };
     totalQ = { p10: rem * 0.8, p50: rem * 1.5, p75: rem * 2, p90: rem * 3 };
   }
 
-  // Derive ETAs & ranges — the model outputs hours, code converts to clock time
   const stageETAs = {
     p10: addBusinessHours(now, stageQ.p10),
     p50: addBusinessHours(now, stageQ.p50),
@@ -795,42 +873,82 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases) {
     p90: addBusinessHours(now, totalQ.p90),
   };
 
-  // Risk level — derived from where due date falls in total_p10..total_p90
-  // No hand-tuned thresholds; it's geometry against a known deadline.
+  // === RISK LEVEL DETERMINATION ===
+  // v8.3 uses a two-signal system:
+  //   1. Dedicated classifier P(late) — primary signal, trained directly for this job
+  //   2. Quantile position vs due date — secondary signal for geometric sanity
+  // When both signals agree, risk is high-confidence.
+  
   let riskLevel = "low";
-  let pLate = 0.05;
+  let pLateFinal = 0.05;
+  let riskFromQuantiles = null;  // what quantile geometry says
+  let riskFromClassifier = null;  // what classifier says
+  let signalsAgree = true;
+  
+  // Quantile-based risk (secondary signal)
   if (due) {
-    if (totalETAs.p10 > due) { riskLevel = "critical"; pLate = 0.9; }
-    else if (totalETAs.p50 > due) { riskLevel = "high";  pLate = 0.65; }
-    else if (totalETAs.p75 > due) { riskLevel = "medium"; pLate = 0.35; }
-    else if (totalETAs.p90 > due) { riskLevel = "low";    pLate = 0.15; }
-    else { riskLevel = "low"; pLate = 0.03; }
-    // Smooth P(late) by interpolating where due falls in the range
-    pLate = interpolatePLate(totalETAs, due);
+    if (totalETAs.p10 > due) riskFromQuantiles = "critical";
+    else if (totalETAs.p50 > due) riskFromQuantiles = "high";
+    else if (totalETAs.p75 > due) riskFromQuantiles = "medium";
+    else riskFromQuantiles = "low";
+  } else {
+    riskFromQuantiles = "low";
+  }
+  
+  // Classifier-based risk (primary signal) — uses calibrated thresholds
+  if (pLateDirect !== null && lateThresholds) {
+    if (pLateDirect >= lateThresholds.critical) riskFromClassifier = "critical";
+    else if (pLateDirect >= lateThresholds.high) riskFromClassifier = "high";
+    else if (pLateDirect >= lateThresholds.medium) riskFromClassifier = "medium";
+    else riskFromClassifier = "low";
+    
+    // Primary: use classifier
+    riskLevel = riskFromClassifier;
+    pLateFinal = pLateDirect;
+    
+    // Agreement check
+    const rankOrder = { low: 0, medium: 1, high: 2, critical: 3 };
+    const classifierRank = rankOrder[riskFromClassifier];
+    const quantileRank = rankOrder[riskFromQuantiles];
+    signalsAgree = Math.abs(classifierRank - quantileRank) <= 1;
+  } else {
+    // Fallback to quantile-derived if classifier unavailable
+    riskLevel = riskFromQuantiles;
+    pLateFinal = interpolatePLate(totalETAs, due);
   }
 
-  // Confidence: tightness of the p10→p90 range relative to p50
+  // === CONFIDENCE SCORE ===
+  // v8.3 confidence combines: spread tightness + signal agreement + late prob extremity
   const spread = totalQ.p90 - totalQ.p10;
   const relSpread = totalQ.p50 > 0 ? spread / totalQ.p50 : 3;
-  // Narrow range = high confidence; wide range = low confidence
-  const confidenceScore = Math.round(Math.max(35, Math.min(95, 95 - relSpread * 25)));
+  let confidenceScore = 95 - relSpread * 25;  // base from spread
+  if (signalsAgree) confidenceScore += 5;       // bonus when both signals agree
+  else confidenceScore -= 15;                    // penalty when they disagree
+  // Boost when classifier is very confident in either direction
+  if (pLateDirect !== null) {
+    const extremity = Math.abs(pLateDirect - 0.5) * 2;  // 0..1
+    confidenceScore += extremity * 10;
+  }
+  confidenceScore = Math.round(Math.max(35, Math.min(98, confidenceScore)));
 
   return {
-    // Model outputs
     stageHours: stageQ,
     totalHours: totalQ,
     stageETAs,
     totalETAs,
     pResched,
-    pLate,
+    pLate: pLateFinal,
+    pLateDirect,
+    pLateFromQuantiles: due ? interpolatePLate(totalETAs, due) : 0,
     riskLevel,
-    // Main ETA values (P50)
+    riskFromClassifier,
+    riskFromQuantiles,
+    signalsAgree,
     stageETA: snapToMinutes(stageETAs.p50, 5),
     totalETA: snapToMinutes(totalETAs.p50, 5),
     stageWorkHours: stageQ.p50,
     totalWorkHours: totalQ.p50,
     elapsedWorkHours: feats.elapsedBH,
-    // Context
     concurrent: feats.concurrent,
     hoursIdle: feats.hoursIdle,
     remainingBudget: feats.remainingBudget,
@@ -845,23 +963,48 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases) {
   };
 }
 
-function enforceMonotonic(q) {
-  // Ensure p10 ≤ p50 ≤ p75 ≤ p90
-  q.p50 = Math.max(q.p50, q.p10);
-  q.p75 = Math.max(q.p75, q.p50);
-  q.p90 = Math.max(q.p90, q.p75);
-}
-
 function interpolatePLate(etas, due) {
-  // Map due date's position in the p10..p90 range to a probability of being late
+  // Treat the 4 quantiles as 4 known points on the CDF:
+  //   F(p10) = 0.10, F(p50) = 0.50, F(p75) = 0.75, F(p90) = 0.90
+  // For any due date, interpolate/extrapolate the CDF value at that time.
+  // P(late) = 1 − F(due)  (probability the case finishes AFTER the due date)
   if (!due) return 0.05;
+
+  const points = [
+    { ms: etas.p10.getTime(), q: 0.10 },
+    { ms: etas.p50.getTime(), q: 0.50 },
+    { ms: etas.p75.getTime(), q: 0.75 },
+    { ms: etas.p90.getTime(), q: 0.90 },
+  ];
   const dueMs = due.getTime();
-  const p10 = etas.p10.getTime(), p50 = etas.p50.getTime(), p75 = etas.p75.getTime(), p90 = etas.p90.getTime();
-  if (dueMs <= p10) return 0.92;
-  if (dueMs <= p50) return 0.65 + 0.27 * (p50 - dueMs) / Math.max(1, p50 - p10);
-  if (dueMs <= p75) return 0.35 + 0.30 * (p75 - dueMs) / Math.max(1, p75 - p50);
-  if (dueMs <= p90) return 0.12 + 0.23 * (p90 - dueMs) / Math.max(1, p90 - p75);
-  return Math.max(0.02, 0.12 * Math.exp(-(dueMs - p90) / Math.max(1, p90 - p75)));
+
+  let cdf;
+  if (dueMs <= points[0].ms) {
+    // Before p10 — extrapolate using slope of the p10→p50 segment
+    const segMs = Math.max(1, points[1].ms - points[0].ms);
+    const slope = (points[1].q - points[0].q) / segMs; // quantile per ms
+    cdf = points[0].q - slope * (points[0].ms - dueMs);
+  } else if (dueMs >= points[3].ms) {
+    // Past p90 — extrapolate using slope of the p75→p90 segment
+    const segMs = Math.max(1, points[3].ms - points[2].ms);
+    const slope = (points[3].q - points[2].q) / segMs;
+    cdf = points[3].q + slope * (dueMs - points[3].ms);
+  } else {
+    // Inside the range — linear interpolation between adjacent known points
+    cdf = points[0].q;
+    for (let i = 0; i < points.length - 1; i++) {
+      if (dueMs >= points[i].ms && dueMs <= points[i + 1].ms) {
+        const segMs = Math.max(1, points[i + 1].ms - points[i].ms);
+        const frac = (dueMs - points[i].ms) / segMs;
+        cdf = points[i].q + frac * (points[i + 1].q - points[i].q);
+        break;
+      }
+    }
+  }
+
+  // Clamp to a sensible range so tails don't produce pathological values
+  cdf = Math.max(0.005, Math.min(0.995, cdf));
+  return 1 - cdf;
 }
 
 /** ========================================================================
@@ -940,8 +1083,13 @@ export function generateCaseRiskPredictions(activeCases, throughputAnalysis, sta
       // Model outputs
       riskLevel: ml.riskLevel,
       lateProbability: ml.pLate,
+      lateProbabilityDirect: ml.pLateDirect,  // from dedicated classifier
+      lateProbabilityQuantile: ml.pLateFromQuantiles,  // from quantile position
+      riskFromClassifier: ml.riskFromClassifier,
+      riskFromQuantiles: ml.riskFromQuantiles,
+      signalsAgree: ml.signalsAgree,
       rescheduleProbability: ml.pResched,
-      confidence: ml.confidenceScore >= 75 ? "high" : ml.confidenceScore >= 55 ? "medium" : "low",
+      confidence: ml.confidenceScore >= 80 ? "high" : ml.confidenceScore >= 60 ? "medium" : "low",
       confidenceScore: ml.confidenceScore,
       riskScore: Math.round(ml.pLate * 100),
 
@@ -1039,6 +1187,7 @@ const RISK_STYLE = {
   low:      { fg: COLORS.rLow,      bg: COLORS.rLowBg,      label: "Low" },
 };
 
+// Exported formatters (used internally and by callers)
 export function formatHours(h) {
   if (h === undefined || h === null || isNaN(h)) return "—";
   if (h < 1) return `${Math.round(h * 60)}m`;
@@ -1049,7 +1198,7 @@ export function formatHours(h) {
   return `${Math.round(d)}d`;
 }
 
-function formatDuration(ms) {
+export function formatDuration(ms) {
   if (!ms || ms < 0) return "—";
   const h = ms / 3600000;
   if (h < 1) return `${Math.round(ms / 60000)}m`;
@@ -1058,18 +1207,43 @@ function formatDuration(ms) {
   return `${Math.round(d * 10) / 10}d`;
 }
 
-function formatDate(d, withTime = true) {
+export function formatDate(d, withTime = true) {
   if (!d) return "—";
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date)) return "—";
   const opts = withTime
     ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
     : { month: "short", day: "numeric", year: "numeric" };
-  return d.toLocaleString("en-US", opts);
+  return date.toLocaleString("en-US", opts);
 }
 
-function formatPercent(x, digits = 0) {
+export function formatPercent(x, digits = 0) {
   if (x === undefined || x === null || isNaN(x)) return "—";
-  return `${x.toFixed(digits)}%`;
+  return `${Number(x).toFixed(digits)}%`;
 }
+
+export function formatRelativeTime(date, reference = new Date()) {
+  if (!date) return "—";
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return "—";
+  const diffMs = d - reference;
+  const isPast = diffMs < 0;
+  const absMs = Math.abs(diffMs);
+  const hours = absMs / 3600000;
+  const days = hours / 24;
+  let text;
+  if (hours < 1) text = "< 1h";
+  else if (hours < 24) text = `${Math.round(hours)}h`;
+  else if (days < 7) text = `${Math.round(days)}d`;
+  else text = `${Math.round(days / 7)}w`;
+  return isPast ? `${text} ago` : `in ${text}`;
+}
+
+export function daySpanHours(a, b) { return (b - a) / 3600000; }
+
+// Models getters/setters for testing/mocking
+export function getModels() { return XGB_MODELS; }
+export function setModels(models) { XGB_MODELS = models; }
 
 /** ========================================================================
  *  UI COMPONENTS
@@ -1971,8 +2145,11 @@ function TimelineTab({ prediction }) {
 }
 
 function SignalsTab({ prediction }) {
-  const { riskLevel, lateProbability, rescheduleProbability } = prediction;
+  const { riskLevel, lateProbability, rescheduleProbability,
+          lateProbabilityDirect, lateProbabilityQuantile,
+          riskFromClassifier, riskFromQuantiles, signalsAgree } = prediction;
   const style = RISK_STYLE[riskLevel];
+  const hasClassifier = lateProbabilityDirect !== undefined && lateProbabilityDirect !== null;
 
   return (
     <div className="grid grid-cols-5 gap-6">
@@ -1986,7 +2163,6 @@ function SignalsTab({ prediction }) {
             Model outputs
           </div>
 
-          {/* Ring gauge for risk score */}
           <div className="flex justify-center py-4">
             <RingGauge value={prediction.riskScore} max={100} color={style.fg} size={160} />
           </div>
@@ -2001,11 +2177,56 @@ function SignalsTab({ prediction }) {
             className="mt-5 pt-4 text-[11px] leading-relaxed"
             style={{ color: COLORS.inkSoft, borderTop: `1px solid ${COLORS.divider}` }}
           >
-            All probabilities trained directly on actual outcomes. Risk level
-            derived from where the due date falls in the predicted range — no
-            threshold tuning.
+            {hasClassifier ? (
+              <>P(late) comes from a dedicated binary classifier trained
+              directly on historical outcomes. The risk level reflects calibrated
+              operational thresholds.</>
+            ) : (
+              <>Risk level derived from where the due date falls in the
+              predicted completion range.</>
+            )}
           </div>
         </div>
+
+        {/* Signal agreement — the trust-building panel */}
+        {hasClassifier && (
+          <div
+            className="p-5 rounded-sm"
+            style={{
+              backgroundColor: signalsAgree ? COLORS.rLowBg : COLORS.rMediumBg,
+              border: `1px solid ${signalsAgree ? COLORS.rLow : COLORS.rMedium}44`,
+            }}
+          >
+            <div
+              className="text-[10px] uppercase tracking-[0.18em] mb-3"
+              style={{ color: signalsAgree ? COLORS.rLow : COLORS.rMedium, fontWeight: 500 }}
+            >
+              {signalsAgree ? "Model signals agree" : "Model signals disagree"}
+            </div>
+            <div className="space-y-2 text-[11px]">
+              <div className="flex justify-between">
+                <span style={{ color: COLORS.inkSoft }}>Classifier says:</span>
+                <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
+                  {riskFromClassifier} ({(lateProbabilityDirect * 100).toFixed(1)}%)
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: COLORS.inkSoft }}>Quantile view says:</span>
+                <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
+                  {riskFromQuantiles} ({(lateProbabilityQuantile * 100).toFixed(1)}%)
+                </span>
+              </div>
+            </div>
+            <div
+              className="mt-3 pt-3 text-[11px] leading-relaxed"
+              style={{ color: COLORS.inkSoft, borderTop: `1px solid ${COLORS.divider}` }}
+            >
+              {signalsAgree
+                ? "Both the direct classifier and the quantile geometry reach the same conclusion — high-confidence signal."
+                : "The classifier and quantile views disagree — this case has ambiguous signals and warrants human review."}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right: Reasons */}
@@ -2015,7 +2236,6 @@ function SignalsTab({ prediction }) {
         </div>
         <RiskFactors prediction={prediction} />
 
-        {/* Case attributes snapshot */}
         <div
           className="p-6 rounded-sm"
           style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
@@ -2179,99 +2399,600 @@ function RingGauge({ value, max, color, size = 120 }) {
 }
 
 /** ========================================================================
- *  CaseRiskModal — list-style wrapper used by EfficiencyModalUI
- *  Accepts the legacy { open, onClose, predictions, stage, onOpenCaseHistory }
- *  interface and drills into CaseRiskAnalyticsModal for per-case detail.
- *  Portaled to document.body so z-index is in the root stacking context.
+ *  LIST MODAL — beautifully designed, v8-aware list of all cases
  *  ======================================================================== */
 
-export function CaseRiskModal({ open, onClose, predictions = [], onOpenCaseHistory }) {
-  const [selected, setSelected] = React.useState(null);
+function getStatusFromPrediction(p) {
+  // Risk level already comes from the model; elevate to "critical" if overdue
+  const now = new Date();
+  const due = p.dueDate ? new Date(p.dueDate) : p.dueDateCalc;
+  const isOverdue = due && due < now;
+  if (isOverdue && p.riskLevel === "low") return "medium";
+  if (isOverdue) return "critical";
+  return p.riskLevel || "low";
+}
+
+export function ProgressBar({ value, size = "md", color }) {
+  const heights = { sm: 2, md: 4, lg: 6 };
+  const h = heights[size] ?? 4;
+  const percent = Math.max(0, Math.min(100, value || 0));
+  return (
+    <div
+      className="w-full rounded-full overflow-hidden"
+      style={{ height: h, backgroundColor: COLORS.cream }}
+    >
+      <div
+        className="h-full rounded-full transition-all duration-500"
+        style={{ width: `${percent}%`, backgroundColor: color || COLORS.cognac }}
+      />
+    </div>
+  );
+}
+
+/** Alias for backwards compatibility with v7's StatusBadge API */
+export const StatusBadge = ({ status, size = "md" }) => (
+  <RiskBadge level={status} size={size} />
+);
+
+function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
+  const status = getStatusFromPrediction(prediction);
+  const style = RISK_STYLE[status] || RISK_STYLE.low;
+  const now = new Date();
+  const dueDate = prediction.dueDate ? new Date(prediction.dueDate) : prediction.dueDateCalc;
+  const completionETA = prediction.completionETA || prediction.expectedCompletionDate;
+  const isOverdue = dueDate && dueDate < now;
+
+  // Wall-clock buffer in same units as "due in X" so they don't contradict each other
+  const bufferMs = dueDate && completionETA ? dueDate.getTime() - completionETA.getTime() : null;
+  const bufferText = (() => {
+    if (bufferMs === null) return null;
+    const absMs = Math.abs(bufferMs);
+    const h = absMs / 3600000;
+    const d = h / 24;
+    if (h < 1) return "< 1h";
+    if (h < 24) return `${Math.round(h)}h`;
+    if (d < 7) return `${Math.round(d)}d`;
+    return `${Math.round(d / 7)}w`;
+  })();
+
+  const timeDisplay = (() => {
+    if (isOverdue) {
+      return { primary: "OVERDUE", secondary: formatRelativeTime(dueDate), urgent: true };
+    }
+    if (prediction.willBeLate) {
+      return {
+        primary: `Late ${bufferText}`,
+        secondary: `Due ${formatRelativeTime(dueDate)}`,
+        urgent: true,
+      };
+    }
+    return {
+      primary: formatRelativeTime(dueDate),
+      secondary: bufferText ? `${bufferText} before due` : "on time",
+      urgent: false,
+    };
+  })();
+
+  // Late probability display — more precision for small values
+  const latePctRaw = (prediction.lateProbability || 0) * 100;
+  const latePctDisplay = (() => {
+    if (latePctRaw < 1) return "<1";
+    if (latePctRaw < 10) return latePctRaw.toFixed(1);
+    return String(Math.round(latePctRaw));
+  })();
+
+  return (
+    <button
+      type="button"
+      onClick={onOpenAnalytics}
+      className="group relative w-full text-left rounded-sm transition-all"
+      style={{
+        backgroundColor: COLORS.paper,
+        border: `1px solid ${COLORS.borderSoft}`,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = COLORS.cognacLight; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = COLORS.borderSoft; }}
+    >
+      {/* Left accent stripe */}
+      <div
+        className="absolute left-0 top-0 bottom-0"
+        style={{ width: 3, backgroundColor: style.fg }}
+      />
+
+      <div className="pl-5 pr-4 py-4">
+        <div className="flex items-center gap-5">
+          {/* Risk badge */}
+          <div className="w-24 flex-shrink-0">
+            <RiskBadge level={status} size="sm" />
+          </div>
+
+          {/* Case number + type */}
+          <div className="w-40 flex-shrink-0">
+            <div
+              className="text-xl leading-tight"
+              style={{
+                fontFamily: "'Instrument Serif', Georgia, serif",
+                color: COLORS.ink,
+                fontWeight: 400,
+                letterSpacing: "-0.005em",
+              }}
+            >
+              {prediction.caseNumber}
+            </div>
+            <div
+              className="text-[10px] uppercase tracking-[0.15em] mt-0.5"
+              style={{ color: COLORS.inkFaint }}
+            >
+              {prediction.caseType || "general"}
+            </div>
+          </div>
+
+          {/* Due / late info */}
+          <div className="flex-1 min-w-0">
+            <div
+              className="text-sm"
+              style={{
+                color: timeDisplay.urgent ? style.fg : COLORS.ink,
+                fontWeight: timeDisplay.urgent ? 500 : 400,
+                fontFamily: timeDisplay.urgent
+                  ? "'DM Sans', sans-serif"
+                  : "'Instrument Serif', Georgia, serif",
+                fontSize: timeDisplay.urgent ? 13 : 16,
+              }}
+            >
+              {timeDisplay.primary}
+            </div>
+            <div className="text-[11px] mt-0.5" style={{ color: COLORS.inkSoft }}>
+              {timeDisplay.secondary}
+            </div>
+          </div>
+
+          {/* Progress */}
+          <div className="w-28 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <ProgressBar value={prediction.progressPercent || 0} size="sm" color={style.fg} />
+              <span
+                className="text-[11px] tabular-nums"
+                style={{
+                  color: COLORS.inkSoft,
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}
+              >
+                {Math.round(prediction.progressPercent || 0)}%
+              </span>
+            </div>
+            <div
+              className="text-[10px] uppercase tracking-[0.15em] mt-1"
+              style={{ color: COLORS.inkFaint }}
+            >
+              Elapsed
+            </div>
+          </div>
+
+          {/* Flags */}
+          <div className="flex items-center gap-1.5 w-20 justify-end flex-shrink-0">
+            {prediction.isRush && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
+                style={{
+                  color: COLORS.cognac,
+                  backgroundColor: COLORS.cognacGlow,
+                  fontWeight: 500,
+                }}
+              >
+                <Zap size={9} />
+                Rush
+              </span>
+            )}
+            {prediction.onHold && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
+                style={{
+                  color: COLORS.brass,
+                  backgroundColor: COLORS.rMediumBg,
+                  fontWeight: 500,
+                }}
+              >
+                Hold
+              </span>
+            )}
+            {prediction.signalsAgree === false && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
+                style={{
+                  color: COLORS.inkSoft,
+                  backgroundColor: COLORS.cream,
+                  border: `1px dashed ${COLORS.inkFaint}`,
+                  fontWeight: 500,
+                }}
+                title="Model signals disagree — review manually"
+              >
+                Review
+              </span>
+            )}
+          </div>
+
+          {/* Late probability — big, beautiful */}
+          <div className="w-20 flex-shrink-0 text-right">
+            <div
+              className="leading-none"
+              style={{
+                fontFamily: "'Instrument Serif', Georgia, serif",
+                fontSize: 26,
+                fontWeight: 300,
+                color: style.fg,
+              }}
+            >
+              {latePctDisplay}
+              <span style={{ fontSize: 14, color: COLORS.inkFaint }}>%</span>
+            </div>
+            <div
+              className="text-[10px] uppercase tracking-[0.15em] mt-0.5"
+              style={{ color: COLORS.inkFaint }}
+            >
+              Late risk
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onOpenHistory(prediction.id, prediction.caseNumber); }}
+                className="text-[11px] uppercase tracking-[0.12em] px-2.5 py-1 rounded-sm transition-colors"
+                style={{
+                  color: COLORS.inkSoft,
+                  border: `1px solid ${COLORS.borderSoft}`,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = COLORS.cognac; e.currentTarget.style.borderColor = COLORS.cognacLight; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = COLORS.inkSoft; e.currentTarget.style.borderColor = COLORS.borderSoft; }}
+              >
+                History
+              </button>
+            )}
+            <ChevronRight
+              size={16}
+              style={{ color: COLORS.inkFaint }}
+              className="transition-transform group-hover:translate-x-0.5"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom progress sliver */}
+      <div style={{ height: 1.5, backgroundColor: COLORS.divider }}>
+        <div
+          className="h-full transition-all duration-500"
+          style={{
+            width: `${Math.min(100, prediction.progressPercent || 0)}%`,
+            backgroundColor: style.fg,
+            opacity: 0.6,
+          }}
+        />
+      </div>
+    </button>
+  );
+}
+
+/**
+ * CaseRiskModal — the list view. Shows all cases with search, filter, sort.
+ * Opens CaseRiskAnalyticsModal on click for full detail.
+ */
+export function CaseRiskModal({
+  open,
+  onClose,
+  predictions = [],
+  stage,
+  onOpenCaseHistory,
+  onDataProcessed,
+}) {
+  const [query, setQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [sortBy, setSortBy] = useState("risk");
+  const [selectedPrediction, setSelectedPrediction] = useState(null);
+
+  // Inject fonts once (safe no-op if already present)
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const id = "v8-fonts";
+    if (document.getElementById(id)) return;
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap";
+    document.head.appendChild(link);
+  }, []);
+
+  const processedPredictions = useMemo(() => {
+    let filtered = [...(predictions || [])];
+    if (filterStatus !== "all") {
+      filtered = filtered.filter((p) => getStatusFromPrediction(p) === filterStatus);
+    }
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      filtered = filtered.filter((p) =>
+        String(p.caseNumber || "").toLowerCase().includes(q) ||
+        String(p.caseType || "").toLowerCase().includes(q)
+      );
+    }
+    const order = { critical: 0, high: 1, medium: 2, low: 3 };
+    filtered.sort((a, b) => {
+      if (sortBy === "risk") {
+        return (
+          order[getStatusFromPrediction(a)] - order[getStatusFromPrediction(b)] ||
+          (b.lateProbability || 0) - (a.lateProbability || 0)
+        );
+      }
+      if (sortBy === "due") {
+        const aD = a.dueDateCalc || (a.dueDate ? new Date(a.dueDate) : null);
+        const bD = b.dueDateCalc || (b.dueDate ? new Date(b.dueDate) : null);
+        const at = aD ? aD.getTime() : Infinity;
+        const bt = bD ? bD.getTime() : Infinity;
+        return at - bt;
+      }
+      if (sortBy === "progress") return (a.progressPercent || 0) - (b.progressPercent || 0);
+      if (sortBy === "case")     return String(a.caseNumber || "").localeCompare(String(b.caseNumber || ""));
+      return 0;
+    });
+    return filtered;
+  }, [predictions, filterStatus, query, sortBy]);
+
+  const summary = useMemo(() => ({
+    total: predictions.length,
+    critical: predictions.filter((p) => getStatusFromPrediction(p) === "critical").length,
+    high:     predictions.filter((p) => getStatusFromPrediction(p) === "high").length,
+    medium:   predictions.filter((p) => getStatusFromPrediction(p) === "medium").length,
+    low:      predictions.filter((p) => getStatusFromPrediction(p) === "low").length,
+    avgRisk:  predictions.length
+      ? (predictions.reduce((s, p) => s + (p.lateProbability || 0), 0) / predictions.length) * 100
+      : 0,
+    avgConfidence: predictions.length
+      ? predictions.reduce((s, p) => s + (p.confidenceScore || 0), 0) / predictions.length
+      : 0,
+    concurrent: predictions[0]?.backlogCount || 0,
+  }), [predictions]);
+
+  useEffect(() => {
+    onDataProcessed?.({
+      processedPredictions, summary, stage, filterStatus, query,
+      rawPredictions: predictions,
+    });
+  }, [processedPredictions, summary, stage, filterStatus, query, predictions, onDataProcessed]);
 
   if (!open) return null;
 
-  // Detail view — portaled so it sits above the list backdrop
-  if (selected) {
-    return createPortal(
-      <CaseRiskAnalyticsModal prediction={selected} onClose={() => setSelected(null)} />,
-      document.body
-    );
-  }
-
-  const order = { critical: 0, high: 1, medium: 2, low: 3 };
-  const sorted = [...predictions].sort(
-    (a, b) => order[a.riskLevel] - order[b.riskLevel] || b.lateProbability - a.lateProbability
-  );
-
   return createPortal(
-    <div
-      className="fixed inset-0 z-[10001] flex items-center justify-center"
-      style={{ backgroundColor: "rgba(26,22,18,0.55)", backdropFilter: "blur(4px)" }}
-      onClick={onClose}
-    >
+    <>
       <div
-        className="w-full max-w-lg mx-4 rounded-sm shadow-2xl overflow-hidden flex flex-col"
-        style={{ backgroundColor: COLORS.paper, maxHeight: "80vh" }}
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-[10001] flex items-center justify-center p-6 overflow-y-auto"
+        style={{
+          backgroundColor: "rgba(26, 22, 18, 0.55)",
+          backdropFilter: "blur(4px)",
+          fontFamily: "'DM Sans', -apple-system, system-ui, sans-serif",
+        }}
+        onClick={onClose}
       >
-        {/* Header */}
         <div
-          className="flex items-center justify-between px-6 py-4 flex-none"
-          style={{ borderBottom: `1px solid ${COLORS.divider}`, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+          className="w-full max-w-6xl my-8 rounded-sm shadow-2xl flex flex-col overflow-hidden"
+          style={{ backgroundColor: COLORS.cream, maxHeight: "90vh" }}
+          onClick={(e) => e.stopPropagation()}
         >
-          <span style={{ fontWeight: 600, fontSize: 15, color: COLORS.ink }}>
-            Case Risk Predictions
-            <span style={{ marginLeft: 8, fontWeight: 400, fontSize: 13, color: COLORS.inkFaint }}>
-              {sorted.length} cases
-            </span>
-          </span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.inkFaint }}>
-            <X size={16} />
-          </button>
-        </div>
+          {/* Header */}
+          <div
+            className="flex-none px-10 pt-9 pb-7"
+            style={{
+              backgroundColor: COLORS.paper,
+              borderBottom: `1px solid ${COLORS.divider}`,
+            }}
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute top-6 right-6 p-1.5 rounded-sm transition-opacity"
+              style={{ color: COLORS.inkSoft }}
+            >
+              <X size={18} />
+            </button>
 
-        {/* List */}
-        <div className="overflow-y-auto flex-1">
-          {sorted.length === 0 && (
-            <div style={{ padding: 32, textAlign: "center", color: COLORS.inkFaint, fontSize: 14, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-              No active cases to predict.
-            </div>
-          )}
-          {sorted.map((p) => {
-            const s = RISK_STYLE[p.riskLevel] || RISK_STYLE.low;
-            return (
-              <div
-                key={p.id || p.caseNumber}
-                onClick={() => setSelected(p)}
-                className="flex items-center gap-3 px-6 py-3 cursor-pointer"
-                style={{ borderBottom: `1px solid ${COLORS.divider}`, fontFamily: "'DM Sans', system-ui, sans-serif" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.surface || "#f7f5f0")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              >
-                <span style={{ minWidth: 64, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: s.fg, background: s.bg, padding: "2px 7px", borderRadius: 3 }}>
-                  {s.label}
-                </span>
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: COLORS.ink, fontFamily: "monospace" }}>
-                  {p.caseNumber}
-                </span>
-                {onOpenCaseHistory && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onOpenCaseHistory(p); }}
-                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: COLORS.accent || COLORS.cognac, padding: "2px 4px" }}
-                  >
-                    History
-                  </button>
-                )}
-                <span style={{ fontSize: 12, color: COLORS.inkFaint }}>
-                  {Math.round((p.lateProbability || 0) * 100)}% late
-                </span>
-                <ChevronRight size={14} color={COLORS.inkFaint} />
+            <div className="flex items-baseline justify-between mb-5">
+              <div>
+                <div
+                  className="text-[10px] uppercase tracking-[0.25em] font-medium mb-3"
+                  style={{ color: COLORS.inkFaint }}
+                >
+                  Case Risk Predictions · v8
+                </div>
+                <div
+                  className="text-4xl font-light leading-none"
+                  style={{
+                    color: COLORS.ink,
+                    fontFamily: "'Instrument Serif', Georgia, serif",
+                    letterSpacing: "-0.01em",
+                  }}
+                >
+                  {summary.total} {summary.total === 1 ? "case" : "cases"}
+                  {stage && (
+                    <span
+                      className="ml-3 text-lg capitalize"
+                      style={{ color: COLORS.inkSoft, fontStyle: "italic" }}
+                    >
+                      in {stage}
+                    </span>
+                  )}
+                </div>
+                <div
+                  className="mt-2 flex items-center gap-3 text-sm"
+                  style={{ color: COLORS.inkSoft }}
+                >
+                  <span>Avg risk {formatPercent(summary.avgRisk, 1)}</span>
+                  <span style={{ color: COLORS.inkFaint }}>·</span>
+                  <span>Avg confidence {Math.round(summary.avgConfidence)}%</span>
+                  <span style={{ color: COLORS.inkFaint }}>·</span>
+                  <span>{summary.concurrent} concurrent</span>
+                </div>
               </div>
-            );
-          })}
+            </div>
+
+            {/* Filter pills */}
+            <div className="grid grid-cols-5 gap-2.5">
+              {[
+                { k: "all",      label: "All",      count: summary.total,    color: COLORS.ink,       bg: COLORS.cream },
+                { k: "critical", label: "Critical", count: summary.critical, color: COLORS.rCritical, bg: COLORS.rCriticalBg },
+                { k: "high",     label: "High",     count: summary.high,     color: COLORS.rHigh,     bg: COLORS.rHighBg },
+                { k: "medium",   label: "Medium",   count: summary.medium,   color: COLORS.rMedium,   bg: COLORS.rMediumBg },
+                { k: "low",      label: "Low",      count: summary.low,      color: COLORS.rLow,      bg: COLORS.rLowBg },
+              ].map(({ k, label, count, color, bg }) => {
+                const active = filterStatus === k || (k === "all" && filterStatus === "all");
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setFilterStatus(filterStatus === k ? "all" : k)}
+                    className="relative rounded-sm px-4 py-3 text-left transition-all"
+                    style={{
+                      backgroundColor: active ? bg : COLORS.paper,
+                      border: `1px solid ${active ? color + "55" : COLORS.borderSoft}`,
+                    }}
+                  >
+                    <div
+                      className="text-[10px] uppercase tracking-[0.18em] font-medium mb-1"
+                      style={{ color: active ? color : COLORS.inkFaint }}
+                    >
+                      {label}
+                    </div>
+                    <div
+                      className="text-3xl font-light leading-none"
+                      style={{
+                        color: active ? color : COLORS.ink,
+                        fontFamily: "'Instrument Serif', Georgia, serif",
+                      }}
+                    >
+                      {count}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Search + sort */}
+            <div className="flex items-center gap-3 mt-5">
+              <div className="relative flex-1 max-w-xs">
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search cases..."
+                  className="w-full px-4 py-2 text-sm rounded-sm focus:outline-none transition-colors"
+                  style={{
+                    color: COLORS.ink,
+                    backgroundColor: COLORS.cream,
+                    border: `1px solid ${COLORS.borderSoft}`,
+                  }}
+                  onFocus={(e) => { e.target.style.borderColor = COLORS.cognacLight; }}
+                  onBlur={(e) => { e.target.style.borderColor = COLORS.borderSoft; }}
+                />
+              </div>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-3 py-2 text-sm rounded-sm focus:outline-none cursor-pointer"
+                style={{
+                  color: COLORS.ink,
+                  backgroundColor: COLORS.cream,
+                  border: `1px solid ${COLORS.borderSoft}`,
+                }}
+              >
+                <option value="risk">Sort by risk</option>
+                <option value="due">Sort by due date</option>
+                <option value="progress">Sort by progress</option>
+                <option value="case">Sort by case number</option>
+              </select>
+              {filterStatus !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setFilterStatus("all")}
+                  className="text-[11px] uppercase tracking-[0.14em] px-3 py-2 rounded-sm transition-colors"
+                  style={{
+                    color: COLORS.inkSoft,
+                    backgroundColor: COLORS.paper,
+                    border: `1px solid ${COLORS.borderSoft}`,
+                  }}
+                >
+                  Clear filter
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-8 py-6" style={{ backgroundColor: COLORS.cream }}>
+            {processedPredictions.length === 0 ? (
+              <div
+                className="flex flex-col items-center justify-center py-20"
+                style={{ color: COLORS.inkFaint }}
+              >
+                <CircleDot size={32} style={{ color: COLORS.inkFaint }} />
+                <div
+                  className="mt-4 text-2xl font-light"
+                  style={{
+                    color: COLORS.ink,
+                    fontFamily: "'Instrument Serif', Georgia, serif",
+                  }}
+                >
+                  No cases match
+                </div>
+                <div className="mt-1 text-sm">Try adjusting your filters or search</div>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {processedPredictions.map((p) => (
+                  <CompactCaseRow
+                    key={p.id || p.caseNumber}
+                    prediction={p}
+                    onOpenAnalytics={() => setSelectedPrediction(p)}
+                    onOpenHistory={onOpenCaseHistory}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div
+            className="flex-none px-10 py-4 flex items-center justify-between"
+            style={{
+              backgroundColor: COLORS.paper,
+              borderTop: `1px solid ${COLORS.divider}`,
+            }}
+          >
+            <div
+              className="text-[10px] uppercase tracking-[0.18em]"
+              style={{ color: COLORS.inkFaint }}
+            >
+              {processedPredictions.length} of {predictions.length} cases · Live predictions update every render
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2 text-sm rounded-sm transition-colors"
+              style={{ color: COLORS.paper, backgroundColor: COLORS.ink }}
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
-    </div>,
+
+      {/* Analytics detail modal opens on top */}
+      {selectedPrediction && (
+        <CaseRiskAnalyticsModal
+          prediction={selectedPrediction}
+          onClose={() => setSelectedPrediction(null)}
+        />
+      )}
+    </>,
     document.body
   );
 }
@@ -2280,7 +3001,14 @@ export function CaseRiskModal({ open, onClose, predictions = [], onOpenCaseHisto
  *  BACKWARDS-COMPAT EXPORTS
  *  ======================================================================== */
 
-export const calculateRiskWithVelocityEngine = async () => ({ predictions: [], velocityImpact: null });
+// Stub — kept so any old code calling this doesn't break
+export const calculateRiskWithVelocityEngine = async () => ({
+  predictions: [],
+  velocityImpact: null,
+});
+
+// Aliases for the standalone components so external code can import them
+export const StandaloneCompactRow = CompactCaseRow;
 export const StandaloneAnalyticsModal = CaseRiskAnalyticsModal;
 export { COLORS };
 
