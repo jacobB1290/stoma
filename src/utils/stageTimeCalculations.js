@@ -360,10 +360,11 @@ export const calculateStageStatistics = async (stage, onProgress) => {
 
     // Fetch cases
     console.log("[calculateStageStatistics] Fetching cases from database...");
-    const { data: casesWithHistory, error: dbError } = await db
+    const { data: rawCases, error: dbError } = await db
       .from("cases")
       .select("*, case_history(*)")
       .eq("department", "General")
+      .eq("archived", false)
       .order("created_at", { ascending: false });
 
     if (dbError) {
@@ -371,13 +372,19 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       throw dbError;
     }
 
-    if (!casesWithHistory) {
+    if (!rawCases) {
       console.log("[calculateStageStatistics] No cases returned from database");
       return null;
     }
 
+    // Filter out sentinel rows used for update/sys broadcast signaling
+    const casesWithHistory = rawCases.filter((r) => {
+      const cn = r.casenumber?.trim().toLowerCase();
+      return cn !== "update" && cn !== "syscmd" && cn !== "force-cmd";
+    });
+
     console.log(
-      `[calculateStageStatistics] Fetched ${casesWithHistory.length} cases`
+      `[calculateStageStatistics] Fetched ${casesWithHistory.length} cases (${rawCases.length - casesWithHistory.length} sentinel rows filtered)`
     );
 
     // Data quality thresholds
