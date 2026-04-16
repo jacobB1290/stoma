@@ -387,6 +387,33 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       `[calculateStageStatistics] Fetched ${casesWithHistory.length} cases (${rawCases.length - casesWithHistory.length} sentinel rows filtered)`
     );
 
+    // Board-parity list: every non-completed case whose stage-* modifier matches the target stage.
+    // Feeds risk predictions directly so brand-new cases (which lack stage history or trip
+    // MIN_STAGE_TIME) still surface in the risk modal.
+    const allCasesInStage = casesWithHistory
+      .filter((c) => !c.completed && getStageFromModifiers(c.modifiers || []) === stage)
+      .map((c) => ({
+        id: c.id,
+        caseNumber: c.casenumber,
+        casenumber: c.casenumber,
+        caseType: c.modifiers?.includes("bbs")
+          ? "bbs"
+          : c.modifiers?.includes("flex")
+          ? "flex"
+          : "general",
+        modifiers: c.modifiers || [],
+        created_at: c.created_at,
+        due: c.due,
+        completed: false,
+        completed_at: c.completed_at,
+        priority: !!c.priority,
+        rush: c.modifiers?.includes("rush") || !!c.priority,
+        department: c.department,
+        case_history: c.case_history || [],
+        isActive: true,
+        currentStage: stage,
+      }));
+
     // Data quality thresholds
     const MIN_STAGE_TIME = {
       design: 10 * 60 * 1000,
@@ -553,6 +580,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       return {
         noData: true,
         excludedCases,
+        allCasesInStage,
         message: "No valid cases found for this stage",
       };
     }
@@ -567,6 +595,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       casesByType,
       casesWithHistory
     );
+    stats.allCasesInStage = allCasesInStage;
 
     console.log("[calculateStageStatistics] Complete. Returning stats:", {
       averageTime: stats.averageTime,

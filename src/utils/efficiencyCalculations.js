@@ -1352,93 +1352,18 @@ export const calculateDepartmentEfficiency = async (
   const completedCases = allValidCases.filter((c) => !c.isActive);
   const activeCases = allValidCases.filter((c) => c.isActive);
 
-  // CRITICAL FIX: Get ALL active cases for risk predictions (including excluded)
-  // But ONLY cases that are CURRENTLY in this stage
-  let allActiveCasesForRisk = [];
+  // Risk predictions use the board-parity list built in stageTimeCalculations:
+  // every non-completed case whose stage-* modifier matches currentStage.
+  // This ensures the risk modal shows the same cases the board shows, including
+  // brand-new cases that haven't accrued enough stage history to pass statistical
+  // validation or appear in caseDetails/excludedCases.
+  let allActiveCasesForRisk = Array.isArray(stageStatistics.allCasesInStage)
+    ? [...stageStatistics.allCasesInStage]
+    : [];
 
-  // Helper function to check if a case is currently in the specified stage
-  const isCurrentlyInStage = (caseData, targetStage) => {
-    // Check modifiers first (most reliable for current state)
-    const modifiers = caseData.modifiers || [];
-    const stageModifier = modifiers.find((m) => m.startsWith("stage-"));
-
-    if (stageModifier) {
-      const currentCaseStage = stageModifier.replace("stage-", "");
-      return currentCaseStage === targetStage;
-    }
-
-    // Fallback: check if it's active and in this stage based on visits
-    if (caseData.isActive && caseData.currentStage) {
-      return caseData.currentStage === targetStage;
-    }
-
-    // If no stage info, don't include
-    return false;
-  };
-
-  // First, add all active cases from caseDetails that are CURRENTLY in this stage
-  if (stageStatistics.caseDetails) {
-    stageStatistics.caseDetails.forEach((caseDetail) => {
-      // Must be active AND currently in this stage
-      if (caseDetail.isActive && !caseDetail.completed) {
-        // Check if actually in current stage
-        if (isCurrentlyInStage(caseDetail, currentStage)) {
-          allActiveCasesForRisk.push(caseDetail);
-        }
-      }
-    });
-  }
-
-  // Second, add active excluded cases that are currently in this stage
-  if (stageStatistics.excludedCases) {
-    stageStatistics.excludedCases.forEach((excludedCase) => {
-      // Check if this excluded case is active and in current stage
-      const caseId = excludedCase.caseId || excludedCase.id;
-
-      // Skip if already added
-      const exists = allActiveCasesForRisk.find((c) => c.id === caseId);
-      if (exists) return;
-
-      // Must be active (not completed, has visits)
-      const isActive =
-        !excludedCase.isCompleted &&
-        !excludedCase.completed &&
-        excludedCase.visitCount > 0;
-
-      if (isActive) {
-        // Check if currently in this stage
-        const caseWithModifiers = {
-          ...excludedCase,
-          modifiers: excludedCase.modifiers || [],
-        };
-
-        if (isCurrentlyInStage(caseWithModifiers, currentStage)) {
-          allActiveCasesForRisk.push({
-            ...excludedCase,
-            id: caseId,
-            caseNumber: excludedCase.caseNumber,
-            isActive: true,
-            currentStage: currentStage,
-            timeInStage: excludedCase.timeInStage || 0,
-            modifiers: excludedCase.modifiers || [],
-            priority: excludedCase.priority || false,
-            rush: excludedCase.rush || false,
-            due: excludedCase.due,
-            case_history: excludedCase.case_history || [],
-            created_at: excludedCase.created_at,
-            caseType: excludedCase.caseType || "general",
-            completed: false,
-          });
-        }
-      }
-    });
-  }
-
-  // If we still don't have cases, fallback to filtered active cases
-  // (these should already be properly filtered for the current stage)
   if (allActiveCasesForRisk.length === 0) {
     console.warn(
-      "No active cases found including excluded ones, using filtered active cases"
+      "[Risk Predictions] allCasesInStage missing or empty, falling back to validCases"
     );
     allActiveCasesForRisk = activeCases;
   }
