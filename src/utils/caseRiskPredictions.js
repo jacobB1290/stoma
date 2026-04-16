@@ -1626,7 +1626,7 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 overflow-y-auto flex items-start justify-center p-6"
+      className="fixed inset-0 z-[10002] overflow-y-auto flex items-start justify-center p-6"
       style={{
         backgroundColor: "rgba(26, 22, 18, 0.55)",
         backdropFilter: "blur(4px)",
@@ -2185,7 +2185,10 @@ export function CaseRiskModal({ open, onClose, predictions = [], onOpenCaseHisto
   if (!open) return null;
 
   if (selected) {
-    return <CaseRiskAnalyticsModal prediction={selected} onClose={() => setSelected(null)} />;
+    return createPortal(
+      <CaseRiskAnalyticsModal prediction={selected} onClose={() => setSelected(null)} />,
+      document.body
+    );
   }
 
   const order = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -2196,7 +2199,7 @@ export function CaseRiskModal({ open, onClose, predictions = [], onOpenCaseHisto
   return createPortal(
     <div
       style={{
-        position: "fixed", inset: 0, zIndex: 9999,
+        position: "fixed", inset: 0, zIndex: 10001,
         background: "rgba(0,0,0,0.55)", display: "flex",
         alignItems: "center", justifyContent: "center",
       }}
