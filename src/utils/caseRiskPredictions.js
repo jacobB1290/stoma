@@ -230,14 +230,13 @@ function snapToMinutes(d, step = 5) {
 
 export function dueEOD(dueStr) {
   if (!dueStr) return null;
-  // Parse date-only strings ("YYYY-MM-DD") as local dates to avoid UTC-offset
-  // shifting the date by a day — matches the parseLocalDate pattern in date.js.
+  // Split on "T" first so "YYYY-MM-DD" strings aren't parsed as UTC midnight,
+  // which would shift the date back one day in UTC- timezones (matches date.js parseLocalDate).
   const base = String(dueStr).split("T")[0];
   const parts = base.split("-").map(Number);
   if (parts.length === 3 && !parts.some(isNaN)) {
     return new Date(parts[0], parts[1] - 1, parts[2], 17, 0, 0, 0);
   }
-  // Fallback for ISO timestamps that include time components
   const d = new Date(dueStr);
   if (isNaN(d)) return null;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 17, 0, 0, 0);
@@ -854,47 +853,15 @@ function enforceMonotonic(q) {
 }
 
 function interpolatePLate(etas, due) {
-  // Treat the 4 quantiles as 4 known points on the CDF:
-  //   F(p10) = 0.10, F(p50) = 0.50, F(p75) = 0.75, F(p90) = 0.90
-  // For any due date, interpolate/extrapolate the CDF value at that time.
-  // P(late) = 1 − F(due)  (probability the case finishes AFTER the due date)
+  // Map due date's position in the p10..p90 range to a probability of being late
   if (!due) return 0.05;
-
-  const points = [
-    { ms: etas.p10.getTime(), q: 0.10 },
-    { ms: etas.p50.getTime(), q: 0.50 },
-    { ms: etas.p75.getTime(), q: 0.75 },
-    { ms: etas.p90.getTime(), q: 0.90 },
-  ];
   const dueMs = due.getTime();
-
-  let cdf;
-  if (dueMs <= points[0].ms) {
-    // Before p10 — extrapolate using slope of the p10→p50 segment
-    const segMs = Math.max(1, points[1].ms - points[0].ms);
-    const slope = (points[1].q - points[0].q) / segMs; // quantile per ms
-    cdf = points[0].q - slope * (points[0].ms - dueMs);
-  } else if (dueMs >= points[3].ms) {
-    // Past p90 — extrapolate using slope of the p75→p90 segment
-    const segMs = Math.max(1, points[3].ms - points[2].ms);
-    const slope = (points[3].q - points[2].q) / segMs;
-    cdf = points[3].q + slope * (dueMs - points[3].ms);
-  } else {
-    // Inside the range — linear interpolation between adjacent known points
-    cdf = points[0].q;
-    for (let i = 0; i < points.length - 1; i++) {
-      if (dueMs >= points[i].ms && dueMs <= points[i + 1].ms) {
-        const segMs = Math.max(1, points[i + 1].ms - points[i].ms);
-        const frac = (dueMs - points[i].ms) / segMs;
-        cdf = points[i].q + frac * (points[i + 1].q - points[i].q);
-        break;
-      }
-    }
-  }
-
-  // Clamp to a sensible range so tails don't produce pathological values
-  cdf = Math.max(0.005, Math.min(0.995, cdf));
-  return 1 - cdf;
+  const p10 = etas.p10.getTime(), p50 = etas.p50.getTime(), p75 = etas.p75.getTime(), p90 = etas.p90.getTime();
+  if (dueMs <= p10) return 0.92;
+  if (dueMs <= p50) return 0.65 + 0.27 * (p50 - dueMs) / Math.max(1, p50 - p10);
+  if (dueMs <= p75) return 0.35 + 0.30 * (p75 - dueMs) / Math.max(1, p75 - p50);
+  if (dueMs <= p90) return 0.12 + 0.23 * (p90 - dueMs) / Math.max(1, p90 - p75);
+  return Math.max(0.02, 0.12 * Math.exp(-(dueMs - p90) / Math.max(1, p90 - p75)));
 }
 
 /** ========================================================================
@@ -1072,7 +1039,6 @@ const RISK_STYLE = {
   low:      { fg: COLORS.rLow,      bg: COLORS.rLowBg,      label: "Low" },
 };
 
-// Exported formatters (used internally and by callers)
 export function formatHours(h) {
   if (h === undefined || h === null || isNaN(h)) return "—";
   if (h < 1) return `${Math.round(h * 60)}m`;
@@ -1083,7 +1049,7 @@ export function formatHours(h) {
   return `${Math.round(d)}d`;
 }
 
-export function formatDuration(ms) {
+function formatDuration(ms) {
   if (!ms || ms < 0) return "—";
   const h = ms / 3600000;
   if (h < 1) return `${Math.round(ms / 60000)}m`;
@@ -1092,43 +1058,18 @@ export function formatDuration(ms) {
   return `${Math.round(d * 10) / 10}d`;
 }
 
-export function formatDate(d, withTime = true) {
+function formatDate(d, withTime = true) {
   if (!d) return "—";
-  const date = d instanceof Date ? d : new Date(d);
-  if (isNaN(date)) return "—";
   const opts = withTime
     ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
     : { month: "short", day: "numeric", year: "numeric" };
-  return date.toLocaleString("en-US", opts);
+  return d.toLocaleString("en-US", opts);
 }
 
-export function formatPercent(x, digits = 0) {
+function formatPercent(x, digits = 0) {
   if (x === undefined || x === null || isNaN(x)) return "—";
-  return `${Number(x).toFixed(digits)}%`;
+  return `${x.toFixed(digits)}%`;
 }
-
-export function formatRelativeTime(date, reference = new Date()) {
-  if (!date) return "—";
-  const d = date instanceof Date ? date : new Date(date);
-  if (isNaN(d)) return "—";
-  const diffMs = d - reference;
-  const isPast = diffMs < 0;
-  const absMs = Math.abs(diffMs);
-  const hours = absMs / 3600000;
-  const days = hours / 24;
-  let text;
-  if (hours < 1) text = "< 1h";
-  else if (hours < 24) text = `${Math.round(hours)}h`;
-  else if (days < 7) text = `${Math.round(days)}d`;
-  else text = `${Math.round(days / 7)}w`;
-  return isPast ? `${text} ago` : `in ${text}`;
-}
-
-export function daySpanHours(a, b) { return (b - a) / 3600000; }
-
-// Models getters/setters for testing/mocking
-export function getModels() { return XGB_MODELS; }
-export function setModels(models) { XGB_MODELS = models; }
 
 /** ========================================================================
  *  UI COMPONENTS
@@ -2238,566 +2179,99 @@ function RingGauge({ value, max, color, size = 120 }) {
 }
 
 /** ========================================================================
- *  LIST MODAL — beautifully designed, v8-aware list of all cases
+ *  CaseRiskModal — list-style wrapper used by EfficiencyModalUI
+ *  Accepts the legacy { open, onClose, predictions, stage, onOpenCaseHistory }
+ *  interface and drills into CaseRiskAnalyticsModal for per-case detail.
+ *  Portaled to document.body so z-index is in the root stacking context.
  *  ======================================================================== */
 
-function getStatusFromPrediction(p) {
-  // Risk level already comes from the model; elevate to "critical" if overdue
-  const now = new Date();
-  const due = p.dueDate ? new Date(p.dueDate) : p.dueDateCalc;
-  const isOverdue = due && due < now;
-  if (isOverdue && p.riskLevel === "low") return "medium";
-  if (isOverdue) return "critical";
-  return p.riskLevel || "low";
-}
-
-export function ProgressBar({ value, size = "md", color }) {
-  const heights = { sm: 2, md: 4, lg: 6 };
-  const h = heights[size] ?? 4;
-  const percent = Math.max(0, Math.min(100, value || 0));
-  return (
-    <div
-      className="w-full rounded-full overflow-hidden"
-      style={{ height: h, backgroundColor: COLORS.cream }}
-    >
-      <div
-        className="h-full rounded-full transition-all duration-500"
-        style={{ width: `${percent}%`, backgroundColor: color || COLORS.cognac }}
-      />
-    </div>
-  );
-}
-
-/** Alias for backwards compatibility with v7's StatusBadge API */
-export const StatusBadge = ({ status, size = "md" }) => (
-  <RiskBadge level={status} size={size} />
-);
-
-function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
-  const status = getStatusFromPrediction(prediction);
-  const style = RISK_STYLE[status] || RISK_STYLE.low;
-  const now = new Date();
-  const dueDate = prediction.dueDate ? new Date(prediction.dueDate) : prediction.dueDateCalc;
-  const isOverdue = dueDate && dueDate < now;
-
-  const timeDisplay = (() => {
-    if (isOverdue) {
-      return { primary: "OVERDUE", secondary: formatRelativeTime(dueDate), urgent: true };
-    }
-    if (prediction.willBeLate) {
-      return {
-        primary: `Late ${formatHours(prediction.daysLate * 24)}`,
-        secondary: `Due ${formatRelativeTime(dueDate)}`,
-        urgent: true,
-      };
-    }
-    return {
-      primary: formatRelativeTime(dueDate),
-      secondary: prediction.slackDays > 0 ? `${formatHours(prediction.slackDays * 24)} buffer` : "On time",
-      urgent: false,
-    };
-  })();
-
-  const latePct = Math.round((prediction.lateProbability || 0) * 100);
-
-  return (
-    <button
-      type="button"
-      onClick={onOpenAnalytics}
-      className="group relative w-full text-left rounded-sm transition-all"
-      style={{
-        backgroundColor: COLORS.paper,
-        border: `1px solid ${COLORS.borderSoft}`,
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = COLORS.cognacLight; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = COLORS.borderSoft; }}
-    >
-      {/* Left accent stripe */}
-      <div
-        className="absolute left-0 top-0 bottom-0"
-        style={{ width: 3, backgroundColor: style.fg }}
-      />
-
-      <div className="pl-5 pr-4 py-4">
-        <div className="flex items-center gap-5">
-          {/* Risk badge */}
-          <div className="w-24 flex-shrink-0">
-            <RiskBadge level={status} size="sm" />
-          </div>
-
-          {/* Case number + type */}
-          <div className="w-40 flex-shrink-0">
-            <div
-              className="text-xl leading-tight"
-              style={{
-                fontFamily: "'Instrument Serif', Georgia, serif",
-                color: COLORS.ink,
-                fontWeight: 400,
-                letterSpacing: "-0.005em",
-              }}
-            >
-              {prediction.caseNumber}
-            </div>
-            <div
-              className="text-[10px] uppercase tracking-[0.15em] mt-0.5"
-              style={{ color: COLORS.inkFaint }}
-            >
-              {prediction.caseType || "general"}
-            </div>
-          </div>
-
-          {/* Due / late info */}
-          <div className="flex-1 min-w-0">
-            <div
-              className="text-sm"
-              style={{
-                color: timeDisplay.urgent ? style.fg : COLORS.ink,
-                fontWeight: timeDisplay.urgent ? 500 : 400,
-                fontFamily: timeDisplay.urgent
-                  ? "'DM Sans', sans-serif"
-                  : "'Instrument Serif', Georgia, serif",
-                fontSize: timeDisplay.urgent ? 13 : 16,
-              }}
-            >
-              {timeDisplay.primary}
-            </div>
-            <div className="text-[11px] mt-0.5" style={{ color: COLORS.inkSoft }}>
-              {timeDisplay.secondary}
-            </div>
-          </div>
-
-          {/* Progress */}
-          <div className="w-28 flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <ProgressBar value={prediction.progressPercent || 0} size="sm" color={style.fg} />
-              <span
-                className="text-[11px] tabular-nums"
-                style={{
-                  color: COLORS.inkSoft,
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}
-              >
-                {Math.round(prediction.progressPercent || 0)}%
-              </span>
-            </div>
-            <div
-              className="text-[10px] uppercase tracking-[0.15em] mt-1"
-              style={{ color: COLORS.inkFaint }}
-            >
-              Elapsed
-            </div>
-          </div>
-
-          {/* Flags */}
-          <div className="flex items-center gap-1.5 w-20 justify-end flex-shrink-0">
-            {prediction.isRush && (
-              <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
-                style={{
-                  color: COLORS.cognac,
-                  backgroundColor: COLORS.cognacGlow,
-                  fontWeight: 500,
-                }}
-              >
-                <Zap size={9} />
-                Rush
-              </span>
-            )}
-            {prediction.onHold && (
-              <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
-                style={{
-                  color: COLORS.brass,
-                  backgroundColor: COLORS.rMediumBg,
-                  fontWeight: 500,
-                }}
-              >
-                Hold
-              </span>
-            )}
-          </div>
-
-          {/* Late probability — big, beautiful */}
-          <div className="w-20 flex-shrink-0 text-right">
-            <div
-              className="leading-none"
-              style={{
-                fontFamily: "'Instrument Serif', Georgia, serif",
-                fontSize: 26,
-                fontWeight: 300,
-                color: style.fg,
-              }}
-            >
-              {latePct}
-              <span style={{ fontSize: 14, color: COLORS.inkFaint }}>%</span>
-            </div>
-            <div
-              className="text-[10px] uppercase tracking-[0.15em] mt-0.5"
-              style={{ color: COLORS.inkFaint }}
-            >
-              Late risk
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {onOpenHistory && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onOpenHistory(prediction.id, prediction.caseNumber); }}
-                className="text-[11px] uppercase tracking-[0.12em] px-2.5 py-1 rounded-sm transition-colors"
-                style={{
-                  color: COLORS.inkSoft,
-                  border: `1px solid ${COLORS.borderSoft}`,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = COLORS.cognac; e.currentTarget.style.borderColor = COLORS.cognacLight; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = COLORS.inkSoft; e.currentTarget.style.borderColor = COLORS.borderSoft; }}
-              >
-                History
-              </button>
-            )}
-            <ChevronRight
-              size={16}
-              style={{ color: COLORS.inkFaint }}
-              className="transition-transform group-hover:translate-x-0.5"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom progress sliver */}
-      <div style={{ height: 1.5, backgroundColor: COLORS.divider }}>
-        <div
-          className="h-full transition-all duration-500"
-          style={{
-            width: `${Math.min(100, prediction.progressPercent || 0)}%`,
-            backgroundColor: style.fg,
-            opacity: 0.6,
-          }}
-        />
-      </div>
-    </button>
-  );
-}
-
-/**
- * CaseRiskModal — the list view. Shows all cases with search, filter, sort.
- * Opens CaseRiskAnalyticsModal on click for full detail.
- */
-export function CaseRiskModal({
-  open,
-  onClose,
-  predictions = [],
-  stage,
-  onOpenCaseHistory,
-  onDataProcessed,
-}) {
-  const [query, setQuery] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [sortBy, setSortBy] = useState("risk");
-  const [selectedPrediction, setSelectedPrediction] = useState(null);
-
-  // Inject fonts once (safe no-op if already present)
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const id = "v8-fonts";
-    if (document.getElementById(id)) return;
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap";
-    document.head.appendChild(link);
-  }, []);
-
-  const processedPredictions = useMemo(() => {
-    let filtered = [...(predictions || [])];
-    if (filterStatus !== "all") {
-      filtered = filtered.filter((p) => getStatusFromPrediction(p) === filterStatus);
-    }
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      filtered = filtered.filter((p) =>
-        String(p.caseNumber || "").toLowerCase().includes(q) ||
-        String(p.caseType || "").toLowerCase().includes(q)
-      );
-    }
-    const order = { critical: 0, high: 1, medium: 2, low: 3 };
-    filtered.sort((a, b) => {
-      if (sortBy === "risk") {
-        return (
-          order[getStatusFromPrediction(a)] - order[getStatusFromPrediction(b)] ||
-          (b.lateProbability || 0) - (a.lateProbability || 0)
-        );
-      }
-      if (sortBy === "due") {
-        const aD = a.dueDateCalc || (a.dueDate ? new Date(a.dueDate) : null);
-        const bD = b.dueDateCalc || (b.dueDate ? new Date(b.dueDate) : null);
-        const at = aD ? aD.getTime() : Infinity;
-        const bt = bD ? bD.getTime() : Infinity;
-        return at - bt;
-      }
-      if (sortBy === "progress") return (a.progressPercent || 0) - (b.progressPercent || 0);
-      if (sortBy === "case")     return String(a.caseNumber || "").localeCompare(String(b.caseNumber || ""));
-      return 0;
-    });
-    return filtered;
-  }, [predictions, filterStatus, query, sortBy]);
-
-  const summary = useMemo(() => ({
-    total: predictions.length,
-    critical: predictions.filter((p) => getStatusFromPrediction(p) === "critical").length,
-    high:     predictions.filter((p) => getStatusFromPrediction(p) === "high").length,
-    medium:   predictions.filter((p) => getStatusFromPrediction(p) === "medium").length,
-    low:      predictions.filter((p) => getStatusFromPrediction(p) === "low").length,
-    avgRisk:  predictions.length
-      ? (predictions.reduce((s, p) => s + (p.lateProbability || 0), 0) / predictions.length) * 100
-      : 0,
-    avgConfidence: predictions.length
-      ? predictions.reduce((s, p) => s + (p.confidenceScore || 0), 0) / predictions.length
-      : 0,
-    concurrent: predictions[0]?.backlogCount || 0,
-  }), [predictions]);
-
-  useEffect(() => {
-    onDataProcessed?.({
-      processedPredictions, summary, stage, filterStatus, query,
-      rawPredictions: predictions,
-    });
-  }, [processedPredictions, summary, stage, filterStatus, query, predictions, onDataProcessed]);
+export function CaseRiskModal({ open, onClose, predictions = [], onOpenCaseHistory }) {
+  const [selected, setSelected] = React.useState(null);
 
   if (!open) return null;
 
+  // Detail view — portaled so it sits above the list backdrop
+  if (selected) {
+    return createPortal(
+      <CaseRiskAnalyticsModal prediction={selected} onClose={() => setSelected(null)} />,
+      document.body
+    );
+  }
+
+  const order = { critical: 0, high: 1, medium: 2, low: 3 };
+  const sorted = [...predictions].sort(
+    (a, b) => order[a.riskLevel] - order[b.riskLevel] || b.lateProbability - a.lateProbability
+  );
+
   return createPortal(
-    <>
+    <div
+      className="fixed inset-0 z-[10001] flex items-center justify-center"
+      style={{ backgroundColor: "rgba(26,22,18,0.55)", backdropFilter: "blur(4px)" }}
+      onClick={onClose}
+    >
       <div
-        className="fixed inset-0 z-[10001] flex items-center justify-center p-6 overflow-y-auto"
-        style={{
-          backgroundColor: "rgba(26, 22, 18, 0.55)",
-          backdropFilter: "blur(4px)",
-          fontFamily: "'DM Sans', -apple-system, system-ui, sans-serif",
-        }}
-        onClick={onClose}
+        className="w-full max-w-lg mx-4 rounded-sm shadow-2xl overflow-hidden flex flex-col"
+        style={{ backgroundColor: COLORS.paper, maxHeight: "80vh" }}
+        onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div
-          className="w-full max-w-6xl my-8 rounded-sm shadow-2xl flex flex-col overflow-hidden"
-          style={{ backgroundColor: COLORS.cream, maxHeight: "90vh" }}
-          onClick={(e) => e.stopPropagation()}
+          className="flex items-center justify-between px-6 py-4 flex-none"
+          style={{ borderBottom: `1px solid ${COLORS.divider}`, fontFamily: "'DM Sans', system-ui, sans-serif" }}
         >
-          {/* Header */}
-          <div
-            className="flex-none px-10 pt-9 pb-7"
-            style={{
-              backgroundColor: COLORS.paper,
-              borderBottom: `1px solid ${COLORS.divider}`,
-            }}
-          >
-            <button
-              type="button"
-              onClick={onClose}
-              className="absolute top-6 right-6 p-1.5 rounded-sm transition-opacity"
-              style={{ color: COLORS.inkSoft }}
-            >
-              <X size={18} />
-            </button>
+          <span style={{ fontWeight: 600, fontSize: 15, color: COLORS.ink }}>
+            Case Risk Predictions
+            <span style={{ marginLeft: 8, fontWeight: 400, fontSize: 13, color: COLORS.inkFaint }}>
+              {sorted.length} cases
+            </span>
+          </span>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.inkFaint }}>
+            <X size={16} />
+          </button>
+        </div>
 
-            <div className="flex items-baseline justify-between mb-5">
-              <div>
-                <div
-                  className="text-[10px] uppercase tracking-[0.25em] font-medium mb-3"
-                  style={{ color: COLORS.inkFaint }}
-                >
-                  Case Risk Predictions · v8
-                </div>
-                <div
-                  className="text-4xl font-light leading-none"
-                  style={{
-                    color: COLORS.ink,
-                    fontFamily: "'Instrument Serif', Georgia, serif",
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  {summary.total} {summary.total === 1 ? "case" : "cases"}
-                  {stage && (
-                    <span
-                      className="ml-3 text-lg capitalize"
-                      style={{ color: COLORS.inkSoft, fontStyle: "italic" }}
-                    >
-                      in {stage}
-                    </span>
-                  )}
-                </div>
-                <div
-                  className="mt-2 flex items-center gap-3 text-sm"
-                  style={{ color: COLORS.inkSoft }}
-                >
-                  <span>Avg risk {formatPercent(summary.avgRisk, 1)}</span>
-                  <span style={{ color: COLORS.inkFaint }}>·</span>
-                  <span>Avg confidence {Math.round(summary.avgConfidence)}%</span>
-                  <span style={{ color: COLORS.inkFaint }}>·</span>
-                  <span>{summary.concurrent} concurrent</span>
-                </div>
-              </div>
+        {/* List */}
+        <div className="overflow-y-auto flex-1">
+          {sorted.length === 0 && (
+            <div style={{ padding: 32, textAlign: "center", color: COLORS.inkFaint, fontSize: 14, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+              No active cases to predict.
             </div>
-
-            {/* Filter pills */}
-            <div className="grid grid-cols-5 gap-2.5">
-              {[
-                { k: "all",      label: "All",      count: summary.total,    color: COLORS.ink,       bg: COLORS.cream },
-                { k: "critical", label: "Critical", count: summary.critical, color: COLORS.rCritical, bg: COLORS.rCriticalBg },
-                { k: "high",     label: "High",     count: summary.high,     color: COLORS.rHigh,     bg: COLORS.rHighBg },
-                { k: "medium",   label: "Medium",   count: summary.medium,   color: COLORS.rMedium,   bg: COLORS.rMediumBg },
-                { k: "low",      label: "Low",      count: summary.low,      color: COLORS.rLow,      bg: COLORS.rLowBg },
-              ].map(({ k, label, count, color, bg }) => {
-                const active = filterStatus === k || (k === "all" && filterStatus === "all");
-                return (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setFilterStatus(filterStatus === k ? "all" : k)}
-                    className="relative rounded-sm px-4 py-3 text-left transition-all"
-                    style={{
-                      backgroundColor: active ? bg : COLORS.paper,
-                      border: `1px solid ${active ? color + "55" : COLORS.borderSoft}`,
-                    }}
-                  >
-                    <div
-                      className="text-[10px] uppercase tracking-[0.18em] font-medium mb-1"
-                      style={{ color: active ? color : COLORS.inkFaint }}
-                    >
-                      {label}
-                    </div>
-                    <div
-                      className="text-3xl font-light leading-none"
-                      style={{
-                        color: active ? color : COLORS.ink,
-                        fontFamily: "'Instrument Serif', Georgia, serif",
-                      }}
-                    >
-                      {count}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Search + sort */}
-            <div className="flex items-center gap-3 mt-5">
-              <div className="relative flex-1 max-w-xs">
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search cases..."
-                  className="w-full px-4 py-2 text-sm rounded-sm focus:outline-none transition-colors"
-                  style={{
-                    color: COLORS.ink,
-                    backgroundColor: COLORS.cream,
-                    border: `1px solid ${COLORS.borderSoft}`,
-                  }}
-                  onFocus={(e) => { e.target.style.borderColor = COLORS.cognacLight; }}
-                  onBlur={(e) => { e.target.style.borderColor = COLORS.borderSoft; }}
-                />
-              </div>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-2 text-sm rounded-sm focus:outline-none cursor-pointer"
-                style={{
-                  color: COLORS.ink,
-                  backgroundColor: COLORS.cream,
-                  border: `1px solid ${COLORS.borderSoft}`,
-                }}
-              >
-                <option value="risk">Sort by risk</option>
-                <option value="due">Sort by due date</option>
-                <option value="progress">Sort by progress</option>
-                <option value="case">Sort by case number</option>
-              </select>
-              {filterStatus !== "all" && (
-                <button
-                  type="button"
-                  onClick={() => setFilterStatus("all")}
-                  className="text-[11px] uppercase tracking-[0.14em] px-3 py-2 rounded-sm transition-colors"
-                  style={{
-                    color: COLORS.inkSoft,
-                    backgroundColor: COLORS.paper,
-                    border: `1px solid ${COLORS.borderSoft}`,
-                  }}
-                >
-                  Clear filter
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Body */}
-          <div className="flex-1 overflow-y-auto px-8 py-6" style={{ backgroundColor: COLORS.cream }}>
-            {processedPredictions.length === 0 ? (
+          )}
+          {sorted.map((p) => {
+            const s = RISK_STYLE[p.riskLevel] || RISK_STYLE.low;
+            return (
               <div
-                className="flex flex-col items-center justify-center py-20"
-                style={{ color: COLORS.inkFaint }}
+                key={p.id || p.caseNumber}
+                onClick={() => setSelected(p)}
+                className="flex items-center gap-3 px-6 py-3 cursor-pointer"
+                style={{ borderBottom: `1px solid ${COLORS.divider}`, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.surface || "#f7f5f0")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                <CircleDot size={32} style={{ color: COLORS.inkFaint }} />
-                <div
-                  className="mt-4 text-2xl font-light"
-                  style={{
-                    color: COLORS.ink,
-                    fontFamily: "'Instrument Serif', Georgia, serif",
-                  }}
-                >
-                  No cases match
-                </div>
-                <div className="mt-1 text-sm">Try adjusting your filters or search</div>
+                <span style={{ minWidth: 64, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: s.fg, background: s.bg, padding: "2px 7px", borderRadius: 3 }}>
+                  {s.label}
+                </span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: COLORS.ink, fontFamily: "monospace" }}>
+                  {p.caseNumber}
+                </span>
+                {onOpenCaseHistory && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onOpenCaseHistory(p); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: COLORS.accent || COLORS.cognac, padding: "2px 4px" }}
+                  >
+                    History
+                  </button>
+                )}
+                <span style={{ fontSize: 12, color: COLORS.inkFaint }}>
+                  {Math.round((p.lateProbability || 0) * 100)}% late
+                </span>
+                <ChevronRight size={14} color={COLORS.inkFaint} />
               </div>
-            ) : (
-              <div className="space-y-2.5">
-                {processedPredictions.map((p) => (
-                  <CompactCaseRow
-                    key={p.id || p.caseNumber}
-                    prediction={p}
-                    onOpenAnalytics={() => setSelectedPrediction(p)}
-                    onOpenHistory={onOpenCaseHistory}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div
-            className="flex-none px-10 py-4 flex items-center justify-between"
-            style={{
-              backgroundColor: COLORS.paper,
-              borderTop: `1px solid ${COLORS.divider}`,
-            }}
-          >
-            <div
-              className="text-[10px] uppercase tracking-[0.18em]"
-              style={{ color: COLORS.inkFaint }}
-            >
-              {processedPredictions.length} of {predictions.length} cases · Live predictions update every render
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-5 py-2 text-sm rounded-sm transition-colors"
-              style={{ color: COLORS.paper, backgroundColor: COLORS.ink }}
-            >
-              Close
-            </button>
-          </div>
+            );
+          })}
         </div>
       </div>
-
-      {/* Analytics detail modal opens on top */}
-      {selectedPrediction && (
-        <CaseRiskAnalyticsModal
-          prediction={selectedPrediction}
-          onClose={() => setSelectedPrediction(null)}
-        />
-      )}
-    </>,
+    </div>,
     document.body
   );
 }
@@ -2806,14 +2280,7 @@ export function CaseRiskModal({
  *  BACKWARDS-COMPAT EXPORTS
  *  ======================================================================== */
 
-// Stub — kept so any old code calling this doesn't break
-export const calculateRiskWithVelocityEngine = async () => ({
-  predictions: [],
-  velocityImpact: null,
-});
-
-// Aliases for the standalone components so external code can import them
-export const StandaloneCompactRow = CompactCaseRow;
+export const calculateRiskWithVelocityEngine = async () => ({ predictions: [], velocityImpact: null });
 export const StandaloneAnalyticsModal = CaseRiskAnalyticsModal;
 export { COLORS };
 
