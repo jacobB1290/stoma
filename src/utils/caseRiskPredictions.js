@@ -117,30 +117,32 @@ const WORK_WINDOWS = [
   [8, 0, 9, 30], [9, 45, 12, 0], [13, 0, 14, 30], [14, 45, 17, 0],
 ];
 
-// Color system — warm lux aesthetic (cognac, brass, walnut, cream)
+// Color system — uses theme CSS variables so all three themes are respected
 const COLORS = {
-  // Surfaces
-  cream: "#FAF7F2",
-  paper: "#FFFFFF",
-  ink: "#1A1612",
-  inkSoft: "#6B6358",
-  inkFaint: "#A19B8F",
-  divider: "#E8E1D4",
-  borderSoft: "#EDE7DB",
-  // Accents
-  cognac: "#A16632",
-  cognacLight: "#C98B55",
-  cognacGlow: "#F5E9DB",
-  brass: "#B8944A",
-  // Risk
-  rCritical: "#A53F2B",
-  rCriticalBg: "#FAEEE9",
-  rHigh: "#C77A2E",
-  rHighBg: "#FBF1E4",
-  rMedium: "#B89355",
-  rMediumBg: "#FAF3E3",
-  rLow: "#6E8868",
-  rLowBg: "#EEF2EC",
+  // Surfaces (glass.css + theme vars)
+  cream:       "var(--w-surface-2, #f3f4f6)",
+  paper:       "var(--w-surface, #ffffff)",
+  bg:          "var(--w-bg, #f7f8fb)",
+  ink:         "var(--w-text, #0f172a)",
+  inkSoft:     "var(--w-text-muted, #475569)",
+  inkFaint:    "var(--w-text-subtle, #64748b)",
+  divider:     "var(--w-border, rgba(15,23,42,0.12))",
+  borderSoft:  "var(--w-border, rgba(15,23,42,0.12))",
+  surface:     "var(--w-surface-2, #f3f4f6)",
+  // Accent — teal system accent
+  cognac:      "var(--w-accent, #16525f)",
+  cognacLight: "var(--w-accent-hover, #1f6f7c)",
+  cognacGlow:  "var(--w-accent-surface, #a7bec2)",
+  brass:       "var(--w-text-muted, #475569)",
+  // Risk — map to system status token vars
+  rCritical:   "var(--w-priority-ink, #9f1239)",
+  rCriticalBg: "var(--w-priority-surface, #ffe4e6)",
+  rHigh:       "var(--w-rush-ink, #9a3412)",
+  rHighBg:     "var(--w-rush-surface, #ffedd5)",
+  rMedium:     "var(--w-hold-ink, #92400e)",
+  rMediumBg:   "var(--w-hold-surface, #fef3c7)",
+  rLow:        "#16a34a",
+  rLowBg:      "#f0fdf4",
 };
 
 // Stage index for ordering / position
@@ -1258,7 +1260,7 @@ function RiskBadge({ level, size = "md" }) {
   };
   return (
     <span
-      className={`inline-flex items-center font-medium uppercase rounded-sm ${sizes[size]}`}
+      className={`inline-flex items-center font-medium uppercase rounded-md ${sizes[size]}`}
       style={{ color: s.fg, backgroundColor: s.bg, border: `1px solid ${s.fg}22` }}
     >
       {s.label}
@@ -1275,7 +1277,7 @@ function MetricCard({ label, value, sublabel, accent = false, size = "md" }) {
 
   return (
     <div
-      className="relative p-5 rounded-sm"
+      className="relative p-5 rounded-xl"
       style={{
         backgroundColor: COLORS.paper,
         border: `1px solid ${COLORS.borderSoft}`,
@@ -1291,7 +1293,7 @@ function MetricCard({ label, value, sublabel, accent = false, size = "md" }) {
         className={`${sizes.value} font-light leading-none`}
         style={{
           color: accent ? COLORS.cognac : COLORS.ink,
-          fontFamily: "'Instrument Serif', 'Tiempos Headline', Georgia, serif",
+          fontWeight: 600,
           fontFeatureSettings: "'ss01', 'tnum'",
         }}
       >
@@ -1300,7 +1302,7 @@ function MetricCard({ label, value, sublabel, accent = false, size = "md" }) {
       {sublabel && (
         <div
           className={`${sizes.sub} mt-2 font-normal`}
-          style={{ color: COLORS.inkSoft, fontFamily: "'Söhne', -apple-system, sans-serif" }}
+          style={{ color: COLORS.inkSoft, fontSize: "0.75rem" }}
         >
           {sublabel}
         </div>
@@ -1341,7 +1343,7 @@ function TimelineHero({ prediction }) {
 
   return (
     <div
-      className="relative p-8 rounded-sm"
+      className="relative p-8 rounded-2xl"
       style={{
         background: `linear-gradient(135deg, ${COLORS.paper} 0%, ${COLORS.cognacGlow}66 100%)`,
         border: `1px solid ${COLORS.borderSoft}`,
@@ -1492,7 +1494,7 @@ function TimelineHero({ prediction }) {
                 </div>
                 <div
                   className="text-xs font-light mt-0.5 whitespace-nowrap"
-                  style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
+                  style={{ fontWeight: 600 }}
                 >
                   {dueDateCalc.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </div>
@@ -1553,15 +1555,15 @@ function QuantileBar({ title, quantiles, etas, dueDate, now }) {
         </div>
         <div
           className="text-xs tabular-nums"
-          style={{ color: COLORS.ink, fontFamily: "'JetBrains Mono', monospace" }}
+          style={{ color: COLORS.ink, fontFamily: "monospace" }}
         >
           {formatHours(quantiles.p10)} — {formatHours(quantiles.p90)}
         </div>
       </div>
-      <div className="relative h-8 rounded-sm" style={{ backgroundColor: COLORS.cream }}>
+      <div className="relative h-8 rounded-full" style={{ backgroundColor: COLORS.cream }}>
         {/* Full range (p10 to p90) */}
         <div
-          className="absolute top-1/2 -translate-y-1/2 h-2 rounded-sm"
+          className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full"
           style={{
             left: `${pct(p10)}%`,
             width: `${pct(p90) - pct(p10)}%`,
@@ -1570,7 +1572,7 @@ function QuantileBar({ title, quantiles, etas, dueDate, now }) {
         />
         {/* Core range (p50 to p75) emphasized */}
         <div
-          className="absolute top-1/2 -translate-y-1/2 h-3 rounded-sm"
+          className="absolute top-1/2 -translate-y-1/2 h-3 rounded-full"
           style={{
             left: `${pct(p50)}%`,
             width: `${pct(p75) - pct(p50)}%`,
@@ -1610,7 +1612,7 @@ function QuantileBar({ title, quantiles, etas, dueDate, now }) {
       </div>
       <div className="flex justify-between text-[10px]" style={{ color: COLORS.inkFaint }}>
         <span>Now</span>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+        <span style={{ fontFamily: "monospace" }}>
           p50: {formatDate(etas.p50, true)}
         </span>
         {dueDate && <span>Due {formatDate(dueDate, false)}</span>}
@@ -1629,7 +1631,7 @@ function RiskFactors({ prediction }) {
   if (!riskReasons || riskReasons.length === 0) {
     return (
       <div
-        className="p-6 rounded-sm flex items-start gap-3"
+        className="p-6 rounded-xl flex items-start gap-3"
         style={{ backgroundColor: COLORS.rLowBg, border: `1px solid ${COLORS.rLow}22` }}
       >
         <CheckCircle2 size={18} style={{ color: COLORS.rLow, marginTop: 2 }} />
@@ -1650,7 +1652,7 @@ function RiskFactors({ prediction }) {
       {riskReasons.map((reason, i) => (
         <div
           key={i}
-          className="flex items-start gap-3 p-4 rounded-sm"
+          className="flex items-start gap-3 p-4 rounded-xl"
           style={{
             backgroundColor: COLORS.paper,
             border: `1px solid ${COLORS.borderSoft}`,
@@ -1705,7 +1707,7 @@ function FeatureTable({ prediction }) {
           <button
             key={k}
             onClick={() => setFilter(k)}
-            className="text-[11px] uppercase tracking-[0.14em] px-3 py-1.5 rounded-sm transition-colors"
+            className="text-[11px] uppercase tracking-[0.14em] px-3 py-1.5 rounded-lg transition-colors"
             style={{
               color: filter === k ? COLORS.paper : COLORS.inkSoft,
               backgroundColor: filter === k ? COLORS.cognac : COLORS.cream,
@@ -1718,7 +1720,7 @@ function FeatureTable({ prediction }) {
       </div>
 
       <div
-        className="rounded-sm overflow-hidden"
+        className="rounded-xl overflow-hidden"
         style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
       >
         <div className="max-h-[460px] overflow-y-auto">
@@ -1766,7 +1768,7 @@ function FeatureTable({ prediction }) {
                     className="px-4 py-2 text-right font-light"
                     style={{
                       color: Math.abs(r.value) > 1e-9 ? COLORS.cognac : COLORS.inkFaint,
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontFamily: "monospace",
                       fontSize: 13,
                     }}
                   >
@@ -1792,17 +1794,6 @@ function FeatureTable({ prediction }) {
 export function CaseRiskAnalyticsModal({ prediction, onClose }) {
   const [tab, setTab] = useState("overview");
 
-  // Inject fonts once
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const id = "v8-fonts";
-    if (document.getElementById(id)) return;
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap";
-    document.head.appendChild(link);
-  }, []);
 
   if (!prediction) return null;
   const style = RISK_STYLE[prediction.riskLevel];
@@ -1810,27 +1801,20 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-[10002] overflow-y-auto flex items-start justify-center p-6"
-      style={{
-        backgroundColor: "rgba(26, 22, 18, 0.55)",
-        backdropFilter: "blur(4px)",
-        fontFamily: "'DM Sans', -apple-system, system-ui, sans-serif",
-      }}
+      className="fixed inset-0 z-[10002] overflow-y-auto flex items-start justify-center p-6 bg-black/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-5xl my-8 rounded-sm overflow-hidden shadow-2xl"
-        style={{ backgroundColor: COLORS.cream }}
+        className="glass-nb w-full max-w-5xl my-8 rounded-2xl overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* ============ HEADER ============ */}
         <div
-          className="relative px-10 pt-10 pb-8"
-          style={{ backgroundColor: COLORS.paper, borderBottom: `1px solid ${COLORS.divider}` }}
+          className="glass-nb-dark relative px-10 pt-10 pb-8 border-b border-slate-200"
         >
           <button
             onClick={onClose}
-            className="absolute top-6 right-6 p-1.5 rounded-sm hover:opacity-70 transition-opacity"
+            className="absolute top-6 right-6 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
             style={{ color: COLORS.inkSoft }}
           >
             <X size={18} />
@@ -1845,12 +1829,8 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
                 Case Analysis · {prediction.modelUsed}
               </div>
               <div
-                className="text-5xl font-light leading-none mb-3"
-                style={{
-                  color: COLORS.ink,
-                  fontFamily: "'Instrument Serif', Georgia, serif",
-                  letterSpacing: "-0.01em",
-                }}
+                className="text-4xl font-semibold leading-none mb-3 tracking-tight"
+                style={{ color: COLORS.ink }}
               >
                 {prediction.caseNumber}
               </div>
@@ -1872,7 +1852,7 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
           {/* Recommendation banner */}
           <div
-            className="flex items-start gap-3 px-5 py-4 rounded-sm"
+            className="flex items-start gap-3 px-5 py-4 rounded-xl"
             style={{
               backgroundColor: style.bg,
               border: `1px solid ${style.fg}22`,
@@ -1908,7 +1888,7 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
                   color: tab === k ? COLORS.cognac : COLORS.inkSoft,
                   borderBottom: tab === k ? `2px solid ${COLORS.cognac}` : "2px solid transparent",
                   marginBottom: -1,
-                  fontWeight: tab === k ? 500 : 400,
+                  fontWeight: tab === k ? 600 : 400,
                 }}
               >
                 <Icon size={14} />
@@ -1928,19 +1908,14 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
         {/* ============ FOOTER ============ */}
         <div
-          className="px-10 py-5 flex items-center justify-between"
-          style={{ backgroundColor: COLORS.paper, borderTop: `1px solid ${COLORS.divider}` }}
+          className="glass-nb-dark px-10 py-5 flex items-center justify-between border-t border-slate-200"
         >
           <div className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkFaint }}>
             Predictions update live · {prediction.backlogCount} concurrent in stage
           </div>
           <button
             onClick={onClose}
-            className="px-5 py-2 text-sm rounded-sm transition-colors"
-            style={{
-              color: COLORS.paper,
-              backgroundColor: COLORS.ink,
-            }}
+            className="px-5 py-2 text-sm rounded-lg transition-colors bg-slate-800 text-white hover:bg-slate-700"
           >
             Close
           </button>
@@ -1998,7 +1973,7 @@ function OverviewTab({ prediction }) {
       {/* Secondary row: Reschedule + Operational */}
       <div className="grid grid-cols-3 gap-3">
         <div
-          className="p-5 rounded-sm"
+          className="p-5 rounded-xl"
           style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
         >
           <div
@@ -2014,7 +1989,7 @@ function OverviewTab({ prediction }) {
         </div>
 
         <div
-          className="p-5 rounded-sm col-span-2"
+          className="p-5 rounded-xl col-span-2"
           style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
         >
           <div
@@ -2034,7 +2009,7 @@ function OverviewTab({ prediction }) {
 
       {/* Stage-level breakdown */}
       <div
-        className="p-6 rounded-sm"
+        className="p-6 rounded-xl"
         style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
       >
         <div
@@ -2091,7 +2066,7 @@ function TimelineTab({ prediction }) {
       <TimelineHero prediction={prediction} />
 
       <div
-        className="rounded-sm overflow-hidden"
+        className="rounded-xl overflow-hidden"
         style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
       >
         {rows.map((row, i) => {
@@ -2120,7 +2095,7 @@ function TimelineTab({ prediction }) {
                 {row.sub && (
                   <div
                     className="text-xs tabular-nums"
-                    style={{ color: COLORS.inkFaint, fontFamily: "'JetBrains Mono', monospace" }}
+                    style={{ color: COLORS.inkFaint, fontFamily: "monospace" }}
                   >
                     {row.sub}
                   </div>
@@ -2129,7 +2104,7 @@ function TimelineTab({ prediction }) {
                   className="text-sm tabular-nums"
                   style={{
                     color: row.highlight ? COLORS.cognac : COLORS.ink,
-                    fontFamily: "'JetBrains Mono', monospace",
+                    fontFamily: "monospace",
                     fontWeight: row.bold || row.highlight ? 500 : 400,
                   }}
                 >
@@ -2156,7 +2131,7 @@ function SignalsTab({ prediction }) {
       {/* Left: Probability gauges */}
       <div className="col-span-2 space-y-4">
         <div
-          className="p-6 rounded-sm"
+          className="p-6 rounded-xl"
           style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
         >
           <div className="text-[10px] uppercase tracking-[0.18em] mb-4" style={{ color: COLORS.inkFaint }}>
@@ -2191,7 +2166,7 @@ function SignalsTab({ prediction }) {
         {/* Signal agreement — the trust-building panel */}
         {hasClassifier && (
           <div
-            className="p-5 rounded-sm"
+            className="p-5 rounded-xl"
             style={{
               backgroundColor: signalsAgree ? COLORS.rLowBg : COLORS.rMediumBg,
               border: `1px solid ${signalsAgree ? COLORS.rLow : COLORS.rMedium}44`,
@@ -2237,7 +2212,7 @@ function SignalsTab({ prediction }) {
         <RiskFactors prediction={prediction} />
 
         <div
-          className="p-6 rounded-sm"
+          className="p-6 rounded-xl"
           style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
         >
           <div className="text-[10px] uppercase tracking-[0.18em] mb-4" style={{ color: COLORS.inkFaint }}>
@@ -2261,7 +2236,7 @@ function FeaturesTab({ prediction }) {
   return (
     <div className="space-y-4">
       <div
-        className="p-4 rounded-sm text-[12px] leading-relaxed"
+        className="p-4 rounded-xl text-[12px] leading-relaxed"
         style={{ backgroundColor: COLORS.cognacGlow, color: COLORS.ink, border: `1px solid ${COLORS.cognac}22` }}
       >
         <strong style={{ color: COLORS.cognac, fontWeight: 500 }}>108 features</strong> are computed
@@ -2287,7 +2262,7 @@ function ProbRow({ label, value, color, showPercent = false }) {
         <span style={{ color: COLORS.inkSoft }}>{label}</span>
         <span
           className="tabular-nums"
-          style={{ color, fontFamily: "'JetBrains Mono', monospace", fontWeight: 500 }}
+          style={{ color, fontFamily: "monospace", fontWeight: 500 }}
         >
           {pct.toFixed(showPercent ? 1 : 0)}%
         </span>
@@ -2318,7 +2293,7 @@ function KVStat({ label, value }) {
         className="text-2xl font-light leading-none"
         style={{
           color: COLORS.ink,
-          fontFamily: "'Instrument Serif', Georgia, serif",
+          fontWeight: 600,
         }}
       >
         {value}
@@ -2381,7 +2356,7 @@ function RingGauge({ value, max, color, size = 120 }) {
             fontSize: size * 0.32,
             fontWeight: 300,
             color,
-            fontFamily: "'Instrument Serif', Georgia, serif",
+            fontWeight: 600,
             lineHeight: 1,
           }}
         >
@@ -2485,7 +2460,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
     <button
       type="button"
       onClick={onOpenAnalytics}
-      className="group relative w-full text-left rounded-sm transition-all"
+      className="group relative w-full text-left rounded-xl transition-all"
       style={{
         backgroundColor: COLORS.paper,
         border: `1px solid ${COLORS.borderSoft}`,
@@ -2511,7 +2486,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
             <div
               className="text-xl leading-tight"
               style={{
-                fontFamily: "'Instrument Serif', Georgia, serif",
+                fontWeight: 600,
                 color: COLORS.ink,
                 fontWeight: 400,
                 letterSpacing: "-0.005em",
@@ -2555,7 +2530,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
                 className="text-[11px] tabular-nums"
                 style={{
                   color: COLORS.inkSoft,
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: "monospace",
                 }}
               >
                 {Math.round(prediction.progressPercent || 0)}%
@@ -2573,7 +2548,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
           <div className="flex items-center gap-1.5 w-20 justify-end flex-shrink-0">
             {prediction.isRush && (
               <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
                 style={{
                   color: COLORS.cognac,
                   backgroundColor: COLORS.cognacGlow,
@@ -2586,7 +2561,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
             )}
             {prediction.onHold && (
               <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
                 style={{
                   color: COLORS.brass,
                   backgroundColor: COLORS.rMediumBg,
@@ -2598,7 +2573,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
             )}
             {prediction.signalsAgree === false && (
               <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-sm"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
                 style={{
                   color: COLORS.inkSoft,
                   backgroundColor: COLORS.cream,
@@ -2617,7 +2592,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
             <div
               className="leading-none"
               style={{
-                fontFamily: "'Instrument Serif', Georgia, serif",
+                fontWeight: 600,
                 fontSize: 26,
                 fontWeight: 300,
                 color: style.fg,
@@ -2640,7 +2615,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onOpenHistory(prediction.id, prediction.caseNumber); }}
-                className="text-[11px] uppercase tracking-[0.12em] px-2.5 py-1 rounded-sm transition-colors"
+                className="text-[11px] uppercase tracking-[0.12em] px-2.5 py-1 rounded-lg transition-colors"
                 style={{
                   color: COLORS.inkSoft,
                   border: `1px solid ${COLORS.borderSoft}`,
@@ -2692,18 +2667,6 @@ export function CaseRiskModal({
   const [sortBy, setSortBy] = useState("risk");
   const [selectedPrediction, setSelectedPrediction] = useState(null);
 
-  // Inject fonts once (safe no-op if already present)
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const id = "v8-fonts";
-    if (document.getElementById(id)) return;
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap";
-    document.head.appendChild(link);
-  }, []);
 
   const processedPredictions = useMemo(() => {
     let filtered = [...(predictions || [])];
@@ -2766,31 +2729,22 @@ export function CaseRiskModal({
   return createPortal(
     <>
       <div
-        className="fixed inset-0 z-[10001] flex items-center justify-center p-6 overflow-y-auto"
-        style={{
-          backgroundColor: "rgba(26, 22, 18, 0.55)",
-          backdropFilter: "blur(4px)",
-          fontFamily: "'DM Sans', -apple-system, system-ui, sans-serif",
-        }}
+        className="fixed inset-0 z-[10001] flex items-center justify-center p-6 overflow-y-auto bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       >
         <div
-          className="w-full max-w-6xl my-8 rounded-sm shadow-2xl flex flex-col overflow-hidden"
-          style={{ backgroundColor: COLORS.cream, maxHeight: "90vh" }}
+          className="glass-nb w-full max-w-6xl my-8 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          style={{ maxHeight: "90vh" }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div
-            className="flex-none px-10 pt-9 pb-7"
-            style={{
-              backgroundColor: COLORS.paper,
-              borderBottom: `1px solid ${COLORS.divider}`,
-            }}
+            className="glass-nb-dark flex-none px-10 pt-9 pb-7 border-b border-slate-200"
           >
             <button
               type="button"
               onClick={onClose}
-              className="absolute top-6 right-6 p-1.5 rounded-sm transition-opacity"
+              className="absolute top-6 right-6 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
               style={{ color: COLORS.inkSoft }}
             >
               <X size={18} />
@@ -2808,7 +2762,7 @@ export function CaseRiskModal({
                   className="text-4xl font-light leading-none"
                   style={{
                     color: COLORS.ink,
-                    fontFamily: "'Instrument Serif', Georgia, serif",
+                    fontWeight: 600,
                     letterSpacing: "-0.01em",
                   }}
                 >
@@ -2850,7 +2804,7 @@ export function CaseRiskModal({
                     key={k}
                     type="button"
                     onClick={() => setFilterStatus(filterStatus === k ? "all" : k)}
-                    className="relative rounded-sm px-4 py-3 text-left transition-all"
+                    className="relative rounded-xl px-4 py-3 text-left transition-all"
                     style={{
                       backgroundColor: active ? bg : COLORS.paper,
                       border: `1px solid ${active ? color + "55" : COLORS.borderSoft}`,
@@ -2866,7 +2820,7 @@ export function CaseRiskModal({
                       className="text-3xl font-light leading-none"
                       style={{
                         color: active ? color : COLORS.ink,
-                        fontFamily: "'Instrument Serif', Georgia, serif",
+                        fontWeight: 600,
                       }}
                     >
                       {count}
@@ -2884,7 +2838,7 @@ export function CaseRiskModal({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search cases..."
-                  className="w-full px-4 py-2 text-sm rounded-sm focus:outline-none transition-colors"
+                  className="w-full px-4 py-2 text-sm rounded-lg focus:outline-none transition-colors"
                   style={{
                     color: COLORS.ink,
                     backgroundColor: COLORS.cream,
@@ -2897,7 +2851,7 @@ export function CaseRiskModal({
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-2 text-sm rounded-sm focus:outline-none cursor-pointer"
+                className="px-3 py-2 text-sm rounded-lg focus:outline-none cursor-pointer"
                 style={{
                   color: COLORS.ink,
                   backgroundColor: COLORS.cream,
@@ -2913,7 +2867,7 @@ export function CaseRiskModal({
                 <button
                   type="button"
                   onClick={() => setFilterStatus("all")}
-                  className="text-[11px] uppercase tracking-[0.14em] px-3 py-2 rounded-sm transition-colors"
+                  className="text-[11px] uppercase tracking-[0.14em] px-3 py-2 rounded-lg transition-colors"
                   style={{
                     color: COLORS.inkSoft,
                     backgroundColor: COLORS.paper,
@@ -2938,7 +2892,7 @@ export function CaseRiskModal({
                   className="mt-4 text-2xl font-light"
                   style={{
                     color: COLORS.ink,
-                    fontFamily: "'Instrument Serif', Georgia, serif",
+                    fontWeight: 600,
                   }}
                 >
                   No cases match
@@ -2976,7 +2930,7 @@ export function CaseRiskModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2 text-sm rounded-sm transition-colors"
+              className="px-5 py-2 text-sm rounded-lg transition-colors"
               style={{ color: COLORS.paper, backgroundColor: COLORS.ink }}
             >
               Close
