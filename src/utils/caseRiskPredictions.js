@@ -1,1318 +1,1049 @@
 // /src/utils/caseRiskPredictions.js
-// Advanced Case Risk Predictions — v3 Neural Visualization
-// Updated: 2025-12-04 - Fixed timezone handling for due dates
+// =================================================================
+// v8 — Unified Quantile Prediction System
+// =================================================================
+// ALL outputs derived from trained models. Zero hand-tuned constants.
+//
+// Per case, per stage, the system produces:
+//   • Stage exit range    p10 / p50 / p75 / p90  (hours until this stage completes)
+//   • Completion range    p10 / p50 / p75 / p90  (hours until case is fully done)
+//   • P(reschedule)       probability the due date moves
+//
+// From those model outputs we derive (via comparison, not formulas):
+//   • Risk level          where the due date falls in the total completion range
+//   • Buffer              due_date − total_p50
+//   • Confidence          how tight p10→p90 is
+//   • P(late)             interpolated from the quantile range vs due date
+//
+// SETUP
+//   1. Place xgb_v8_final.json in /public
+//   2. Import { loadModels, generateCaseRiskPredictions, CaseRiskAnalyticsModal }
+//   3. Call loadModels() once at app init (returns a Promise)
+//
+// 108 features. 5,920 trees. ~2.4 MB gzipped.
+// =================================================================
 
-import React, {
-  useMemo,
-  useState,
-  useEffect,
-} from "react";
-import { motion, AnimatePresence } from "motion/react";
+import React, { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
+import {
+  X,
+  AlertCircle,
+  TrendingUp,
+  Clock,
+  Activity,
+  Sparkles,
+  ChevronRight,
+  Calendar,
+  Target,
+  Layers,
+  Zap,
+  Info,
+  CheckCircle2,
+  ArrowRight,
+  Flame,
+  CircleDot,
+} from "lucide-react";
 
-/** ======================= DATE & TIME UTILITIES ======================== **/
+/** ========================================================================
+ *  CONSTANTS
+ *  ======================================================================== */
 
-export const formatDate = (date, options = {}) => {
-  if (!date) return "—";
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return "—";
-
-  if (options.dateOnly) {
-    return d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  }
-  if (options.dayTime) {
-    return d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  }
-  if (options.timeOnly) {
-    return d.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  }
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-};
-
-/**
- * Parse a date string and return the END OF DAY (5 PM) in LOCAL timezone.
- * This is critical for due date handling - we always want 5 PM local time on the specified date.
- */
-function dueEOD(due) {
-  if (!due) return null;
-
-  // If already a Date object
-  if (due instanceof Date && !isNaN(due.getTime())) {
-    // Create a new date at 5 PM local time on the same calendar date
-    return new Date(
-      due.getFullYear(),
-      due.getMonth(),
-      due.getDate(),
-      17,
-      0,
-      0,
-      0
-    );
-  }
-
-  if (typeof due === "string") {
-    // Case 1: Date-only string like "2025-12-05"
-    if (!due.includes("T")) {
-      const parts = due.split("-");
-      if (parts.length === 3) {
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
-        const day = parseInt(parts[2], 10);
-        // Create date directly in local timezone at 5 PM
-        return new Date(year, month, day, 17, 0, 0, 0);
-      }
-    }
-
-    // Case 2: ISO string with time component
-    // We need to extract just the date part and ignore the time/timezone
-    // because we always want 5 PM local time on the DUE DATE
-
-    // Extract date portion: "2025-12-05T..." -> "2025-12-05"
-    const datePart = due.split("T")[0];
-    const parts = datePart.split("-");
-    if (parts.length === 3) {
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const day = parseInt(parts[2], 10);
-      // Create date directly in local timezone at 5 PM
-      return new Date(year, month, day, 17, 0, 0, 0);
-    }
-
-    // Fallback: try to parse and extract local date components
-    const parsed = new Date(due);
-    if (!isNaN(parsed.getTime())) {
-      // If the string had timezone info, the parsed date is correct in UTC
-      // but we want the LOCAL calendar date that was intended
-      // This is tricky - we'll use the local interpretation
-      return new Date(
-        parsed.getFullYear(),
-        parsed.getMonth(),
-        parsed.getDate(),
-        17,
-        0,
-        0,
-        0
-      );
-    }
-  }
-
-  return null;
-}
-
-/**
- * Parse a due date for DISPLAY purposes - shows the actual date the user set
- */
-function parseDueDateForDisplay(due) {
-  if (!due) return null;
-
-  if (due instanceof Date && !isNaN(due.getTime())) {
-    return due;
-  }
-
-  if (typeof due === "string") {
-    // Date-only string
-    if (!due.includes("T")) {
-      const parts = due.split("-");
-      if (parts.length === 3) {
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1;
-        const day = parseInt(parts[2], 10);
-        return new Date(year, month, day, 17, 0, 0, 0);
-      }
-    }
-
-    // ISO string - extract date part
-    const datePart = due.split("T")[0];
-    const parts = datePart.split("-");
-    if (parts.length === 3) {
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const day = parseInt(parts[2], 10);
-      return new Date(year, month, day, 17, 0, 0, 0);
-    }
-  }
-
-  return null;
-}
-
-/** ======================= BREAK-AWARE CALENDAR ======================== **/
-
-const WORK_WINDOWS = [
-  { h0: 8, m0: 0, h1: 9, m1: 30 },
-  { h0: 9, m0: 45, h1: 12, m1: 0 },
-  { h0: 13, m0: 0, h1: 14, m1: 30 },
-  { h0: 14, m0: 45, h1: 17, m1: 0 },
+// Feature order MUST match training: /home/claude/feature_names_v8.json
+const V8_FEATURE_NAMES = [
+  "intercept", "log_allowed_wh", "allowed_wh_raw", "is_rush", "entry_hour",
+  "due_changes", "stage_moves", "log_hold_pre", "dow", "is_friday", "is_monday",
+  "concurrent_in_stage", "log_concurrent", "is_repair", "is_flex", "is_bbs",
+  "log_lead_days", "lead_days_raw", "has_backward", "has_prior_qc", "log_times_seen", "same_day_cases",
+  "elapsed_bh", "log_elapsed", "frac_budget", "frac_budget_sq", "remaining_budget", "log_remaining_budget",
+  "events_count", "log_events", "activity_rate", "hours_idle", "log_idle", "hold_during",
+  "is_overrun", "thin_rem_3h", "thin_rem_6h", "thin_rem_12h",
+  "elapsed_x_rush", "elapsed_x_flex", "elapsed_x_bbs", "elapsed_x_repair",
+  "elapsed_x_concurrent", "elapsed_x_idle", "frac_x_rush", "frac_x_events",
+  "allowed_x_flex", "allowed_x_repair", "lead_x_flex", "idle_x_frac",
+  "concurrent_x_dow", "concurrent_x_friday",
+  "log_hours_to_first_action", "hours_to_first_action", "rush_added_late",
+  "log_hours_to_rush", "due_changes_closer", "due_changes_further", "due_net_direction",
+  "hold_cycles", "batch_siblings", "log_batch_siblings", "early_actions",
+  "mid_stage_actions", "log_longest_gap", "longest_gap",
+  "created_outside_hours", "gap_before_entry", "log_gap_before_entry",
+  "unique_users", "stage_position", "stages_remaining", "backward_count",
+  "days_since_due_change", "has_appt",
+  "pickup_x_batch", "idle_x_concurrent", "flex_x_stages_remaining",
+  "rush_late_x_elapsed", "backward_x_elapsed", "hold_cycles_x_elapsed",
+  "h_to_rush_added", "has_rush_added", "count_rush_added",
+  "h_to_priority_added", "has_priority_added", "count_priority_added",
+  "h_to_hold_added", "has_hold_added", "count_hold_added",
+  "h_to_hold_removed", "has_hold_removed", "count_hold_removed",
+  "h_to_moved_to_prod", "has_moved_to_prod", "count_moved_to_prod",
+  "h_to_moved_to_finish", "has_moved_to_finish", "count_moved_to_finish",
+  "h_to_moved_to_qc", "has_moved_to_qc", "count_moved_to_qc",
+  "h_to_backward_move", "has_backward_move", "count_backward_move",
+  "h_to_due_changed", "has_due_changed", "count_due_changed",
 ];
 
-const STAGE_CAPACITY = { design: 1, production: 2, finishing: 3, qc: 2 };
-const BUFFER_REQ = { design: 2, production: 1, finishing: 0, qc: 0 };
-const RESCHEDULE_DISCOUNT_GAMMA = 0.6;
+// Human-readable labels for the features tab
+const FEATURE_LABELS = {
+  intercept: "Bias term", log_allowed_wh: "Allowed hours (log)", allowed_wh_raw: "Allowed work hours",
+  is_rush: "Rush flag", entry_hour: "Entry time of day", due_changes: "Due changes before entry",
+  stage_moves: "Stage moves before entry", log_hold_pre: "Pre-entry hold (log)",
+  dow: "Day of week", is_friday: "Entered Friday", is_monday: "Entered Monday",
+  concurrent_in_stage: "Concurrent cases in stage", log_concurrent: "Concurrent (log)",
+  is_repair: "Repair case", is_flex: "Flex case", is_bbs: "BBS case",
+  log_lead_days: "Lead time (log days)", lead_days_raw: "Lead time (days)",
+  has_backward: "Had backward move", has_prior_qc: "Prior QC visit",
+  log_times_seen: "Seen before count", same_day_cases: "Same-day cases",
+  elapsed_bh: "Elapsed business hours", log_elapsed: "Elapsed (log)",
+  frac_budget: "% of budget used", frac_budget_sq: "Budget² (non-linear)",
+  remaining_budget: "Budget hours remaining", log_remaining_budget: "Budget remaining (log)",
+  events_count: "Events during stage", log_events: "Events (log)",
+  activity_rate: "Events per hour", hours_idle: "Hours since last activity",
+  log_idle: "Idle (log)", hold_during: "Hold hours during stage",
+  is_overrun: "Past allowed time", thin_rem_3h: "<3h budget left",
+  thin_rem_6h: "<6h budget left", thin_rem_12h: "<12h budget left",
+  hours_to_first_action: "Hours until first touch", rush_added_late: "Rush added after creation",
+  log_hours_to_rush: "Hours to rush (log)", due_changes_closer: "Due pushed closer",
+  due_changes_further: "Due pushed further", due_net_direction: "Net due direction",
+  hold_cycles: "Hold on/off cycles", batch_siblings: "Cases created together",
+  early_actions: "Actions in first 2h", mid_stage_actions: "Non-transition mid-stage events",
+  longest_gap: "Longest activity gap", created_outside_hours: "Created off-hours",
+  gap_before_entry: "Gap before stage entry", unique_users: "Unique users touched",
+  stage_position: "Pipeline position", stages_remaining: "Stages after current",
+  backward_count: "Backward moves", days_since_due_change: "Days since due last changed",
+  has_appt: "Appointment-linked case",
+};
 
-const clamp = (x, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x));
-const sigmoid = (z) => 1 / (1 + Math.exp(-z));
-const normalizeStage = (s) => (s || "design").toString().trim().toLowerCase();
+// Work-day definition must match Python training: 8–9:30, 9:45–12, 1–2:30, 2:45–5
+const WORK_WINDOWS = [
+  [8, 0, 9, 30], [9, 45, 12, 0], [13, 0, 14, 30], [14, 45, 17, 0],
+];
+
+// Color system — uses theme CSS variables so all three themes are respected
+const COLORS = {
+  // Surfaces (glass.css + theme vars)
+  cream:       "var(--w-surface-2, #f3f4f6)",
+  paper:       "var(--w-surface, #ffffff)",
+  bg:          "var(--w-bg, #f7f8fb)",
+  ink:         "var(--w-text, #0f172a)",
+  inkSoft:     "var(--w-text-muted, #475569)",
+  inkFaint:    "var(--w-text-subtle, #64748b)",
+  divider:     "var(--w-border, rgba(15,23,42,0.12))",
+  borderSoft:  "var(--w-border, rgba(15,23,42,0.12))",
+  surface:     "var(--w-surface-2, #f3f4f6)",
+  // Accent — teal system accent
+  cognac:      "var(--w-accent, #16525f)",
+  cognacLight: "var(--w-accent-hover, #1f6f7c)",
+  cognacGlow:  "var(--w-accent-surface, #a7bec2)",
+  brass:       "var(--w-text-muted, #475569)",
+  // Risk — map to system status token vars
+  rCritical:   "var(--w-priority-ink, #9f1239)",
+  rCriticalBg: "var(--w-priority-surface, #ffe4e6)",
+  rHigh:       "var(--w-rush-ink, #9a3412)",
+  rHighBg:     "var(--w-rush-surface, #ffedd5)",
+  rMedium:     "var(--w-hold-ink, #92400e)",
+  rMediumBg:   "var(--w-hold-surface, #fef3c7)",
+  rLow:        "#16a34a",
+  rLowBg:      "#f0fdf4",
+};
+
+// Stage index for ordering / position
+const STAGE_ORDER = { design: 0, production: 1, finishing: 2, qc: 3 };
+
+/** ========================================================================
+ *  BUSINESS HOUR ENGINE (must match Python training exactly)
+ *  ======================================================================== */
+
 const isWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
-const dowPy = (d) => (d.getDay() + 6) % 7;
-const getCurrentTime = () => new Date();
 
 function dayWindows(d) {
-  const y = d.getFullYear(),
-    m = d.getMonth(),
-    day = d.getDate();
-  return WORK_WINDOWS.map((w) => ({
-    start: new Date(y, m, day, w.h0, w.m0, 0, 0),
-    end: new Date(y, m, day, w.h1, w.m1, 0, 0),
+  const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+  return WORK_WINDOWS.map(([a, b, c, e]) => ({
+    start: new Date(y, m, day, a, b, 0, 0),
+    end: new Date(y, m, day, c, e, 0, 0),
   }));
 }
 
-export function daySpanHours(a, b) {
-  return (b - a) / 3_600_000;
+function advanceToNextWorkMoment(c) {
+  for (let i = 0; i < 400; i++) {
+    if (isWeekend(c)) {
+      const nextMonday = c.getDay() === 6 ? 2 : 1;
+      c = new Date(c.getFullYear(), c.getMonth(), c.getDate() + nextMonday, 8, 0, 0, 0);
+      continue;
+    }
+    const w = dayWindows(c);
+    if (c < w[0].start) return w[0].start;
+    for (const win of w) if (win.start <= c && c < win.end) return c;
+    c = new Date(c.getFullYear(), c.getMonth(), c.getDate() + 1, 8, 0, 0, 0);
+  }
+  return c;
 }
 
 export function businessHoursBetween(start, end) {
   if (!start || !end || end <= start) return 0;
-  let cur = new Date(start),
-    stop = new Date(end),
-    total = 0;
-  while (cur < stop) {
-    cur = advanceToNextWorkMoment(cur);
-    const wins = dayWindows(cur);
-    for (const w of wins) {
-      if (stop <= w.start) break;
-      const s = cur < w.start ? w.start : cur;
-      const e = stop < w.end ? stop : w.end;
-      if (e > s) total += daySpanHours(s, e);
-      if (stop <= w.end) break;
-      cur = w.end;
+  let c = new Date(start.getTime());
+  const stop = new Date(end.getTime());
+  let total = 0;
+  for (let i = 0; i < 500; i++) {
+    if (c >= stop) break;
+    c = advanceToNextWorkMoment(c);
+    if (c >= stop) break;
+    for (const w of dayWindows(c)) {
+      if (stop <= w.start) return Math.max(0, total);
+      const a = c > w.start ? c : w.start;
+      const b = stop < w.end ? stop : w.end;
+      if (b > a) total += (b - a) / 3600000;
+      if (stop <= w.end) return Math.max(0, total);
     }
-    cur = new Date(
-      cur.getFullYear(),
-      cur.getMonth(),
-      cur.getDate() + 1,
-      8,
-      0,
-      0,
-      0
-    );
+    c = new Date(c.getFullYear(), c.getMonth(), c.getDate() + 1, 8, 0, 0, 0);
   }
   return Math.max(0, total);
 }
 
 export function addBusinessHours(start, hoursToAdd) {
-  let cur = new Date(start);
-  if (hoursToAdd <= 0) return snapToMinutes(advanceToNextWorkMoment(cur), 5);
+  let c = new Date(start.getTime());
+  if (hoursToAdd <= 0) return snapToMinutes(advanceToNextWorkMoment(c), 5);
   let remaining = hoursToAdd;
-  while (remaining > 1e-9) {
-    cur = advanceToNextWorkMoment(cur);
-    const wins = dayWindows(cur);
-    let advanced = false;
-    for (const w of wins) {
-      if (cur < w.start) cur = w.start;
-      if (cur >= w.start && cur < w.end) {
-        const span = daySpanHours(cur, w.end);
-        if (remaining <= span + 1e-12) {
-          cur = new Date(cur.getTime() + remaining * 3_600_000);
-          return snapToMinutes(cur, 5);
-        } else {
-          remaining -= span;
-          cur = w.end;
-          advanced = true;
-        }
+  for (let i = 0; i < 500; i++) {
+    if (remaining <= 1e-9) return c;
+    c = advanceToNextWorkMoment(c);
+    for (const w of dayWindows(c)) {
+      if (c < w.start) c = w.start;
+      if (w.start <= c && c < w.end) {
+        const span = (w.end - c) / 3600000;
+        if (remaining <= span + 1e-12) return new Date(c.getTime() + remaining * 3600000);
+        remaining -= span;
+        c = w.end;
       }
     }
-    if (!advanced)
-      cur = new Date(
-        cur.getFullYear(),
-        cur.getMonth(),
-        cur.getDate() + 1,
-        8,
-        0,
-        0,
-        0
-      );
+    c = new Date(c.getFullYear(), c.getMonth(), c.getDate() + 1, 8, 0, 0, 0);
   }
-  return snapToMinutes(cur, 5);
+  return c;
 }
 
-function snapToMinutes(dt, step = 5) {
-  const d = new Date(dt);
-  d.setMinutes(Math.round(d.getMinutes() / step) * step, 0, 0);
-  return d;
+/** ========================================================================
+ *  DATE HELPERS
+ *  ======================================================================== */
+
+function getCurrentTime() { return new Date(); }
+
+function snapToMinutes(d, step = 5) {
+  const ms = step * 60 * 1000;
+  return new Date(Math.round(d.getTime() / ms) * ms);
 }
 
-function advanceToNextWorkMoment(cur) {
-  cur = new Date(cur);
-  while (true) {
-    if (isWeekend(cur)) {
-      const add = cur.getDay() === 0 ? 1 : 2;
-      cur = new Date(
-        cur.getFullYear(),
-        cur.getMonth(),
-        cur.getDate() + add,
-        8,
-        0,
-        0,
-        0
-      );
-      continue;
-    }
-    const wins = dayWindows(cur);
-    if (cur < wins[0].start) return wins[0].start;
-    for (const w of wins) if (cur >= w.start && cur < w.end) return cur;
-    cur = new Date(
-      cur.getFullYear(),
-      cur.getMonth(),
-      cur.getDate() + 1,
-      8,
-      0,
-      0,
-      0
-    );
+export function dueEOD(dueStr) {
+  if (!dueStr) return null;
+  const base = String(dueStr).split("T")[0];
+  const parts = base.split("-").map(Number);
+  if (parts.length === 3 && !parts.some(isNaN)) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 17, 0, 0, 0);
   }
+  const d = new Date(dueStr);
+  if (isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 17, 0, 0, 0);
 }
 
-/** ======================= ML WEIGHTS ======================== **/
-
-export const ETA_WEIGHTS = {
-  design: {
-    intercept: -2.640829,
-    log_allowed_wh: 0.673991,
-    is_rush: 0.376177,
-    entry_hour_from8: 0.073464,
-    due_changes: -0.539435,
-    stage_moves: 0.046302,
-    log_hold_hours: 0.078169,
-    dow_0: 0.359067,
-    dow_1: 0.959329,
-    dow_2: 0.381417,
-    dow_3: -0.001334,
-    dow_4: -0.761674,
-    log_backlog: 0.102261,
-    thin_lt6h: 1.985591,
-    thin_lt12h: 0.650655,
-    thin_lt18h: 0.102337,
-  },
-  production: {
-    intercept: -2.68967,
-    log_allowed_wh: 1.384507,
-    is_rush: 0.694135,
-    entry_hour_from8: -0.055862,
-    due_changes: -0.017134,
-    stage_moves: -0.139123,
-    log_hold_hours: 0.030151,
-    dow_0: 0.02859,
-    dow_1: 0.266903,
-    dow_2: 0.128429,
-    dow_3: 0.234442,
-    dow_4: -0.598305,
-    log_backlog: 0.049686,
-    thin_lt6h: 1.58952,
-    thin_lt12h: 0.307451,
-    thin_lt18h: 0.045829,
-  },
-  finishing: {
-    intercept: -2.545875,
-    log_allowed_wh: 1.460449,
-    is_rush: 0.678927,
-    entry_hour_from8: -0.06837,
-    due_changes: -0.538377,
-    stage_moves: 0.266929,
-    log_hold_hours: 0.063066,
-    dow_0: -0.287658,
-    dow_1: 0.024906,
-    dow_2: 0.234092,
-    dow_3: -0.023023,
-    dow_4: -0.010952,
-    log_backlog: 0.078251,
-    thin_lt6h: 0.743563,
-    thin_lt12h: 0.182453,
-    thin_lt18h: 0.010125,
-  },
-  qc: {
-    intercept: -1.957785,
-    log_allowed_wh: 0.965457,
-    is_rush: 0.672908,
-    entry_hour_from8: -0.024352,
-    due_changes: -0.069335,
-    stage_moves: 0.036815,
-    log_hold_hours: 0.058525,
-    dow_0: -0.177764,
-    dow_1: -0.234222,
-    dow_2: 0.128916,
-    dow_3: -0.321999,
-    dow_4: 0.057325,
-    log_backlog: -0.039022,
-    thin_lt6h: 0.665837,
-    thin_lt12h: 0.188604,
-    thin_lt18h: 0.012429,
-  },
-};
-
-const ETA_BIAS_BH = {
-  design: 3.972104,
-  production: 8.218431,
-  finishing: 5.056508,
-  qc: 1.675231,
-};
-
-export const RESCHED_WEIGHTS = {
-  design: {
-    intercept: -2.089762,
-    log_allowed_wh: -0.115738,
-    is_rush: 0.23956,
-    entry_hour_from8: 0.093549,
-    due_changes: -0.460649,
-    stage_moves: 0.179508,
-    log_hold_hours: 0.069483,
-    dow_0: 0.195904,
-    dow_1: 0.895072,
-    dow_2: 0.104981,
-    dow_3: -0.25019,
-    dow_4: -0.97208,
-    log_backlog: 0.277596,
-  },
-  production: {
-    intercept: -2.898941,
-    log_allowed_wh: 0.280508,
-    is_rush: 0.304921,
-    entry_hour_from8: -0.031877,
-    due_changes: 0.031466,
-    stage_moves: 0.225873,
-    log_hold_hours: 0.208372,
-    dow_0: 0.07638,
-    dow_1: 0.268953,
-    dow_2: 0.057425,
-    dow_3: -0.433533,
-    dow_4: -0.006247,
-    log_backlog: 0.125255,
-  },
-  finishing: {
-    intercept: -3.072409,
-    log_allowed_wh: 0.392936,
-    is_rush: 0.228209,
-    entry_hour_from8: 0.014063,
-    due_changes: 0.629781,
-    stage_moves: 0.080335,
-    log_hold_hours: 0.494662,
-    dow_0: -0.356527,
-    dow_1: -0.428608,
-    dow_2: 0.211926,
-    dow_3: 0.519935,
-    dow_4: 0.043215,
-    log_backlog: -0.211702,
-  },
-  qc: {
-    intercept: 0,
-    log_allowed_wh: 0,
-    is_rush: 0,
-    entry_hour_from8: 0,
-    due_changes: 0,
-    stage_moves: 0,
-    log_hold_hours: 0,
-    dow_0: 0,
-    dow_1: 0,
-    dow_2: 0,
-    dow_3: 0,
-    dow_4: 0,
-    log_backlog: 0,
-  },
-};
-
-export const STALL_WEIGHTS = {
-  design: {
-    intercept: -1.002144,
-    log_allowed_wh: -0.182932,
-    is_rush: 0.081405,
-    entry_hour_from8: 0.034555,
-    due_changes: 0.576277,
-    stage_moves: -0.206462,
-    log_hold_hours: -0.013732,
-    dow_0: 0.03339,
-    dow_1: 0.310309,
-    dow_2: 0.299819,
-    dow_3: 0.209462,
-    dow_4: -0.852681,
-    log_backlog: 0.382757,
-  },
-  production: {
-    intercept: -1.213911,
-    log_allowed_wh: -0.210764,
-    is_rush: 0.177715,
-    entry_hour_from8: 0.009511,
-    due_changes: 0.007812,
-    stage_moves: 0.026406,
-    log_hold_hours: 0.007904,
-    dow_0: 0.01749,
-    dow_1: 0.06242,
-    dow_2: 0.076707,
-    dow_3: 0.057608,
-    dow_4: -0.174425,
-    log_backlog: 0.171958,
-  },
-  finishing: {
-    intercept: -1.319843,
-    log_allowed_wh: -0.175374,
-    is_rush: 0.184624,
-    entry_hour_from8: -0.013206,
-    due_changes: -0.149343,
-    stage_moves: 0.079618,
-    log_hold_hours: -0.031293,
-    dow_0: -0.106142,
-    dow_1: 0.005437,
-    dow_2: 0.163608,
-    dow_3: -0.071625,
-    dow_4: 0.014146,
-    log_backlog: 0.155345,
-  },
-  qc: {
-    intercept: -1.478745,
-    log_allowed_wh: -0.189624,
-    is_rush: 0.190964,
-    entry_hour_from8: 0.019235,
-    due_changes: -0.014356,
-    stage_moves: 0.243506,
-    log_hold_hours: -0.011767,
-    dow_0: -0.062546,
-    dow_1: 0.050208,
-    dow_2: -0.044985,
-    dow_3: 0.055539,
-    dow_4: 0.002279,
-    log_backlog: -0.116675,
-  },
-};
-
-const CALIB_PLATT = {
-  design: { a: 1, b: 0 },
-  production: { a: 1, b: 0 },
-  finishing: { a: 1, b: 0 },
-  qc: { a: 1, b: 0 },
-};
-const RESCHED_LIKELY_FLOOR = {
-  design: 0.3,
-  production: 0.3,
-  finishing: 0.3,
-  qc: 0.3,
-};
-const RESCHED_PRIOR_LIVE = {
-  design: 0.0954,
-  production: 0.0696,
-  finishing: 0.0328,
-  qc: 0.02,
-};
-const RESCHED_PRIOR_TRAIN = {
-  design: 0.0954,
-  production: 0.0696,
-  finishing: 0.0328,
-  qc: 0.02,
-};
-
-/** ======================= FEATURE METADATA FOR NEURAL VIZ ======================== **/
-
-const FEATURE_METADATA = {
-  intercept: {
-    name: "Base Bias",
-    description: "Model baseline - always active",
-    category: "model",
-    icon: "⚡",
-  },
-  log_allowed_wh: {
-    name: "Time Budget",
-    description: "Log of allowed work hours until due date",
-    category: "time",
-    icon: "⏱️",
-    interpret: (v) =>
-      v > 2
-        ? "Generous timeline"
-        : v > 1
-        ? "Normal timeline"
-        : "Tight deadline",
-  },
-  is_rush: {
-    name: "Rush Priority",
-    description: "Case marked as rush/priority",
-    category: "priority",
-    icon: "🚀",
-    interpret: (v) =>
-      v > 0 ? "RUSH case - expedited processing" : "Standard priority",
-  },
-  entry_hour_from8: {
-    name: "Entry Time",
-    description: "Hours after 8 AM when case entered stage",
-    category: "time",
-    icon: "🕐",
-    interpret: (v) =>
-      v < 2
-        ? "Early morning entry"
-        : v < 5
-        ? "Mid-day entry"
-        : "Late day entry",
-  },
-  due_changes: {
-    name: "Due Date Changes",
-    description: "Number of times due date was modified",
-    category: "history",
-    icon: "📅",
-    interpret: (v) =>
-      v === 0
-        ? "Stable deadline"
-        : v === 1
-        ? "One reschedule"
-        : "Multiple reschedules - unstable",
-  },
-  stage_moves: {
-    name: "Stage Movements",
-    description: "Number of stage transitions",
-    category: "history",
-    icon: "🔄",
-    interpret: (v) =>
-      v <= 1
-        ? "Normal flow"
-        : v <= 3
-        ? "Some back-and-forth"
-        : "High churn - complex case",
-  },
-  log_hold_hours: {
-    name: "Hold Time",
-    description: "Log of total hours spent on hold",
-    category: "blockers",
-    icon: "⏸️",
-    interpret: (v) =>
-      v < 0.5
-        ? "Minimal holds"
-        : v < 1.5
-        ? "Some hold time"
-        : "Significant hold delays",
-  },
-  dow_0: {
-    name: "Monday",
-    description: "Case entered on Monday",
-    category: "timing",
-    icon: "📆",
-    interpret: (v) => (v > 0 ? "Monday entry - week start" : null),
-  },
-  dow_1: {
-    name: "Tuesday",
-    description: "Case entered on Tuesday",
-    category: "timing",
-    icon: "📆",
-    interpret: (v) => (v > 0 ? "Tuesday entry" : null),
-  },
-  dow_2: {
-    name: "Wednesday",
-    description: "Case entered on Wednesday",
-    category: "timing",
-    icon: "📆",
-    interpret: (v) => (v > 0 ? "Wednesday entry - mid-week" : null),
-  },
-  dow_3: {
-    name: "Thursday",
-    description: "Case entered on Thursday",
-    category: "timing",
-    icon: "📆",
-    interpret: (v) => (v > 0 ? "Thursday entry" : null),
-  },
-  dow_4: {
-    name: "Friday",
-    description: "Case entered on Friday",
-    category: "timing",
-    icon: "📆",
-    interpret: (v) => (v > 0 ? "Friday entry - weekend ahead" : null),
-  },
-  log_backlog: {
-    name: "Queue Depth",
-    description: "Log of cases ahead in queue",
-    category: "capacity",
-    icon: "📊",
-    interpret: (v) =>
-      v < 0.3 ? "Short queue" : v < 0.7 ? "Moderate queue" : "Heavy backlog",
-  },
-  thin_lt6h: {
-    name: "Critical Timeline",
-    description: "Less than 6 hours until due",
-    category: "urgency",
-    icon: "🔴",
-    interpret: (v) => (v > 0 ? "CRITICAL - Under 6 hours remaining!" : null),
-  },
-  thin_lt12h: {
-    name: "Tight Timeline",
-    description: "Less than 12 hours until due",
-    category: "urgency",
-    icon: "🟠",
-    interpret: (v) => (v > 0 ? "Tight - Under 12 hours remaining" : null),
-  },
-  thin_lt18h: {
-    name: "Limited Timeline",
-    description: "Less than 18 hours until due",
-    category: "urgency",
-    icon: "🟡",
-    interpret: (v) => (v > 0 ? "Limited buffer - Under 18 hours" : null),
-  },
-};
-
-const CATEGORY_COLORS = {
-  model: { bg: "#f3f4f6", border: "#9ca3af", glow: "#6b7280" },
-  time: { bg: "#dbeafe", border: "#3b82f6", glow: "#2563eb" },
-  priority: { bg: "#fae8ff", border: "#c026d3", glow: "#a855f7" },
-  history: { bg: "#fef3c7", border: "#f59e0b", glow: "#d97706" },
-  blockers: { bg: "#fee2e2", border: "#ef4444", glow: "#dc2626" },
-  timing: { bg: "#e0e7ff", border: "#6366f1", glow: "#4f46e5" },
-  capacity: { bg: "#ccfbf1", border: "#14b8a6", glow: "#0d9488" },
-  urgency: { bg: "#fecaca", border: "#dc2626", glow: "#b91c1c" },
-};
-
-/** ======================= HELPER FUNCTIONS ======================== **/
-
-function learnedCapacity(stage, stageStatsForStage, fallback = 1) {
-  const stg = normalizeStage(stage);
-  const learned = Math.round(
-    stageStatsForStage?.concurrencyP50 ||
-      stageStatsForStage?.concurrencyMean ||
-      fallback
-  );
-  const clipped = Math.max(1, Math.min(6, learned || fallback));
-  return stg === "design" ? 1 : clipped;
+export function parseDueDateForDisplay(dueStr) {
+  if (!dueStr) return null;
+  const base = String(dueStr).split("T")[0];
+  const parts = base.split("-").map(Number);
+  if (parts.length === 3 && !parts.some(isNaN)) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 17, 0, 0, 0);
+  }
+  const d = new Date(dueStr);
+  return isNaN(d) ? null : d;
 }
 
-function effectiveBacklog(activeCases, c, stage, entryAt, k) {
-  const stg = normalizeStage(stage);
-  const earlier = activeCases.filter((o) => {
-    if (o.id === c.id || o.caseNumber === c.caseNumber) return false;
-    const otherStage = normalizeStage(o.currentStage || o.stage);
-    if (otherStage !== stg) return false;
-    const otherEntry = getStageEnteredAtFor(o, stg);
-    return otherEntry && otherEntry < entryAt;
+function parseTimestamp(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+function normalizeStage(s) {
+  const x = String(s || "").toLowerCase().trim();
+  if (x.startsWith("design")) return "design";
+  if (x.startsWith("prod")) return "production";
+  if (x.startsWith("finish")) return "finishing";
+  if (x.startsWith("qc") || x.includes("quality")) return "qc";
+  return "design";
+}
+
+function strSet(arr) {
+  const s = new Set();
+  (arr || []).forEach((x) => s.add(String(x).toLowerCase().trim()));
+  return s;
+}
+
+/** ========================================================================
+ *  CASE HISTORY PARSING
+ *  ======================================================================== */
+
+function getHistory(c) {
+  return (c.case_history || c.history || []).slice().sort((a, b) => {
+    const ta = new Date(a.created_at).getTime();
+    const tb = new Date(b.created_at).getTime();
+    return ta - tb;
+  });
+}
+
+function histCountUpTo(c, pred, cutoff) {
+  return getHistory(c).filter((h) => {
+    const t = parseTimestamp(h.created_at);
+    return t && t <= cutoff && pred((h.action || "").toLowerCase());
   }).length;
-  return Math.max(0, earlier - Math.max(0, (k || 1) - 1));
 }
 
-function applyPriorShift(logit, pTrain, pLive) {
-  const lt = Math.log(pTrain / (1 - pTrain));
-  const ll = Math.log(pLive / (1 - pLive));
-  return logit - lt + ll;
+function holdHoursUntil(c, cutoff) {
+  let on = null, total = 0;
+  for (const h of getHistory(c)) {
+    const a = (h.action || "").toLowerCase();
+    const t = parseTimestamp(h.created_at);
+    if (!t || t > cutoff) break;
+    if (a.includes("hold added")) on = t;
+    if (a.includes("hold removed") && on) { total += (t - on) / 3600000; on = null; }
+  }
+  if (on) total += (cutoff - on) / 3600000;
+  return Math.max(0, total);
 }
 
-function shockScore(activeCases, stage, capacityK) {
-  const stg = normalizeStage(stage);
-  const S = activeCases.filter(
-    (c) => normalizeStage(c.currentStage || c.stage) === stg
-  );
-  const n = S.length || 1;
-  const behind = S.filter((c) => (c.slackDays ?? 99) < 0).length / n;
-  const heavyHolds =
-    S.filter((c) => (c.holdHours || 0) >= 4 || c.onHold).length / n;
-  const backlogRatio =
-    Math.max(0, n - (capacityK || 1)) / Math.max(1, capacityK || 1);
-  return behind > 0.35
-    ? clamp(
-        0.5 * behind +
-          0.3 * Math.tanh(Math.max(0, backlogRatio - 0.3)) +
-          0.2 * heavyHolds,
-        0,
-        1
-      )
-    : 0;
+function eventsSinceEntry(c, entry, now) {
+  return getHistory(c).filter((h) => {
+    const t = parseTimestamp(h.created_at);
+    if (!t || t < entry || t > now) return false;
+    const a = (h.action || "").toLowerCase();
+    return ["moved", "due changed", "hold", "comment", "uploaded", "repair"].some((k) => a.includes(k));
+  }).length;
 }
 
-function eventsPerHourSince(c, start, end = getCurrentTime()) {
-  const H = (c.case_history || c.history || [])
-    .filter((h) => h?.created_at)
-    .map((h) => ({
-      t: new Date(h.created_at),
-      a: String(h.action || "").toLowerCase(),
-    }))
-    .sort((a, b) => a.t - b.t)
-    .filter(
-      (h) =>
-        h.t >= start &&
-        h.t < end &&
-        (h.a.includes("moved") ||
-          h.a.includes("due changed") ||
-          h.a.includes("hold added") ||
-          h.a.includes("hold removed"))
-    );
-  const bh = businessHoursBetween(start, end);
-  return bh <= 1e-6 ? 0 : H.length / bh;
-}
-
-function lastActivityAtSince(c, since) {
-  const H = (c.case_history || c.history || [])
-    .filter((h) => h?.created_at)
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  const s = new Date(since);
-  let last = s;
-  for (const h of H) {
-    const t = new Date(h.created_at);
-    if (t < s) continue;
-    const a = String(h.action || "").toLowerCase();
-    if (
-      (a.includes("hold") ||
-        a.includes("moved") ||
-        a.includes("comment") ||
-        a.includes("uploaded") ||
-        a.includes("note") ||
-        a.includes("repair")) &&
-      !isNaN(t.getTime())
-    )
-      last = t;
+function lastActivityAtSince(c, entry) {
+  let last = entry;
+  for (const h of getHistory(c)) {
+    const t = parseTimestamp(h.created_at);
+    if (!t || t < entry) continue;
+    const a = (h.action || "").toLowerCase();
+    if (["hold", "moved", "comment", "uploaded", "repair"].some((k) => a.includes(k))) last = t;
   }
   return last;
 }
 
-function timeSinceLastActivityHours(c, stageEnteredAt) {
-  const last = lastActivityAtSince(c, stageEnteredAt);
-  return (getCurrentTime() - last) / 3_600_000;
-}
-
-function strSet(mods) {
-  if (!mods) return new Set();
-  if (Array.isArray(mods))
-    return new Set(mods.map((m) => String(m).toLowerCase()));
-  return new Set(
-    String(mods)
-      .toLowerCase()
-      .split(/[\,\s]+/g)
-  );
-}
-
-function histCountUpTo(c, pred, cutoff) {
-  const H = (c.case_history || c.history || [])
-    .filter((h) => h?.created_at)
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  let n = 0;
-  for (const h of H) {
-    if (new Date(h.created_at) > cutoff) break;
-    if (pred(String(h.action || "").toLowerCase())) n++;
-  }
-  return n;
-}
-
-function holdHoursUntil(c, cutoff) {
-  const H = (c.case_history || c.history || [])
-    .filter((h) => h?.created_at)
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  let on = null,
-    total = 0;
-  for (const h of H) {
-    const a = String(h.action || "").toLowerCase();
-    const t = new Date(h.created_at);
-    if (t > cutoff) break;
-    if (a.includes("hold added")) on = t;
-    if (a.includes("hold removed") && on) {
-      total += t - on;
-      on = null;
-    }
-  }
-  if (on) total += cutoff - on;
-  return total / 3_600_000;
-}
-
 function getStageEnteredAtFor(c, stage) {
   const stg = normalizeStage(stage);
-  const visits = Array.isArray(c?.visits) ? c.visits : [];
-  for (let i = visits.length - 1; i >= 0; i--) {
-    const v = visits[i];
-    const name = (v?.stage || v?.name || "").toString().toLowerCase();
-    if (name.includes(stg) && v?.enteredAt) {
-      const dt = new Date(v.enteredAt);
-      if (!isNaN(dt.getTime())) return dt;
+  const target = {
+    design: /design/,
+    production: /production/,
+    finishing: /finishing/,
+    qc: /quality control|qc/,
+  }[stg];
+  let entry = parseTimestamp(c.created_at);
+  for (const h of getHistory(c)) {
+    const a = (h.action || "").toLowerCase();
+    if (target.test(a) && a.includes("to ")) {
+      const t = parseTimestamp(h.created_at);
+      if (t) entry = t;
     }
   }
-  if (c?.stageEnteredAt) {
-    const dt = new Date(c.stageEnteredAt);
-    if (!isNaN(dt.getTime())) return dt;
-  }
-  const H = (c?.case_history || c?.history || [])
-    .slice()
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  for (let i = H.length - 1; i >= 0; i--) {
-    const a = String(H[i]?.action || "").toLowerCase();
-    if (
-      a.includes("moved to") &&
-      a.includes("stage") &&
-      a.includes(stg) &&
-      H[i]?.created_at
-    ) {
-      const dt = new Date(H[i].created_at);
-      if (!isNaN(dt.getTime())) return dt;
-    }
-  }
-  const fallback = new Date(c?.created_at || Date.now());
-  return isNaN(fallback.getTime()) ? new Date() : fallback;
+  return entry;
 }
 
-function featureVector(c, stage, entry, dueEodDate, extra = {}) {
-  const mods = strSet(c.modifiers);
-  const isRush = !!(
-    c.priority ||
-    c.rush ||
-    mods.has("rush") ||
-    mods.has("priority")
-  );
-  const allowedWH = dueEodDate ? businessHoursBetween(entry, dueEodDate) : 0;
-  const hour = entry.getHours() + entry.getMinutes() / 60;
-  const dpy = dowPy(entry);
+/** ========================================================================
+ *  FEATURE COMPUTATION — 108 features matching Python training
+ *  ======================================================================== */
 
-  return {
-    intercept: 1,
-    log_allowed_wh: Math.log1p(Math.max(0, allowedWH)),
-    is_rush: isRush ? 1 : 0,
-    entry_hour_from8: Math.max(0, hour - 8),
-    due_changes: histCountUpTo(c, (a) => a.startsWith("due changed"), entry),
-    stage_moves: histCountUpTo(c, (a) => a.includes("moved"), entry),
-    log_hold_hours: Math.log1p(Math.max(0, holdHoursUntil(c, entry))),
-    dow_0: dpy === 0 ? 1 : 0,
-    dow_1: dpy === 1 ? 1 : 0,
-    dow_2: dpy === 2 ? 1 : 0,
-    dow_3: dpy === 3 ? 1 : 0,
-    dow_4: dpy === 4 ? 1 : 0,
-    log_backlog: extra.log_backlog ?? 0,
-    thin_lt6h: allowedWH < 6 ? 1 : 0,
-    thin_lt12h: allowedWH < 12 ? 1 : 0,
-    thin_lt18h: allowedWH < 18 ? 1 : 0,
-  };
-}
-
-function dot(w, x) {
-  let s = 0;
-  for (const k in w) s += (w[k] || 0) * (x[k] || 0);
-  return s;
-}
-
-/** ======================= DYNAMIC ETA ADJUSTMENT ======================== **/
-
-function calculateDynamicETAExtension(
-  c,
-  stage,
-  stageEnteredAt,
-  elapsedWorkHours,
-  originalTotalWorkHours,
-  activeCases,
-  stageStatsForStage
-) {
-  const now = getCurrentTime();
+function computeV8Features(c, stage, entry, due, activeCases, now) {
   const stg = normalizeStage(stage);
-  const k = learnedCapacity(stg, stageStatsForStage, STAGE_CAPACITY[stg] || 1);
-  const overrunHours = Math.max(0, elapsedWorkHours - originalTotalWorkHours);
+  const mods = strSet(c.modifiers);
+  const history = getHistory(c);
+  const created = parseTimestamp(c.created_at) || entry;
+  const events = history.map((h) => ({
+    ts: parseTimestamp(h.created_at),
+    action: (h.action || "").toLowerCase().trim(),
+    user: h.user_name || "",
+  })).filter((e) => e.ts);
 
-  if (overrunHours <= 0)
-    return { extensionHours: 0, adjustmentReason: null, isAdjusted: false };
+  // Base
+  const rush = !!(c.priority || c.rush || mods.has("rush") || mods.has("priority"));
+  const allowedWH = due ? businessHoursBetween(entry, due) : 0;
+  const entryHour = entry.getHours() + entry.getMinutes() / 60;
+  const dpy = entry.getDay() === 0 ? 6 : entry.getDay() - 1; // Python: Monday=0
+  const isRepair = /repair/i.test(c.caseNumber || c.casenumber || "");
+  const isFlex = mods.has("flex");
+  const isBBS = mods.has("bbs");
+  const leadDays = due && created ? Math.max(0, (due - created) / 86400000) : 3.0;
 
-  const hoursIdle = timeSinceLastActivityHours(c, stageEnteredAt);
-  const currentHoldHours = holdHoursUntil(c, now);
-  const holdHoursSinceEntry = holdHoursUntil(c, stageEnteredAt);
-  const recentHoldHours = Math.max(0, currentHoldHours - holdHoursSinceEntry);
-  const entry = new Date(stageEnteredAt);
-  const backlogEff = effectiveBacklog(activeCases, c, stg, entry, k);
+  const eventsBefore = events.filter((e) => e.ts <= now);
+  const dueChanges = eventsBefore.filter((e) => e.ts <= entry && e.action.startsWith("due changed")).length;
+  const stageMoves = eventsBefore.filter((e) => e.ts <= entry && e.action.includes("moved")).length;
+  const holdPre = holdHoursUntil(c, entry);
+  const hasBackward = eventsBefore.some((e) => e.ts <= entry && (e.action.includes("to design") || e.action.includes("from finishing to production")));
+  const hasPriorQC = eventsBefore.some((e) => e.ts <= entry && e.action.includes("quality control"));
 
-  let extensionHours = 0;
-  const reasons = [];
+  // Concurrent count — raw, no capacity division
+  const concurrent = (activeCases || []).filter((o) => {
+    if (!o || o.id === c.id) return false;
+    return normalizeStage(o.currentStage || o.stage) === stg;
+  }).length;
 
-  if (hoursIdle >= 2) {
-    extensionHours += Math.min(hoursIdle * 0.5, 8);
-    reasons.push(`idle ${formatHours(hoursIdle)}`);
+  const caseNum = (c.caseNumber || c.casenumber || "").replace(/[^0-9]/g, "");
+  const timesSeen = caseNum
+    ? (activeCases || []).filter((o) => {
+        const on = (o.caseNumber || o.casenumber || "").replace(/[^0-9]/g, "");
+        return on === caseNum && o.id !== c.id;
+      }).length
+    : 0;
+
+  const sameDayCases = Math.min(20,
+    (activeCases || []).filter((o) => {
+      const oc = parseTimestamp(o.created_at);
+      return oc && created && oc.toDateString() === created.toDateString() && o.id !== c.id;
+    }).length
+  );
+
+  // Live features
+  const elapsedBH = Math.max(0, businessHoursBetween(entry, now));
+  const fracBudget = allowedWH > 0 ? Math.min(3, elapsedBH / Math.max(0.1, allowedWH)) : 0;
+  const remainingBudget = Math.max(0, allowedWH - elapsedBH);
+  const evtCount = eventsSinceEntry(c, entry, now);
+  const lastAct = lastActivityAtSince(c, entry);
+  const hoursIdle = Math.max(0, (now - lastAct) / 3600000);
+  const holdDuring = Math.max(0, holdHoursUntil(c, now) - holdPre);
+  const actRate = elapsedBH > 0.1 ? evtCount / Math.max(0.5, elapsedBH) : 0;
+  const logConcurrent = Math.log1p(concurrent);
+
+  // ==== NEW DEEP FEATURES (v8) ====
+
+  // 1. Hours to first action after creation
+  let hoursToFirst = 24;
+  const firstNon = events.find((e) => e.ts > created && e.action !== "case created");
+  if (firstNon && created) hoursToFirst = Math.max(0, (firstNon.ts - created) / 3600000);
+
+  // 2. Rush added late (>1h after creation)
+  let rushAddedLate = 0, hoursToRush = 0;
+  for (const e of events) {
+    if (e.action.includes("rush added") || e.action.includes("priority added")) {
+      if (created && (e.ts - created) / 3600000 > 1) rushAddedLate = 1;
+      if (rush && !hoursToRush && created) hoursToRush = Math.max(0, (e.ts - created) / 3600000);
+      break;
+    }
   }
-  if (recentHoldHours > 0) {
-    extensionHours += recentHoldHours * 0.8;
-    reasons.push(`hold ${formatHours(recentHoldHours)}`);
+
+  // 3. Due date change direction
+  let dueCloser = 0, dueFurther = 0;
+  for (const h of history) {
+    const t = parseTimestamp(h.created_at);
+    if (!t || t > now) break;
+    const raw = h.action || "";
+    if (/^due (date )?changed from/i.test(raw)) {
+      const m = raw.match(/(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})/);
+      if (m) {
+        const d1 = new Date(m[1]).getTime(), d2 = new Date(m[2]).getTime();
+        if (d2 > d1) dueFurther++;
+        else if (d2 < d1) dueCloser++;
+      }
+    }
   }
-  if (backlogEff > 2) {
-    extensionHours += (backlogEff - 2) * 0.5;
-    reasons.push(`backlog ${backlogEff}`);
+
+  // 4. Hold cycles (count of hold-added events)
+  let holdCycles = 0;
+  for (const e of events) {
+    if (e.ts > now) break;
+    if (e.ts >= entry && e.action.includes("hold added")) holdCycles++;
   }
-  extensionHours += overrunHours * 0.3;
-  extensionHours = Math.max(1, Math.min(extensionHours, 24));
+
+  // 5. Batch siblings — cases created within 10 min
+  let batchSiblings = 0;
+  if (created) {
+    for (const o of (activeCases || [])) {
+      if (o.id === c.id) continue;
+      const oc = parseTimestamp(o.created_at);
+      if (oc && Math.abs(oc - created) < 600000) batchSiblings++;
+    }
+  }
+
+  // 6. Early actions (first 2h after creation)
+  let earlyActions = 0;
+  if (created) {
+    for (const e of events) {
+      if (e.ts > new Date(created.getTime() + 2 * 3600000)) break;
+      if (e.ts > created && e.action !== "case created") earlyActions++;
+    }
+  }
+
+  // 7. Mid-stage actions (non-transition events during visit)
+  const midStageActions = events.filter((e) => {
+    if (e.ts < entry || e.ts > now) return false;
+    return !["moved from", "moved to", "marked done", "case created", "case archived"].some((k) => e.action.includes(k));
+  }).length;
+
+  // 8. Longest gap between consecutive events during visit
+  let longestGap = 0;
+  const relevant = events.filter((e) => e.ts >= entry && e.ts <= now);
+  if (relevant.length >= 2) {
+    for (let i = 1; i < relevant.length; i++) {
+      const gap = (relevant[i].ts - relevant[i - 1].ts) / 3600000;
+      if (gap > longestGap) longestGap = gap;
+    }
+  } else if (now > entry) {
+    longestGap = Math.min(48, (now - entry) / 3600000);
+  }
+
+  // 9. Created outside work hours
+  let createdOutside = 0;
+  if (created) {
+    const h = created.getHours();
+    if (h < 8 || h >= 17 || isWeekend(created)) createdOutside = 1;
+  }
+
+  // 10. Gap before stage entry (batch-update detector)
+  let gapBeforeEntry = 0;
+  const preEntry = events.filter((e) => e.ts <= entry);
+  if (preEntry.length >= 2) {
+    gapBeforeEntry = (preEntry[preEntry.length - 1].ts - preEntry[preEntry.length - 2].ts) / 3600000;
+  }
+
+  // 11. Unique users
+  const uniqueUsers = new Set(events.filter((e) => e.ts <= now && e.user).map((e) => e.user)).size;
+
+  // 12. Stage position
+  const stagePos = STAGE_ORDER[stg] ?? 0;
+  const stagesRemaining = Math.max(0, 3 - stagePos);
+
+  // 13. Backward moves
+  const backwardCount = eventsBefore.filter((e) =>
+    e.action.includes("to design") || e.action.includes("from finishing to production")
+  ).length;
+
+  // 14. Days since last due change
+  let daysSinceDueChange = 0;
+  for (let i = eventsBefore.length - 1; i >= 0; i--) {
+    const a = eventsBefore[i].action;
+    if (a.startsWith("due changed") || a.startsWith("due date changed")) {
+      daysSinceDueChange = Math.max(0, (now - eventsBefore[i].ts) / 86400000);
+      break;
+    }
+  }
+
+  // 15. Has appointment note
+  const hasAppt = /appt|am\b|pm\b|\d+:\d+/i.test(c.caseNumber || c.casenumber || "") ? 1 : 0;
+
+  // Auto-generated action type features
+  const actionTypes = {
+    rush_added:    (a) => a.includes("rush added"),
+    priority_added:(a) => a.includes("priority added"),
+    hold_added:    (a) => a.includes("hold added"),
+    hold_removed:  (a) => a.includes("hold removed"),
+    moved_to_prod: (a) => a.includes("design to production"),
+    moved_to_finish:(a) => a.includes("production to finishing"),
+    moved_to_qc:   (a) => a.includes("quality control"),
+    backward_move: (a) => a.includes("to design") || a.includes("from finishing to production"),
+    due_changed:   (a) => a.startsWith("due changed") || a.startsWith("due date changed"),
+  };
+  const autoFeats = {};
+  for (const [atype, pred] of Object.entries(actionTypes)) {
+    let firstTs = null, count = 0;
+    for (const e of eventsBefore) {
+      if (pred(e.action)) {
+        if (!firstTs) firstTs = e.ts;
+        count++;
+      }
+    }
+    const hToFirst = firstTs && created ? Math.max(0, (firstTs - created) / 3600000) : -1;
+    autoFeats[`h_to_${atype}`] = hToFirst >= 0 ? hToFirst : 0;
+    autoFeats[`has_${atype}`] = count > 0 ? 1 : 0;
+    autoFeats[`count_${atype}`] = count;
+  }
+
+  // Build feature dictionary keyed by name (then serialize in V8_FEATURE_NAMES order)
+  const f = {
+    intercept: 1.0,
+    log_allowed_wh: Math.log1p(Math.max(0, allowedWH)),
+    allowed_wh_raw: Math.min(80, Math.max(0, allowedWH)),
+    is_rush: rush ? 1 : 0,
+    entry_hour: entryHour,
+    due_changes: dueChanges,
+    stage_moves: stageMoves,
+    log_hold_pre: Math.log1p(Math.max(0, holdPre)),
+    dow: dpy,
+    is_friday: dpy === 4 ? 1 : 0,
+    is_monday: dpy === 0 ? 1 : 0,
+    concurrent_in_stage: concurrent,
+    log_concurrent: logConcurrent,
+    is_repair: isRepair ? 1 : 0,
+    is_flex: isFlex ? 1 : 0,
+    is_bbs: isBBS ? 1 : 0,
+    log_lead_days: Math.log1p(Math.max(0, leadDays)),
+    lead_days_raw: Math.min(14, Math.max(0, leadDays)),
+    has_backward: hasBackward ? 1 : 0,
+    has_prior_qc: hasPriorQC ? 1 : 0,
+    log_times_seen: Math.log1p(timesSeen),
+    same_day_cases: sameDayCases,
+    elapsed_bh: elapsedBH,
+    log_elapsed: Math.log1p(Math.max(0, elapsedBH)),
+    frac_budget: fracBudget,
+    frac_budget_sq: Math.min(9, fracBudget * fracBudget),
+    remaining_budget: Math.min(80, remainingBudget),
+    log_remaining_budget: Math.log1p(remainingBudget),
+    events_count: evtCount,
+    log_events: Math.log1p(evtCount),
+    activity_rate: actRate,
+    hours_idle: Math.min(48, hoursIdle),
+    log_idle: Math.log1p(hoursIdle),
+    hold_during: Math.min(24, holdDuring),
+    is_overrun: fracBudget > 1.0 ? 1 : 0,
+    thin_rem_3h: remainingBudget < 3 ? 1 : 0,
+    thin_rem_6h: remainingBudget < 6 ? 1 : 0,
+    thin_rem_12h: remainingBudget < 12 ? 1 : 0,
+    elapsed_x_rush: elapsedBH * (rush ? 1 : 0),
+    elapsed_x_flex: elapsedBH * (isFlex ? 1 : 0),
+    elapsed_x_bbs: elapsedBH * (isBBS ? 1 : 0),
+    elapsed_x_repair: elapsedBH * (isRepair ? 1 : 0),
+    elapsed_x_concurrent: elapsedBH * logConcurrent,
+    elapsed_x_idle: elapsedBH * Math.log1p(hoursIdle),
+    frac_x_rush: fracBudget * (rush ? 1 : 0),
+    frac_x_events: fracBudget * Math.log1p(evtCount),
+    allowed_x_flex: Math.log1p(allowedWH) * (isFlex ? 1 : 0),
+    allowed_x_repair: Math.log1p(allowedWH) * (isRepair ? 1 : 0),
+    lead_x_flex: Math.log1p(leadDays) * (isFlex ? 1 : 0),
+    idle_x_frac: Math.log1p(hoursIdle) * Math.min(3, fracBudget),
+    concurrent_x_dow: concurrent * dpy,
+    concurrent_x_friday: concurrent * (dpy === 4 ? 1 : 0),
+
+    log_hours_to_first_action: Math.log1p(Math.min(72, hoursToFirst)),
+    hours_to_first_action: Math.min(72, hoursToFirst),
+    rush_added_late: rushAddedLate,
+    log_hours_to_rush: rush ? Math.log1p(hoursToRush) : 0,
+    due_changes_closer: dueCloser,
+    due_changes_further: dueFurther,
+    due_net_direction: dueFurther - dueCloser,
+    hold_cycles: holdCycles,
+    batch_siblings: Math.min(10, batchSiblings),
+    log_batch_siblings: Math.log1p(batchSiblings),
+    early_actions: Math.min(5, earlyActions),
+    mid_stage_actions: Math.min(10, midStageActions),
+    log_longest_gap: Math.log1p(Math.min(48, longestGap)),
+    longest_gap: Math.min(48, longestGap),
+    created_outside_hours: createdOutside,
+    gap_before_entry: Math.min(48, gapBeforeEntry),
+    log_gap_before_entry: Math.log1p(Math.min(48, gapBeforeEntry)),
+    unique_users: uniqueUsers,
+    stage_position: stagePos,
+    stages_remaining: stagesRemaining,
+    backward_count: backwardCount,
+    days_since_due_change: Math.min(30, daysSinceDueChange),
+    has_appt: hasAppt,
+
+    pickup_x_batch: Math.log1p(Math.min(72, hoursToFirst)) * Math.log1p(batchSiblings),
+    idle_x_concurrent: Math.log1p(hoursIdle) * logConcurrent,
+    flex_x_stages_remaining: (isFlex ? 1 : 0) * stagesRemaining,
+    rush_late_x_elapsed: rushAddedLate * elapsedBH,
+    backward_x_elapsed: backwardCount * elapsedBH,
+    hold_cycles_x_elapsed: holdCycles * elapsedBH,
+
+    ...autoFeats,
+  };
+
+  const array = V8_FEATURE_NAMES.map((n) => (f[n] !== undefined ? f[n] : 0));
 
   return {
-    extensionHours,
-    adjustmentReason:
-      reasons.length > 0 ? reasons.join(", ") : "exceeded prediction",
-    isAdjusted: true,
-    overrunHours,
-    factors: {
-      idleTime: hoursIdle,
-      recentHolds: recentHoldHours,
-      backlog: backlogEff,
-      overrun: overrunHours,
-    },
+    array,
+    dict: f,
+    concurrent,
+    elapsedBH,
+    hoursIdle,
+    remainingBudget,
+    allowedWH,
+    fracBudget,
+    rush,
+    isFlex,
+    isBBS,
+    isRepair,
+    holdHours: holdPre + holdDuring,
   };
 }
 
-/** ======================= CORE PREDICTORS ======================== **/
+/** ========================================================================
+ *  XGBOOST TREE EVALUATION
+ *  ======================================================================== */
 
-function predictStageExitML(
-  c,
-  stage,
-  stageEnteredAt,
-  activeCases,
-  stageStatsForStage
-) {
+function walkTree(node, features) {
+  if (node.leaf !== undefined) return node.leaf;
+  const featIdx = typeof node.split === "string"
+    ? parseInt(node.split.replace("f", ""), 10)
+    : node.split;
+  const val = features[featIdx];
+  if (val === undefined || val === null || Number.isNaN(val)) {
+    const mc = node.missing ?? node.yes ?? (node.children?.[0]?.nodeid);
+    const match = node.children?.find((ch) => ch.nodeid === mc);
+    return match ? walkTree(match, features) : 0;
+  }
+  const threshold = node.split_condition;
+  const goLeftId = val < threshold ? (node.yes ?? node.children?.[0]?.nodeid) : (node.no ?? node.children?.[1]?.nodeid);
+  const child = node.children?.find((ch) => ch.nodeid === goLeftId) ?? node.children?.[val < threshold ? 0 : 1];
+  return child ? walkTree(child, features) : 0;
+}
+
+function xgbPredictRegression(subModel, features) {
+  if (!subModel?.trees) return 0;
+  // Per-model base_score (different for each quantile in quantile regression)
+  let sum = typeof subModel.base_score === "number" ? subModel.base_score : 0.5;
+  for (const tree of subModel.trees) {
+    sum += tree.leaf !== undefined ? tree.leaf : walkTree(tree, features);
+  }
+  return sum;
+}
+
+function xgbPredictProba(subModel, features) {
+  if (!subModel?.trees) return 0.5;
+  // Classification base_score is typically 0 in logit space (logistic loss)
+  let sum = typeof subModel.base_score === "number" ? subModel.base_score : 0;
+  for (const tree of subModel.trees) {
+    sum += tree.leaf !== undefined ? tree.leaf : walkTree(tree, features);
+  }
+  return 1 / (1 + Math.exp(-sum));
+}
+
+/** ========================================================================
+ *  MODEL LOADING
+ *  ======================================================================== */
+
+let XGB_MODELS = null;
+let modelLoadPromise = null;
+
+export function loadModels(modelUrl = "/xgb_v8_3_final.json") {
+  if (XGB_MODELS) return Promise.resolve(XGB_MODELS);
+  if (modelLoadPromise) return modelLoadPromise;
+  modelLoadPromise = fetch(modelUrl)
+    .then((r) => { if (!r.ok) throw new Error(`Model fetch ${r.status}`); return r.json(); })
+    .then((data) => {
+      XGB_MODELS = data;
+      if (typeof window !== "undefined") {
+        console.log("[v8] Models loaded for stages:", Object.keys(data).join(", "));
+      }
+      return data;
+    })
+    .catch((err) => {
+      console.error("[v8] Failed to load models:", err);
+      return null;
+    });
+  return modelLoadPromise;
+}
+
+export function modelsReady() { return !!XGB_MODELS; }
+
+/** ========================================================================
+ *  CORE PREDICTION — runs all quantile models + P(resched)
+ *  ======================================================================== */
+
+/** ========================================================================
+ *  QUANTILE COMPUTATION — v8.2 distributional (mean + sigma)
+ *  ========================================================================
+ *  Instead of training 4 independent quantile models (which can cross),
+ *  we train a mean model and a sigma model. Quantiles are derived analytically
+ *  from the lognormal distribution: q_α = exp(mean + z_α * sigma * scale) − 1
+ *  
+ *  This guarantees p10 ≤ p50 ≤ p75 ≤ p90 by mathematical construction
+ *  (the CDF is strictly monotone).
+ *  
+ *  Asymmetric scales handle right-skew in duration data:
+ *    scale_lower  for z < 0 (p10 side)
+ *    scale_upper_75  for z ≈ 0.67 (p75)
+ *    scale_upper_90  for z ≈ 1.28 (p90)
+ */
+
+// Standard normal z-values for target quantiles
+const Z_QUANTILES = {
+  p10: -1.2815515655446004,
+  p50: 0,
+  p75: 0.6744897501960817,
+  p90: 1.2815515655446004,
+};
+
+function computeQuantiles(meanModel, sigmaModel, features) {
+  if (!meanModel || !sigmaModel) {
+    return { p10: 0, p50: 0, p75: 0, p90: 0 };
+  }
+  
+  const meanRaw = xgbPredictRegression(meanModel, features);
+  const logSigmaRaw = xgbPredictRegression(sigmaModel, features);
+  const sigmaBase = Math.exp(logSigmaRaw);
+  
+  const scales = {
+    lower: sigmaModel.scale_lower ?? 1.0,
+    up75: sigmaModel.scale_upper_75 ?? 1.0,
+    up90: sigmaModel.scale_upper_90 ?? 1.0,
+  };
+  
+  // Conformal adjustments — additive hours to guarantee coverage
+  const conformal = {
+    p75: sigmaModel.conformal_p75 ?? 0,
+    p90: sigmaModel.conformal_p90 ?? 0,
+  };
+  
+  const quantileHours = (z, conformalAdj = 0) => {
+    let scale;
+    if (z < 0) scale = scales.lower;
+    else if (z > 0 && z < 1.0) scale = scales.up75;
+    else if (z >= 1.0) scale = scales.up90;
+    else scale = 1.0;
+    const logHours = meanRaw + z * sigmaBase * scale;
+    const hours = Math.max(0, Math.exp(logHours) - 1);
+    return hours + conformalAdj;  // conformal layer adds guaranteed buffer
+  };
+  
+  return {
+    p10: quantileHours(Z_QUANTILES.p10),
+    p50: quantileHours(Z_QUANTILES.p50),
+    p75: quantileHours(Z_QUANTILES.p75, conformal.p75),
+    p90: quantileHours(Z_QUANTILES.p90, conformal.p90),
+  };
+}
+
+/**
+ * Predicts P(case will exceed its allowed work-hour budget) using the
+ * dedicated late classifier. Returns a calibrated probability via isotonic
+ * regression lookup.
+ */
+function predictLateProb(stageModel, features) {
+  const lateModel = stageModel?.late_classifier;
+  if (!lateModel) return null;
+  
+  // Raw classifier output
+  const rawProb = xgbPredictProba(lateModel, features);
+  
+  // Apply isotonic calibration if present
+  const xPts = lateModel.calibration_x;
+  const yPts = lateModel.calibration_y;
+  if (!xPts || !yPts || xPts.length !== yPts.length) return rawProb;
+  
+  // Piecewise linear interpolation through calibration curve
+  if (rawProb <= xPts[0]) return yPts[0];
+  if (rawProb >= xPts[xPts.length - 1]) return yPts[yPts.length - 1];
+  for (let i = 0; i < xPts.length - 1; i++) {
+    if (rawProb >= xPts[i] && rawProb <= xPts[i + 1]) {
+      const frac = (rawProb - xPts[i]) / Math.max(1e-9, xPts[i + 1] - xPts[i]);
+      return yPts[i] + frac * (yPts[i + 1] - yPts[i]);
+    }
+  }
+  return rawProb;
+}
+
+function predictCaseML(c, stage, stageEnteredAt, activeCases) {
   const now = getCurrentTime();
   const entry = stageEnteredAt ? new Date(stageEnteredAt) : now;
   const due = dueEOD(c.due || null);
   const stg = normalizeStage(stage);
-  const k = learnedCapacity(stg, stageStatsForStage, STAGE_CAPACITY[stg] || 1);
-  const backlogEff = effectiveBacklog(activeCases, c, stg, entry, k);
-  const log_backlog = Math.log1p(backlogEff / Math.max(1, k));
 
-  const x = featureVector(c, stg, entry, due, { log_backlog });
-  const w = ETA_WEIGHTS[stg] || ETA_WEIGHTS.design;
+  const feats = computeV8Features(c, stg, entry, due, activeCases, now);
+  const featureArray = feats.array;
 
-  // Calculate individual feature contributions
-  const featureContributions = {};
-  for (const key in x) {
-    featureContributions[key] = {
-      value: x[key],
-      weight: w[key] || 0,
-      contribution: (x[key] || 0) * (w[key] || 0),
-      metadata: FEATURE_METADATA[key] || {
-        name: key,
-        description: "Unknown feature",
-        category: "model",
-        icon: "?",
-      },
-    };
+  const model = XGB_MODELS?.[stg];
+  let stageQ = null, totalQ = null, pResched = 0.05, modelUsed = "fallback";
+  let pLateDirect = null;  // From dedicated classifier
+  let lateThresholds = null;
+
+  if (model?.stage_mean && model?.stage_sigma) {
+    stageQ = computeQuantiles(model.stage_mean, model.stage_sigma, featureArray);
+    totalQ = computeQuantiles(model.total_mean, model.total_sigma, featureArray);
+    if (model.resched) pResched = xgbPredictProba(model.resched, featureArray);
+    
+    // NEW in v8.3: dedicated late classifier
+    if (model.late_classifier) {
+      pLateDirect = predictLateProb(model, featureArray);
+      lateThresholds = {
+        critical: model.late_classifier.thresh_critical ?? 0.8,
+        high: model.late_classifier.thresh_high ?? 0.5,
+        medium: model.late_classifier.thresh_medium ?? 0.25,
+      };
+    }
+    
+    modelUsed = "xgboost-v8.3";
+  } else {
+    const rem = Math.max(0.5, feats.remainingBudget || 4);
+    stageQ = { p10: rem * 0.5, p50: rem, p75: rem * 1.3, p90: rem * 1.8 };
+    totalQ = { p10: rem * 0.8, p50: rem * 1.5, p75: rem * 2, p90: rem * 3 };
   }
 
-  const logPrediction = dot(w, x);
-  const baseTotalWorkHours = Math.max(0, Math.exp(logPrediction) - 1);
-  const biasBH = ETA_BIAS_BH[stg] || 0;
-  const originalTotalWorkHours = baseTotalWorkHours + biasBH;
-  const elapsedWorkHours = Math.max(0, businessHoursBetween(entry, now));
+  const stageETAs = {
+    p10: addBusinessHours(now, stageQ.p10),
+    p50: addBusinessHours(now, stageQ.p50),
+    p75: addBusinessHours(now, stageQ.p75),
+    p90: addBusinessHours(now, stageQ.p90),
+  };
+  const totalETAs = {
+    p10: addBusinessHours(now, totalQ.p10),
+    p50: addBusinessHours(now, totalQ.p50),
+    p75: addBusinessHours(now, totalQ.p75),
+    p90: addBusinessHours(now, totalQ.p90),
+  };
 
-  const dynamicAdjustment = calculateDynamicETAExtension(
-    c,
-    stg,
-    stageEnteredAt,
-    elapsedWorkHours,
-    originalTotalWorkHours,
-    activeCases,
-    stageStatsForStage
-  );
-  const adjustedTotalWorkHours =
-    originalTotalWorkHours + dynamicAdjustment.extensionHours;
-  const absoluteETA = addBusinessHours(entry, adjustedTotalWorkHours);
-  const remainingWorkHours = Math.max(
-    0,
-    businessHoursBetween(now, absoluteETA)
-  );
+  // === RISK LEVEL DETERMINATION ===
+  // v8.3 uses a two-signal system:
+  //   1. Dedicated classifier P(late) — primary signal, trained directly for this job
+  //   2. Quantile position vs due date — secondary signal for geometric sanity
+  // When both signals agree, risk is high-confidence.
+  
+  let riskLevel = "low";
+  let pLateFinal = 0.05;
+  let riskFromQuantiles = null;  // what quantile geometry says
+  let riskFromClassifier = null;  // what classifier says
+  let signalsAgree = true;
+  
+  // Quantile-based risk (secondary signal)
+  if (due) {
+    if (totalETAs.p10 > due) riskFromQuantiles = "critical";
+    else if (totalETAs.p50 > due) riskFromQuantiles = "high";
+    else if (totalETAs.p75 > due) riskFromQuantiles = "medium";
+    else riskFromQuantiles = "low";
+  } else {
+    riskFromQuantiles = "low";
+  }
+  
+  // Classifier-based risk (primary signal) — uses calibrated thresholds
+  if (pLateDirect !== null && lateThresholds) {
+    if (pLateDirect >= lateThresholds.critical) riskFromClassifier = "critical";
+    else if (pLateDirect >= lateThresholds.high) riskFromClassifier = "high";
+    else if (pLateDirect >= lateThresholds.medium) riskFromClassifier = "medium";
+    else riskFromClassifier = "low";
+    
+    // Primary: use classifier
+    riskLevel = riskFromClassifier;
+    pLateFinal = pLateDirect;
+    
+    // Agreement check
+    const rankOrder = { low: 0, medium: 1, high: 2, critical: 3 };
+    const classifierRank = rankOrder[riskFromClassifier];
+    const quantileRank = rankOrder[riskFromQuantiles];
+    signalsAgree = Math.abs(classifierRank - quantileRank) <= 1;
+  } else {
+    // Fallback to quantile-derived if classifier unavailable
+    riskLevel = riskFromQuantiles;
+    pLateFinal = interpolatePLate(totalETAs, due);
+  }
+
+  // === CONFIDENCE SCORE ===
+  // v8.3 confidence combines: spread tightness + signal agreement + late prob extremity
+  const spread = totalQ.p90 - totalQ.p10;
+  const relSpread = totalQ.p50 > 0 ? spread / totalQ.p50 : 3;
+  let confidenceScore = 95 - relSpread * 25;  // base from spread
+  if (signalsAgree) confidenceScore += 5;       // bonus when both signals agree
+  else confidenceScore -= 15;                    // penalty when they disagree
+  // Boost when classifier is very confident in either direction
+  if (pLateDirect !== null) {
+    const extremity = Math.abs(pLateDirect - 0.5) * 2;  // 0..1
+    confidenceScore += extremity * 10;
+  }
+  confidenceScore = Math.round(Math.max(35, Math.min(98, confidenceScore)));
 
   return {
-    eta: snapToMinutes(absoluteETA, 5),
-    workHours: remainingWorkHours,
-    totalWorkHours: adjustedTotalWorkHours,
-    originalTotalWorkHours,
-    k,
-    backlogEff,
-    log_backlog,
-    isETAAdjusted: dynamicAdjustment.isAdjusted,
-    etaAdjustmentReason: dynamicAdjustment.adjustmentReason,
-    etaExtensionHours: dynamicAdjustment.extensionHours,
-    adjustmentFactors: dynamicAdjustment.factors,
-    featureVector: x,
-    featureContributions,
-    modelWeights: w,
-    logPrediction,
-    stageBias: biasBH,
+    stageHours: stageQ,
+    totalHours: totalQ,
+    stageETAs,
+    totalETAs,
+    pResched,
+    pLate: pLateFinal,
+    pLateDirect,
+    pLateFromQuantiles: due ? interpolatePLate(totalETAs, due) : 0,
+    riskLevel,
+    riskFromClassifier,
+    riskFromQuantiles,
+    signalsAgree,
+    stageETA: snapToMinutes(stageETAs.p50, 5),
+    totalETA: snapToMinutes(totalETAs.p50, 5),
+    stageWorkHours: stageQ.p50,
+    totalWorkHours: totalQ.p50,
+    elapsedWorkHours: feats.elapsedBH,
+    concurrent: feats.concurrent,
+    hoursIdle: feats.hoursIdle,
+    remainingBudget: feats.remainingBudget,
+    allowedWH: feats.allowedWH,
+    fracBudget: feats.fracBudget,
+    holdHours: feats.holdHours,
+    confidenceScore,
+    modelUsed,
+    featureArray,
+    featureDict: feats.dict,
+    featureNames: V8_FEATURE_NAMES,
   };
 }
 
-function rescheduleDriverBump({
-  slackDays,
-  holdHours,
-  shock,
-  backlogEff,
-  dueChanges,
-  stageMoves,
-}) {
-  let bump = 0;
-  if (Number.isFinite(slackDays)) {
-    if (slackDays < 0) bump += 0.4;
-    else if (slackDays < 0.5) bump += 0.2;
+function interpolatePLate(etas, due) {
+  // Treat the 4 quantiles as 4 known points on the CDF:
+  //   F(p10) = 0.10, F(p50) = 0.50, F(p75) = 0.75, F(p90) = 0.90
+  // For any due date, interpolate/extrapolate the CDF value at that time.
+  // P(late) = 1 − F(due)  (probability the case finishes AFTER the due date)
+  if (!due) return 0.05;
+
+  const points = [
+    { ms: etas.p10.getTime(), q: 0.10 },
+    { ms: etas.p50.getTime(), q: 0.50 },
+    { ms: etas.p75.getTime(), q: 0.75 },
+    { ms: etas.p90.getTime(), q: 0.90 },
+  ];
+  const dueMs = due.getTime();
+
+  let cdf;
+  if (dueMs <= points[0].ms) {
+    // Before p10 — extrapolate using slope of the p10→p50 segment
+    const segMs = Math.max(1, points[1].ms - points[0].ms);
+    const slope = (points[1].q - points[0].q) / segMs; // quantile per ms
+    cdf = points[0].q - slope * (points[0].ms - dueMs);
+  } else if (dueMs >= points[3].ms) {
+    // Past p90 — extrapolate using slope of the p75→p90 segment
+    const segMs = Math.max(1, points[3].ms - points[2].ms);
+    const slope = (points[3].q - points[2].q) / segMs;
+    cdf = points[3].q + slope * (dueMs - points[3].ms);
+  } else {
+    // Inside the range — linear interpolation between adjacent known points
+    cdf = points[0].q;
+    for (let i = 0; i < points.length - 1; i++) {
+      if (dueMs >= points[i].ms && dueMs <= points[i + 1].ms) {
+        const segMs = Math.max(1, points[i + 1].ms - points[i].ms);
+        const frac = (dueMs - points[i].ms) / segMs;
+        cdf = points[i].q + frac * (points[i + 1].q - points[i].q);
+        break;
+      }
+    }
   }
-  if ((holdHours || 0) >= 4) bump += 0.2;
-  if ((shock || 0) > 0.6) bump += 0.25;
-  else if ((shock || 0) > 0.4) bump += 0.15;
-  if ((backlogEff || 0) > 3) bump += 0.1;
-  if ((dueChanges || 0) + (stageMoves || 0) >= 3) bump += 0.1;
-  return bump;
+
+  // Clamp to a sensible range so tails don't produce pathological values
+  cdf = Math.max(0.005, Math.min(0.995, cdf));
+  return 1 - cdf;
 }
 
-function stallBump(hoursIdle) {
-  if (hoursIdle >= 36) return 0.6;
-  if (hoursIdle >= 18) return 0.35;
-  return 0;
-}
+/** ========================================================================
+ *  MAIN GENERATOR — produces prediction objects for all active cases
+ *  ======================================================================== */
 
-function predictRescheduleProbML(
-  c,
-  stage,
-  stageEnteredAt,
-  activeCases,
-  stageStatsForStage
-) {
-  const entry = stageEnteredAt ? new Date(stageEnteredAt) : getCurrentTime();
-  const due = dueEOD(c.due || null);
-  const stg = normalizeStage(stage);
-  const k = learnedCapacity(stg, stageStatsForStage, STAGE_CAPACITY[stg] || 1);
-  const backlogEff = effectiveBacklog(activeCases, c, stg, entry, k);
-  const log_backlog = Math.log1p(backlogEff / Math.max(1, k));
-  const x = featureVector(c, stg, entry, due, { log_backlog });
-  const eph = eventsPerHourSince(c, entry, getCurrentTime());
-  x.events_per_hour = eph;
-  x.stalliness = Math.max(0, 1.5 - eph);
-  const w = RESCHED_WEIGHTS[stg] || RESCHED_WEIGHTS.design;
-  let logit = dot(w, x);
-  logit = applyPriorShift(
-    logit,
-    clamp(RESCHED_PRIOR_TRAIN[stg] ?? 0.1, 1e-4, 1 - 1e-4),
-    clamp(RESCHED_PRIOR_LIVE[stg] ?? 0.1, 1e-4, 1 - 1e-4)
-  );
-  const shock = shockScore(activeCases, stg, k);
-  logit += 0.5 * shock;
-  logit += stallBump(timeSinceLastActivityHours(c, entry));
-  logit += rescheduleDriverBump({
-    slackDays: c.slackDays,
-    holdHours: c.holdHours || 0,
-    shock,
-    backlogEff,
-    dueChanges: x.due_changes,
-    stageMoves: x.stage_moves,
-  });
-  if (
-    stg === "design" &&
-    !(
-      (c.holdHours || 0) >= 2 ||
-      (c.slackDays ?? 99) < 0 ||
-      (x.due_changes || 0) + (x.stage_moves || 0) >= 1
-    )
-  )
-    logit -= 1.4;
-  return sigmoid(logit);
-}
-
-function predictLateNoRescheduleProbML(
-  c,
-  stage,
-  stageEnteredAt,
-  activeCases,
-  stageStatsForStage
-) {
-  const entry = stageEnteredAt ? new Date(stageEnteredAt) : getCurrentTime();
-  const due = dueEOD(c.due || null);
-  const stg = normalizeStage(stage);
-  const k = learnedCapacity(stg, stageStatsForStage, STAGE_CAPACITY[stg] || 1);
-  const backlogEff = effectiveBacklog(activeCases, c, stg, entry, k);
-  const x = featureVector(c, stg, entry, due, {
-    log_backlog: Math.log1p(backlogEff / Math.max(1, k)),
-  });
-  x.events_per_hour = eventsPerHourSince(c, entry, getCurrentTime());
-  x.stalliness = Math.max(0, 1.5 - x.events_per_hour);
-  const w = STALL_WEIGHTS[stg];
-  return w ? sigmoid(dot(w, { ...x, intercept: 1 })) : 0.0;
-}
-
-function plattCalibrate(stage, p) {
-  const pars = CALIB_PLATT[normalizeStage(stage)] || { a: 1, b: 0 };
-  const pp = clamp(p, 1e-6, 1 - 1e-6);
-  return clamp(sigmoid(pars.a * Math.log(pp / (1 - pp)) + pars.b), 0, 1);
-}
-
-function dynamicReschedThreshold(stage, probs, shock) {
-  const stg = normalizeStage(stage);
-  const pLive = clamp(RESCHED_PRIOR_LIVE[stg] ?? 0.05, 0.01, 0.5);
-  const targetRate = clamp(pLive * (shock > 0.5 ? 2.0 : 1.25), 0.02, 0.35);
-  if (!probs.length) return RESCHED_LIKELY_FLOOR[stg] ?? 0.3;
-  const sorted = [...probs].sort((a, b) => a - b);
-  const idx = Math.max(
-    0,
-    Math.min(sorted.length - 1, Math.floor((1 - targetRate) * sorted.length))
-  );
-  return Math.max(RESCHED_LIKELY_FLOOR[stg] ?? 0.3, sorted[idx]);
-}
-
-function capacityAwareStageSchedule(preds, stage, now = getCurrentTime()) {
-  const stg = normalizeStage(stage);
-  const k = preds[0]?.stageCapacity || STAGE_CAPACITY[stg] || 1;
-  if (!preds.length) return preds;
-  const jobs = preds.map((p, i) => ({
-    idx: i,
-    remaining: Math.max(0.25, Number(p.stageWorkHours) || 0.5),
-    priority:
-      (p.willBeLate ? 2 : 0) + (p.isRush ? 1 : 0) + (p.lateProbability || 0),
-  }));
-  jobs.sort(
-    (a, b) =>
-      b.priority / (b.remaining + 1e-6) - a.priority / (a.remaining + 1e-6)
-  );
-  const workers = Array.from({ length: k }, () => new Date(now));
-  for (const j of jobs) {
-    let wi = 0;
-    for (let i = 1; i < k; i++) if (workers[i] < workers[wi]) wi = i;
-    const start = workers[wi] > now ? workers[wi] : now;
-    const finish = snapToMinutes(addBusinessHours(start, j.remaining), 5);
-    preds[j.idx].capacityStart = start;
-    preds[j.idx].capacityETA = finish;
-    preds[j.idx].assignedWorker = wi + 1;
-    preds[j.idx].queuePosition = jobs.indexOf(j) + 1;
-    workers[wi] = finish;
-  }
-  return preds;
-}
-
-const toLevel = (p) =>
-  p >= 0.85 ? "critical" : p >= 0.65 ? "high" : p >= 0.4 ? "medium" : "low";
-
-/** ======================= MAIN PREDICTION GENERATOR ======================== **/
-
-export function generateCaseRiskPredictions(
-  activeCases,
-  throughputAnalysis,
-  stage = null,
-  stageStats = null
-) {
+export function generateCaseRiskPredictions(activeCases, throughputAnalysis, stage = null, _stageStats = null) {
   if (!activeCases || activeCases.length === 0) {
     return {
-      atRisk: 0,
-      predictions: [],
-      urgent: [],
-      summary: {
-        onTrack: 0,
-        atRisk: 0,
-        high: 0,
-        critical: 0,
-        averageCompletionConfidence: 0,
-        averageLateProbability: 0,
-      },
+      atRisk: 0, predictions: [], urgent: [],
+      summary: { onTrack: 0, atRisk: 0, high: 0, critical: 0, averageCompletionConfidence: 0, averageLateProbability: 0, averageRescheduleProbability: 0, concurrent: 0 },
       byRiskLevel: { critical: [], high: [], medium: [], low: [] },
     };
   }
 
   const nowTs = getCurrentTime().getTime();
   const currentStage = normalizeStage(stage || "design");
-  const k = learnedCapacity(
-    currentStage,
-    stageStats?.stageStats?.[currentStage],
-    STAGE_CAPACITY[currentStage] || 1
-  );
 
   const predictions = activeCases.map((c) => {
-    const caseType =
-      c.caseType ||
-      (c.modifiers?.includes?.("bbs")
-        ? "bbs"
-        : c.modifiers?.includes?.("flex")
-        ? "flex"
-        : "general");
+    const caseType = c.caseType ||
+      (c.modifiers?.includes?.("bbs") ? "bbs" :
+       c.modifiers?.includes?.("flex") ? "flex" : "general");
     const stageEnteredAt = getStageEnteredAtFor(c, currentStage);
-    const timeInStageMs = Math.max(
-      0,
-      nowTs - (stageEnteredAt?.getTime?.() || nowTs)
-    );
-    const mlResult = predictStageExitML(
-      c,
-      currentStage,
-      stageEnteredAt,
-      activeCases,
-      stageStats?.stageStats?.[currentStage]
-    );
-    const expectedCompletionDate = mlResult.eta;
+    const timeInStageMs = Math.max(0, nowTs - (stageEnteredAt?.getTime?.() || nowTs));
 
-    // Use the corrected dueEOD function for calculations
-    const dueDate = dueEOD(c.due);
-
-    // Store the original due string for display purposes
+    const ml = predictCaseML(c, currentStage, stageEnteredAt, activeCases);
+    const dueDateCalc = dueEOD(c.due);
     const dueDateDisplay = parseDueDateForDisplay(c.due);
-
     const isRush = !!(c?.rush || c?.priority);
-    const daysUntilDue = dueDate
-      ? (dueDate.getTime() - nowTs) / 86_400_000
-      : Number.POSITIVE_INFINITY;
-    const expectedDaysToComplete =
-      (expectedCompletionDate.getTime() - nowTs) / 86_400_000;
-    const willBeLate = dueDate ? expectedCompletionDate > dueDate : false;
+    const daysUntilDue = dueDateCalc ? (dueDateCalc.getTime() - nowTs) / 86400000 : Number.POSITIVE_INFINITY;
+    const expectedDaysToComplete = (ml.totalETA.getTime() - nowTs) / 86400000;
+    const willBeLate = dueDateCalc ? ml.totalETA > dueDateCalc : false;
     const slackDays = daysUntilDue - expectedDaysToComplete;
-    const effectiveReqBuf = isRush
-      ? Math.max(0.25, (BUFFER_REQ[currentStage] ?? 0) * 0.6)
-      : BUFFER_REQ[currentStage] ?? 0;
-    const slackAfterBuffer =
-      (isFinite(slackDays) ? slackDays : 999) - effectiveReqBuf;
 
-    const p_data = 0.3;
-    const p_slack = sigmoid(-0.895 * slackAfterBuffer + 0.405);
-    const qcLoops = histCountUpTo(
-      c,
-      (a) =>
-        a.includes("moved to quality control") ||
-        a.includes("finishing to quality control"),
-      getCurrentTime()
-    );
-    const holdHrs = holdHoursUntil(c, getCurrentTime());
-    const currentLoad = activeCases.length;
-    const histAvgLoad = throughputAnalysis?.avgHistoricalActive || currentLoad;
-    const ratio = histAvgLoad ? currentLoad / Math.max(1, histAvgLoad) : 1;
-    const pHold = 1 - Math.exp(-Math.max(0, holdHrs) / 12);
-    const pQc = clamp(qcLoops * 0.18, 0, 0.6);
-    const pLoad = ratio > 1 ? clamp((ratio - 1) * 0.25, 0, 0.35) : 0;
-    const p_ops = clamp(1 - (1 - pHold) * (1 - pQc) * (1 - pLoad));
-    const p_base = clamp(
-      1 -
-        Math.pow(1 - p_data, 0.6) *
-          Math.pow(1 - p_slack, 0.8) *
-          Math.pow(1 - p_ops, 0.3)
-    );
-
-    c.holdHours = holdHrs;
-    c.slackDays = slackDays;
-    const p_reschedule = predictRescheduleProbML(
-      c,
-      currentStage,
-      stageEnteredAt,
-      activeCases,
-      stageStats?.stageStats?.[currentStage]
-    );
-    const p_stallLate = predictLateNoRescheduleProbML(
-      c,
-      currentStage,
-      stageEnteredAt,
-      activeCases,
-      stageStats?.stageStats?.[currentStage]
-    );
-    const reschedDiscount =
-      RESCHEDULE_DISCOUNT_GAMMA * p_reschedule * (1 - p_stallLate);
-    let p_final = plattCalibrate(
-      currentStage,
-      clamp(p_base * (1 - reschedDiscount), 0, 1)
-    );
-
-    const elapsedWorkHours = Math.max(
-      0,
-      businessHoursBetween(stageEnteredAt, getCurrentTime())
-    );
-    const progressPercent = Math.min(
-      98,
-      (elapsedWorkHours / Math.max(1e-6, mlResult.totalWorkHours)) * 100
-    );
-    const confidenceScore = 75;
-    const hoursIdle = timeSinceLastActivityHours(c, stageEnteredAt);
+    const progressPercent = Math.min(98, (ml.elapsedWorkHours / Math.max(1e-6, ml.elapsedWorkHours + ml.stageWorkHours)) * 100);
+    const hoursIdle = ml.hoursIdle;
+    const qcLoops = histCountUpTo(c, (a) => a.includes("moved to quality control") || a.includes("finishing to quality control"), getCurrentTime());
 
     return {
       id: c.id,
@@ -1320,1906 +1051,1609 @@ export function generateCaseRiskPredictions(
       caseType,
       currentStage,
       timeInStageMs,
-      stageWorkHours: mlResult.workHours,
-      totalStageWorkHours: mlResult.totalWorkHours,
-      originalTotalWorkHours: mlResult.originalTotalWorkHours,
-      elapsedWorkHours,
+      stageEnteredAt,
+
+      // ETAs (primary)
+      stageETA: ml.stageETA,
+      completionETA: ml.totalETA,
+      expectedCompletionDate: ml.totalETA, // alias for old UI
+
+      // Quantile ranges
+      stageHours: ml.stageHours,      // {p10, p50, p75, p90} remaining in stage
+      totalHours: ml.totalHours,      // {p10, p50, p75, p90} remaining to done
+      stageETAs: ml.stageETAs,        // {p10, p50, p75, p90} as Date objects
+      totalETAs: ml.totalETAs,
+
+      // Work-hour shortcuts
+      stageWorkHours: ml.stageWorkHours,
+      totalStageWorkHours: ml.stageWorkHours + ml.elapsedWorkHours,
+      totalCompletionWorkHours: ml.totalWorkHours,
+      elapsedWorkHours: ml.elapsedWorkHours,
       progressPercent,
       hoursIdle,
-      stageEnteredAt,
-      expectedCompletionDate,
-      dueDate: dueDateDisplay, // Use the display version for UI
-      dueDateCalc: dueDate, // Keep the calculation version for internal use
+
+      // Due / risk
+      dueDate: dueDateDisplay,
+      dueDateCalc,
       willBeLate,
       daysUntilDue: isFinite(daysUntilDue) ? daysUntilDue : null,
       expectedDaysToComplete,
-      daysLate: willBeLate
-        ? Math.max(0, expectedDaysToComplete - daysUntilDue)
-        : 0,
-      riskLevel: toLevel(p_final),
-      confidence:
-        confidenceScore >= 70
-          ? "high"
-          : confidenceScore >= 50
-          ? "medium"
-          : "low",
-      confidenceScore,
-      lateProbability: p_final,
-      rescheduleProbability: p_reschedule,
-      stallLateProbability: p_stallLate,
-      riskScore: Math.round(p_final * 100),
-      riskReasons: [],
-      riskComponents: {
-        data: p_data,
-        slack: p_slack,
-        ops: p_ops,
-        base: p_base,
-        rescheduleDiscount: reschedDiscount,
-      },
+      daysLate: willBeLate ? Math.max(0, expectedDaysToComplete - daysUntilDue) : 0,
       slackDays,
       slackHours: slackDays * 24,
-      slackAfterBuffer,
-      dueChanges: histCountUpTo(
-        c,
-        (a) => a.startsWith("due changed"),
-        stageEnteredAt
-      ),
-      stageMoves: histCountUpTo(c, (a) => a.includes("moved"), stageEnteredAt),
-      onHold: holdHrs > 0.1,
-      holdHours: holdHrs,
-      qcLoops,
+
+      // Model outputs
+      riskLevel: ml.riskLevel,
+      lateProbability: ml.pLate,
+      lateProbabilityDirect: ml.pLateDirect,  // from dedicated classifier
+      lateProbabilityQuantile: ml.pLateFromQuantiles,  // from quantile position
+      riskFromClassifier: ml.riskFromClassifier,
+      riskFromQuantiles: ml.riskFromQuantiles,
+      signalsAgree: ml.signalsAgree,
+      rescheduleProbability: ml.pResched,
+      confidence: ml.confidenceScore >= 80 ? "high" : ml.confidenceScore >= 60 ? "medium" : "low",
+      confidenceScore: ml.confidenceScore,
+      riskScore: Math.round(ml.pLate * 100),
+
+      // Context
       isRush,
-      backlogCount: mlResult.backlogEff,
-      stageCapacity: mlResult.k,
-      log_backlog: mlResult.log_backlog,
+      qcLoops,
+      onHold: ml.holdHours > 0.1,
+      holdHours: ml.holdHours,
+      dueChanges: histCountUpTo(c, (a) => a.startsWith("due changed"), stageEnteredAt || new Date(0)),
+      stageMoves: histCountUpTo(c, (a) => a.includes("moved"), stageEnteredAt || new Date(0)),
+      backlogCount: ml.concurrent,
+      stageCapacity: ml.concurrent,
+      allowedWH: ml.allowedWH,
+      fracBudget: ml.fracBudget,
+
+      // Diagnostics / modal data
+      riskReasons: [],
       recommendation: "",
-      isETAAdjusted: mlResult.isETAAdjusted,
-      etaAdjustmentReason: mlResult.etaAdjustmentReason,
-      etaExtensionHours: mlResult.etaExtensionHours,
-      adjustmentFactors: mlResult.adjustmentFactors,
-      featureVector: mlResult.featureVector,
-      featureContributions: mlResult.featureContributions,
-      modelWeights: mlResult.modelWeights,
-      logPrediction: mlResult.logPrediction,
-      stageBias: mlResult.stageBias,
+      modelUsed: ml.modelUsed,
+      featureArray: ml.featureArray,
+      featureDict: ml.featureDict,
+      featureNames: ml.featureNames,
+
+      // Original case for reference
+      _case: c,
     };
   });
 
-  const shock = shockScore(activeCases, currentStage, k);
-  const stageThreshold = dynamicReschedThreshold(
-    currentStage,
-    predictions.map((p) => p.rescheduleProbability),
-    shock
-  );
-  capacityAwareStageSchedule(predictions, currentStage, getCurrentTime());
-
+  // Build risk reasons from the feature dict (data-driven, not hand-rules)
   for (const p of predictions) {
     const reasons = [];
-    if (p.riskComponents.slack >= 0.65)
-      reasons.push(
-        p.slackAfterBuffer < 0
-          ? "no buffer vs stage requirement"
-          : "tight buffer"
-      );
-    if (p.holdHours >= 8) reasons.push("long hold time");
-    if (p.qcLoops > 0)
-      reasons.push(`${p.qcLoops} QC loop${p.qcLoops > 1 ? "s" : ""}`);
-    const drivers = [];
-    if (p.slackDays < 0) drivers.push("due pressure");
-    else if (p.slackDays < 0.5) drivers.push("thin buffer");
-    if (p.holdHours >= 4) drivers.push("hold friction");
-    if (shock > 0.6 || p.backlogCount > 3) drivers.push("load");
-    if (p.dueChanges + p.stageMoves >= 3) drivers.push("churn");
-    if (p.isETAAdjusted) {
-      reasons.push(`ETA extended +${formatHours(p.etaExtensionHours)}`);
-      drivers.push("eta adjusted");
-    } else if (p.hoursIdle >= 18) drivers.push("low activity");
-    if (p.rescheduleProbability >= stageThreshold)
-      reasons.push(
-        drivers.length
-          ? `reschedule likely (${drivers.join(", ")})`
-          : "reschedule likely"
-      );
-    if (p.backlogCount > 3)
-      reasons.push(`backlog: ${Math.round(p.backlogCount)} cases ahead`);
-    p.riskReasons = reasons;
-    p.rescheduleThreshold = stageThreshold;
-    p.shockScore = shock;
-    p.rescheduleDrivers = drivers;
-    p.recommendation = generateRecommendation(p, stageThreshold);
+    const f = p.featureDict;
+
+    // Order matters: list most relevant first
+    if (f.rush_added_late) reasons.push("rush added after creation");
+    if (f.backward_count >= 1) reasons.push(`${f.backward_count} backward move${f.backward_count > 1 ? "s" : ""}`);
+    if (f.due_changes_closer >= 1) reasons.push("due date pushed closer");
+    if (f.hold_cycles >= 2) reasons.push(`${f.hold_cycles} hold cycles`);
+    else if (p.onHold && f.hold_during >= 4) reasons.push("long hold time");
+    if (f.concurrent_in_stage >= 8) reasons.push(`${Math.round(f.concurrent_in_stage)} concurrent cases`);
+    if (f.hours_idle >= 18) reasons.push("inactive 18h+");
+    if (f.is_overrun) reasons.push("past allowed time");
+    if (f.batch_siblings >= 3 && f.lead_days_raw <= 2) reasons.push("tight batch intake");
+    if (f.is_flex && f.stages_remaining >= 2) reasons.push("flex case with pipeline ahead");
+    if (p.qcLoops > 0) reasons.push(`${p.qcLoops} QC loop${p.qcLoops > 1 ? "s" : ""}`);
+
+    // Recommendations keyed on risk level
+    const rec = {
+      critical: "Immediate escalation required",
+      high: "Actively monitor and prioritize",
+      medium: "Check progress today",
+      low: "On track — no action needed",
+    }[p.riskLevel];
+
+    p.riskReasons = reasons.slice(0, 5);
+    p.recommendation = rec;
   }
 
-  const order = { critical: 0, high: 1, medium: 2, low: 3 };
-  predictions.sort(
-    (a, b) =>
-      order[a.riskLevel] - order[b.riskLevel] ||
-      (a.queuePosition || 1e9) - (b.queuePosition || 1e9) ||
-      b.lateProbability - a.lateProbability
-  );
+  const summary = {
+    onTrack: predictions.filter((p) => !p.willBeLate && p.riskLevel === "low").length,
+    atRisk: predictions.filter((p) => p.riskLevel === "medium").length,
+    high: predictions.filter((p) => p.riskLevel === "high").length,
+    critical: predictions.filter((p) => p.riskLevel === "critical").length,
+    averageCompletionConfidence: predictions.length
+      ? predictions.reduce((s, p) => s + p.confidenceScore, 0) / predictions.length : 0,
+    averageLateProbability: predictions.length
+      ? predictions.reduce((s, p) => s + p.lateProbability, 0) / predictions.length : 0,
+    averageRescheduleProbability: predictions.length
+      ? predictions.reduce((s, p) => s + p.rescheduleProbability, 0) / predictions.length : 0,
+    concurrent: predictions[0]?.backlogCount || 0,
+  };
 
   return {
-    atRisk: predictions.filter((p) => p.riskLevel !== "low").length,
+    atRisk: summary.atRisk + summary.high + summary.critical,
     predictions,
-    urgent: predictions.filter((p) => p.riskLevel === "critical"),
-    high: predictions.filter((p) => p.riskLevel === "high"),
-    summary: {
-      onTrack: predictions.filter((p) => !p.willBeLate && p.riskLevel === "low")
-        .length,
-      atRisk: predictions.filter((p) => p.riskLevel === "medium").length,
-      high: predictions.filter((p) => p.riskLevel === "high").length,
-      critical: predictions.filter((p) => p.riskLevel === "critical").length,
-      averageCompletionConfidence: predictions.length
-        ? predictions.reduce((s, p) => s + p.confidenceScore, 0) /
-          predictions.length
-        : 0,
-      averageLateProbability: predictions.length
-        ? predictions.reduce((s, p) => s + p.lateProbability, 0) /
-          predictions.length
-        : 0,
-      averageRescheduleProbability: predictions.length
-        ? predictions.reduce((s, p) => s + p.rescheduleProbability, 0) /
-          predictions.length
-        : 0,
-      likelyReschedules: predictions.filter(
-        (p) => p.rescheduleProbability >= stageThreshold
-      ).length,
-      averageBacklog: predictions.length
-        ? predictions.reduce((s, p) => s + p.backlogCount, 0) /
-          predictions.length
-        : 0,
-      stageCapacity: k,
-      stageThreshold,
-      shockScore: shock,
-      adjustedETACases: predictions.filter((p) => p.isETAAdjusted).length,
-    },
+    urgent: predictions.filter((p) => p.riskLevel === "critical" || p.riskLevel === "high"),
+    summary,
     byRiskLevel: {
       critical: predictions.filter((p) => p.riskLevel === "critical"),
-      high: predictions.filter((p) => p.riskLevel === "high"),
-      medium: predictions.filter((p) => p.riskLevel === "medium"),
-      low: predictions.filter((p) => p.riskLevel === "low"),
+      high:     predictions.filter((p) => p.riskLevel === "high"),
+      medium:   predictions.filter((p) => p.riskLevel === "medium"),
+      low:      predictions.filter((p) => p.riskLevel === "low"),
     },
   };
 }
 
-function generateRecommendation(p, stageThreshold) {
-  if (p.isETAAdjusted) {
-    if (p.riskLevel === "critical" || p.riskLevel === "high")
-      return `ETA extended (${p.etaAdjustmentReason}) - Immediate attention required`;
-    return `ETA adjusted due to ${p.etaAdjustmentReason} - Monitor for further delays`;
-  }
-  if (p.backlogCount > 5)
-    return p.riskLevel === "critical" || p.riskLevel === "high"
-      ? "High risk with significant backlog - consider expediting"
-      : "In queue with backlog - monitor for delays";
-  if (p.rescheduleProbability >= stageThreshold)
-    return p.riskLevel === "critical" || p.riskLevel === "high"
-      ? "High risk but likely to be rescheduled"
-      : "Likely reschedule - communicate expectation";
-  if (p.riskLevel === "critical")
-    return p.progressPercent < 50
-      ? "Immediate escalation required"
-      : "Urgent attention needed";
-  if (p.riskLevel === "high")
-    return p.isRush
-      ? "Priority case at risk - reallocate resources"
-      : "Monitor closely - may require intervention";
-  if (p.riskLevel === "medium")
-    return p.progressPercent > 75
-      ? "Nearly complete but timing is tight"
-      : "On track but limited buffer";
-  return "On schedule - continue normal processing";
+/** ========================================================================
+ *  UI UTILITIES
+ *  ======================================================================== */
+
+const RISK_STYLE = {
+  critical: { fg: COLORS.rCritical, bg: COLORS.rCriticalBg, label: "Critical" },
+  high:     { fg: COLORS.rHigh,     bg: COLORS.rHighBg,     label: "High" },
+  medium:   { fg: COLORS.rMedium,   bg: COLORS.rMediumBg,   label: "Medium" },
+  low:      { fg: COLORS.rLow,      bg: COLORS.rLowBg,      label: "Low" },
+};
+
+// Exported formatters (used internally and by callers)
+export function formatHours(h) {
+  if (h === undefined || h === null || isNaN(h)) return "—";
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 10) return `${h.toFixed(1)}h`;
+  if (h < 24) return `${Math.round(h)}h`;
+  const d = h / 8; // business days
+  if (d < 10) return `${d.toFixed(1)}d`;
+  return `${Math.round(d)}d`;
 }
 
-export const calculateRiskWithVelocityEngine = async () => ({
-  predictions: [],
-  velocityImpact: null,
-});
+export function formatDuration(ms) {
+  if (!ms || ms < 0) return "—";
+  const h = ms / 3600000;
+  if (h < 1) return `${Math.round(ms / 60000)}m`;
+  if (h < 24) return `${Math.round(h)}h`;
+  const d = h / 24;
+  return `${Math.round(d * 10) / 10}d`;
+}
 
-/** ======================= DESIGN SYSTEM ======================== **/
+export function formatDate(d, withTime = true) {
+  if (!d) return "—";
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date)) return "—";
+  const opts = withTime
+    ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+    : { month: "short", day: "numeric", year: "numeric" };
+  return date.toLocaleString("en-US", opts);
+}
 
-const COLORS = {
-  status: {
-    critical: {
-      primary: "#dc2626",
-      light: "#fef2f2",
-      border: "#fecaca",
-      text: "#991b1b",
-    },
-    high: {
-      primary: "#f59e0b",
-      light: "#fffbeb",
-      border: "#fde68a",
-      text: "#92400e",
-    },
-    medium: {
-      primary: "#eab308",
-      light: "#fefce8",
-      border: "#fef08a",
-      text: "#854d0e",
-    },
-    low: {
-      primary: "#22c55e",
-      light: "#f0fdf4",
-      border: "#bbf7d0",
-      text: "#166534",
-    },
-  },
-};
+export function formatPercent(x, digits = 0) {
+  if (x === undefined || x === null || isNaN(x)) return "—";
+  return `${Number(x).toFixed(digits)}%`;
+}
 
-export const formatPercent = (value, decimals = 0) =>
-  `${Math.max(0, Math.min(100, Number(value) || 0)).toFixed(decimals)}%`;
-
-export const formatHours = (hours) => {
-  if (!Number.isFinite(hours)) return "—";
-  if (hours < 1) return `${Math.round(hours * 60)}m`;
-  if (hours < 24) return `${hours.toFixed(1)}h`;
-  return `${(hours / 24).toFixed(1)}d`;
-};
-
-const formatRelativeTime = (date, reference = new Date()) => {
+export function formatRelativeTime(date, reference = new Date()) {
   if (!date) return "—";
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return "—";
-
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return "—";
   const diffMs = d - reference;
   const isPast = diffMs < 0;
   const absMs = Math.abs(diffMs);
   const hours = absMs / 3600000;
   const days = hours / 24;
-
   let text;
   if (hours < 1) text = "< 1h";
   else if (hours < 24) text = `${Math.round(hours)}h`;
   else if (days < 7) text = `${Math.round(days)}d`;
   else text = `${Math.round(days / 7)}w`;
-
   return isPast ? `${text} ago` : `in ${text}`;
-};
+}
 
-const getStatusFromPrediction = (p) => {
-  const now = new Date();
-  const dueDate = p.dueDate ? new Date(p.dueDate) : null;
-  const isOverdue = dueDate && dueDate < now;
+export function daySpanHours(a, b) { return (b - a) / 3600000; }
 
-  if (isOverdue) return "critical";
-  if (p.willBeLate) {
-    if (p.riskLevel === "low") return "medium";
-    if (p.riskLevel === "medium") return "high";
-    return "critical";
-  }
-  return p.riskLevel;
-};
+// Models getters/setters for testing/mocking
+export function getModels() { return XGB_MODELS; }
+export function setModels(models) { XGB_MODELS = models; }
 
-/** ======================= ICON COMPONENTS ======================== **/
+/** ========================================================================
+ *  UI COMPONENTS
+ *  ======================================================================== */
 
-const Icons = {
-  ChevronDown: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
-  ),
-  Clock: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
-  ),
-  AlertTriangle: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-      />
-    </svg>
-  ),
-  CheckCircle: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
-  ),
-  XCircle: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
-  ),
-  Info: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
-  ),
-  Activity: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
-    </svg>
-  ),
-  Zap: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M13 10V3L4 14h7v7l9-11h-7z"
-      />
-    </svg>
-  ),
-  Pause: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
-  ),
-  RefreshCw: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-      />
-    </svg>
-  ),
-  X: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6 18L18 6M6 6l12 12"
-      />
-    </svg>
-  ),
-  Search: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-      />
-    </svg>
-  ),
-  Filter: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
-      />
-    </svg>
-  ),
-  BarChart: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-      />
-    </svg>
-  ),
-  Target: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <circle cx="12" cy="12" r="10" />
-      <circle cx="12" cy="12" r="6" />
-      <circle cx="12" cy="12" r="2" />
-    </svg>
-  ),
-  Brain: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-      />
-    </svg>
-  ),
-  Expand: ({ className }) => (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-      />
-    </svg>
-  ),
-};
-
-/** ======================= REUSABLE UI COMPONENTS ======================== **/
-
-const StatusBadge = ({ status, size = "md" }) => {
-  const colors = COLORS.status[status] || COLORS.status.low;
+function RiskBadge({ level, size = "md" }) {
+  const s = RISK_STYLE[level] || RISK_STYLE.low;
   const sizes = {
-    sm: "px-2 py-0.5 text-xs",
-    md: "px-2.5 py-1 text-xs",
-    lg: "px-3 py-1.5 text-sm",
+    sm: "px-2 py-0.5 text-[10px] tracking-[0.12em]",
+    md: "px-2.5 py-1 text-[11px] tracking-[0.14em]",
+    lg: "px-3 py-1.5 text-xs tracking-[0.16em]",
   };
-
   return (
     <span
-      className={`inline-flex items-center font-semibold uppercase tracking-wide rounded-md ${sizes[size]}`}
-      style={{
-        backgroundColor: colors.light,
-        color: colors.text,
-        border: `1px solid ${colors.border}`,
-      }}
+      className={`inline-flex items-center font-medium uppercase rounded-md ${sizes[size]}`}
+      style={{ color: s.fg, backgroundColor: s.bg, border: `1px solid ${s.fg}22` }}
     >
-      {status}
+      {s.label}
     </span>
   );
-};
+}
 
-const ProgressBar = ({ value, size = "md", color = "auto" }) => {
-  const heights = { sm: "h-1", md: "h-2", lg: "h-3" };
-  const percent = Math.max(0, Math.min(100, value || 0));
-
-  let barColor;
-  if (color === "auto") {
-    barColor =
-      percent > 75
-        ? "#22c55e"
-        : percent > 50
-        ? "#3b82f6"
-        : percent > 25
-        ? "#f59e0b"
-        : "#dc2626";
-  } else {
-    barColor = color;
-  }
+function MetricCard({ label, value, sublabel, accent = false, size = "md" }) {
+  const sizes = {
+    sm: { label: "text-[10px]", value: "text-2xl", sub: "text-xs" },
+    md: { label: "text-[11px]", value: "text-4xl", sub: "text-xs" },
+    lg: { label: "text-[11px]", value: "text-5xl", sub: "text-sm" },
+  }[size];
 
   return (
     <div
-      className={`w-full bg-gray-100 rounded-full overflow-hidden ${heights[size]}`}
+      className="relative p-5 rounded-xl"
+      style={{
+        backgroundColor: COLORS.paper,
+        border: `1px solid ${COLORS.borderSoft}`,
+      }}
     >
       <div
-        className="h-full rounded-full transition-all duration-500"
-        style={{ width: `${percent}%`, backgroundColor: barColor }}
-      />
+        className={`${sizes.label} uppercase tracking-[0.18em] font-medium mb-2`}
+        style={{ color: COLORS.inkFaint }}
+      >
+        {label}
+      </div>
+      <div
+        className={`${sizes.value} font-light leading-none`}
+        style={{
+          color: accent ? COLORS.cognac : COLORS.ink,
+          fontWeight: 600,
+          fontFeatureSettings: "'ss01', 'tnum'",
+        }}
+      >
+        {value}
+      </div>
+      {sublabel && (
+        <div
+          className={`${sizes.sub} mt-2 font-normal`}
+          style={{ color: COLORS.inkSoft, fontSize: "0.75rem" }}
+        >
+          {sublabel}
+        </div>
+      )}
     </div>
   );
-};
+}
 
-/** ======================= NEURAL NETWORK VISUALIZATION ======================== **/
+/**
+ * TimelineHero — the centerpiece visual.
+ * Shows NOW → stage exit range → completion range → due date on one axis.
+ * Due date is a vertical marker; where it falls relative to the completion
+ * range is how the user reads risk visually.
+ */
+function TimelineHero({ prediction }) {
+  const { stageETAs, totalETAs, dueDateCalc, stageEnteredAt, elapsedWorkHours } = prediction;
+  const now = getCurrentTime();
 
-const NeuralNetworkVisualization = ({
-  featureContributions,
-  modelWeights,
-  logPrediction,
-  stageBias,
-  currentStage,
-}) => {
-  const [hoveredNode, setHoveredNode] = useState(null);
-  const [selectedNode, setSelectedNode] = useState(null);
+  // Build a timeline axis spanning from entry to max(due, p90)
+  const entryTs = (stageEnteredAt || now).getTime();
+  const nowTs = now.getTime();
+  const dueTs = dueDateCalc ? dueDateCalc.getTime() : null;
+  const stagePoints = [stageETAs.p10, stageETAs.p50, stageETAs.p75, stageETAs.p90].map((d) => d.getTime());
+  const totalPoints = [totalETAs.p10, totalETAs.p50, totalETAs.p75, totalETAs.p90].map((d) => d.getTime());
 
-  const groupedFeatures = useMemo(() => {
-    const groups = {};
-    Object.entries(featureContributions || {}).forEach(([key, data]) => {
-      const category = data.metadata?.category || "other";
-      if (!groups[category]) groups[category] = [];
-      groups[category].push({ key, ...data });
-    });
-    return groups;
-  }, [featureContributions]);
+  const minTs = entryTs;
+  const maxTs = Math.max(
+    dueTs || 0,
+    totalPoints[3],
+    nowTs + 3600000,
+  );
+  const span = Math.max(1, maxTs - minTs);
+  const pct = (ts) => Math.max(0, Math.min(100, ((ts - minTs) / span) * 100));
 
-  const maxContribution = useMemo(() => {
-    if (!featureContributions) return 1;
-    return Math.max(
-      ...Object.values(featureContributions).map((f) =>
-        Math.abs(f.contribution)
-      ),
-      0.1
-    );
-  }, [featureContributions]);
-
-  const totalSum = useMemo(() => {
-    if (!featureContributions) return 0;
-    return Object.values(featureContributions).reduce(
-      (sum, f) => sum + f.contribution,
-      0
-    );
-  }, [featureContributions]);
-
-  const categoryOrder = [
-    "urgency",
-    "time",
-    "priority",
-    "capacity",
-    "history",
-    "blockers",
-    "timing",
-    "model",
-  ];
-  const sortedCategories = categoryOrder.filter((c) => groupedFeatures[c]);
+  const dueInRange = dueTs && dueTs >= totalPoints[0] && dueTs <= totalPoints[3];
+  const dueBeforeRange = dueTs && dueTs < totalPoints[0];
+  const dueAfterRange = dueTs && dueTs > totalPoints[3];
 
   return (
-    <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-2xl p-6 relative overflow-hidden">
-      {/* Background grid */}
-      <div className="absolute inset-0 opacity-10">
+    <div
+      className="relative p-8 rounded-2xl"
+      style={{
+        background: `linear-gradient(135deg, ${COLORS.paper} 0%, ${COLORS.cognacGlow}66 100%)`,
+        border: `1px solid ${COLORS.borderSoft}`,
+      }}
+    >
+      <div className="flex items-baseline justify-between mb-6">
         <div
-          className="absolute inset-0"
+          className="text-[10px] uppercase tracking-[0.2em] font-medium"
+          style={{ color: COLORS.inkFaint }}
+        >
+          Prediction Timeline
+        </div>
+        <div className="text-[10px]" style={{ color: COLORS.inkFaint }}>
+          Range shows p10 → p90 of model predictions
+        </div>
+      </div>
+
+      {/* Axis container */}
+      <div className="relative" style={{ height: 180 }}>
+        {/* Background axis line */}
+        <div
+          className="absolute left-0 right-0 top-1/2 h-px"
+          style={{ backgroundColor: COLORS.divider, transform: "translateY(-0.5px)" }}
+        />
+
+        {/* Stage exit range bar (thinner, top) */}
+        <div
+          className="absolute"
           style={{
-            backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255,255,255,0.3) 1px, transparent 0)`,
-            backgroundSize: "24px 24px",
+            top: "30%",
+            left: `${pct(stagePoints[0])}%`,
+            width: `${pct(stagePoints[3]) - pct(stagePoints[0])}%`,
+            height: 3,
+            background: `linear-gradient(90deg, ${COLORS.brass}55, ${COLORS.brass}cc, ${COLORS.brass}55)`,
+            borderRadius: 1,
           }}
         />
-      </div>
-
-      {/* Header */}
-      <div className="relative flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-500/20 rounded-xl">
-            <Icons.Brain className="w-6 h-6 text-blue-400" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-white">
-              Neural Feature Analysis
-            </h3>
-            <p className="text-sm text-slate-400">
-              Real-time model activation for {currentStage} stage
-            </p>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-2xl font-mono font-bold text-white">
-            {logPrediction?.toFixed(3) || "—"}
-          </div>
-          <div className="text-xs text-slate-400">Log Prediction</div>
-        </div>
-      </div>
-
-      {/* Network Visualization */}
-      <div className="relative flex items-stretch gap-4">
-        {/* Input Layer */}
-        <div className="flex-1 space-y-3">
-          {sortedCategories.map((category) => {
-            const features = groupedFeatures[category];
-            const categoryColor =
-              CATEGORY_COLORS[category] || CATEGORY_COLORS.model;
-
-            return (
-              <div key={category} className="relative">
-                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 pl-2">
-                  {category}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {features.map(
-                    ({ key, value, weight, contribution, metadata }) => {
-                      const isActive = Math.abs(value) > 0.001;
-                      const activationLevel =
-                        Math.abs(contribution) / maxContribution;
-                      const isPositive = contribution > 0;
-                      const isHovered = hoveredNode === key;
-                      const isSelected = selectedNode === key;
-
-                      return (
-                        <motion.div
-                          key={key}
-                          className={`relative rounded-xl p-3 cursor-pointer transition-all ${
-                            isSelected ? "ring-2 ring-blue-400" : ""
-                          }`}
-                          style={{
-                            backgroundColor: isActive
-                              ? categoryColor.bg
-                              : "rgba(30, 41, 59, 0.5)",
-                            borderWidth: 2,
-                            borderColor: isActive
-                              ? categoryColor.border
-                              : "rgba(71, 85, 105, 0.3)",
-                            boxShadow:
-                              isActive && activationLevel > 0.3
-                                ? `0 0 ${20 * activationLevel}px ${
-                                    categoryColor.glow
-                                  }40`
-                                : "none",
-                          }}
-                          onMouseEnter={() => setHoveredNode(key)}
-                          onMouseLeave={() => setHoveredNode(null)}
-                          onClick={() =>
-                            setSelectedNode(selectedNode === key ? null : key)
-                          }
-                          animate={{ scale: isHovered ? 1.02 : 1 }}
-                          transition={{ duration: 0.15 }}
-                        >
-                          {isActive && activationLevel > 0.2 && (
-                            <motion.div
-                              className="absolute inset-0 rounded-xl"
-                              style={{ backgroundColor: categoryColor.glow }}
-                              animate={{ opacity: [0.1, 0.2, 0.1] }}
-                              transition={{ duration: 2, repeat: Infinity }}
-                            />
-                          )}
-
-                          <div className="relative">
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-lg">{metadata.icon}</span>
-                                <span
-                                  className={`text-sm font-medium ${
-                                    isActive
-                                      ? "text-slate-900"
-                                      : "text-slate-500"
-                                  }`}
-                                >
-                                  {metadata.name}
-                                </span>
-                              </div>
-                              {isActive && (
-                                <div
-                                  className={`w-2 h-2 rounded-full ${
-                                    isPositive ? "bg-red-500" : "bg-green-500"
-                                  }`}
-                                  style={{
-                                    boxShadow: `0 0 8px ${
-                                      isPositive ? "#ef4444" : "#22c55e"
-                                    }`,
-                                  }}
-                                />
-                              )}
-                            </div>
-
-                            <div className="flex items-center justify-between">
-                              <span
-                                className={`text-xs font-mono ${
-                                  isActive ? "text-slate-700" : "text-slate-600"
-                                }`}
-                              >
-                                {value.toFixed(3)}
-                              </span>
-                              <span
-                                className={`text-xs font-mono font-semibold ${
-                                  isPositive
-                                    ? "text-red-600"
-                                    : contribution < 0
-                                    ? "text-green-600"
-                                    : "text-slate-500"
-                                }`}
-                              >
-                                {contribution > 0 ? "+" : ""}
-                                {contribution.toFixed(3)}
-                              </span>
-                            </div>
-
-                            {isActive && (
-                              <div className="mt-2 h-1 bg-slate-300 rounded-full overflow-hidden">
-                                <motion.div
-                                  className="h-full rounded-full"
-                                  style={{
-                                    backgroundColor: isPositive
-                                      ? "#ef4444"
-                                      : "#22c55e",
-                                  }}
-                                  initial={{ width: 0 }}
-                                  animate={{
-                                    width: `${activationLevel * 100}%`,
-                                  }}
-                                  transition={{
-                                    duration: 0.5,
-                                    ease: "easeOut",
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </motion.div>
-                      );
-                    }
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        {/* Stage P50 marker */}
+        <div
+          className="absolute w-2 h-2 rounded-full"
+          style={{
+            top: "30%",
+            left: `${pct(stagePoints[1])}%`,
+            transform: "translate(-50%, -50%)",
+            marginTop: 1.5,
+            backgroundColor: COLORS.brass,
+            boxShadow: `0 0 0 3px ${COLORS.paper}`,
+          }}
+        />
+        <div
+          className="absolute text-[9px] uppercase tracking-[0.15em]"
+          style={{
+            top: "30%",
+            left: `${pct(stagePoints[1])}%`,
+            transform: "translate(-50%, -140%)",
+            color: COLORS.brass,
+            fontWeight: 500,
+          }}
+        >
+          Stage exit
         </div>
 
-        {/* Central processing */}
-        <div className="w-32 flex flex-col items-center justify-center relative">
-          <div className="space-y-4">
-            <motion.div
-              className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg"
-              style={{ boxShadow: "0 0 30px rgba(59, 130, 246, 0.4)" }}
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              <span className="text-2xl">🧠</span>
-            </motion.div>
-            <div className="text-center">
-              <div className="text-xs text-slate-400">Weighted Sum</div>
-              <div className="text-sm font-mono font-bold text-white">
-                {totalSum.toFixed(3)}
-              </div>
-            </div>
-          </div>
+        {/* Total completion range bar (thicker, bottom) */}
+        <div
+          className="absolute"
+          style={{
+            top: "60%",
+            left: `${pct(totalPoints[0])}%`,
+            width: `${pct(totalPoints[3]) - pct(totalPoints[0])}%`,
+            height: 6,
+            background: `linear-gradient(90deg, ${COLORS.cognacLight}66, ${COLORS.cognac}, ${COLORS.cognacLight}66)`,
+            borderRadius: 1,
+          }}
+        />
+        {/* Total P50 marker */}
+        <div
+          className="absolute rounded-full"
+          style={{
+            top: "60%",
+            left: `${pct(totalPoints[1])}%`,
+            transform: "translate(-50%, -50%)",
+            marginTop: 3,
+            width: 14,
+            height: 14,
+            backgroundColor: COLORS.cognac,
+            boxShadow: `0 0 0 3px ${COLORS.paper}, 0 2px 6px ${COLORS.cognac}44`,
+          }}
+        />
+        <div
+          className="absolute text-[10px] uppercase tracking-[0.15em] font-medium"
+          style={{
+            top: "60%",
+            left: `${pct(totalPoints[1])}%`,
+            transform: "translate(-50%, 180%)",
+            color: COLORS.cognac,
+          }}
+        >
+          Case done
         </div>
 
-        {/* Output Layer */}
-        <div className="w-48 flex flex-col justify-center">
-          <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700">
-            <div className="text-xs text-slate-400 uppercase tracking-wider mb-3">
-              Model Output
-            </div>
-
-            <div className="space-y-3">
-              <div className="bg-slate-700/50 rounded-xl p-3">
-                <div className="text-xs text-slate-400">Raw Prediction</div>
-                <div className="text-lg font-mono font-bold text-white">
-                  {logPrediction?.toFixed(4)}
-                </div>
-              </div>
-
-              <div className="bg-slate-700/50 rounded-xl p-3">
-                <div className="text-xs text-slate-400">Stage Bias</div>
-                <div className="text-lg font-mono font-bold text-blue-400">
-                  +{stageBias?.toFixed(4)}
-                </div>
-              </div>
-
-              <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl p-3 border border-blue-500/30">
-                <div className="text-xs text-slate-300">Final ETA (hours)</div>
-                <div className="text-xl font-mono font-bold text-white">
-                  {(
-                    Math.exp(logPrediction || 0) -
-                    1 +
-                    (stageBias || 0)
-                  ).toFixed(2)}
-                  h
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Selected Node Detail */}
-      <AnimatePresence>
-        {selectedNode && featureContributions?.[selectedNode] && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="mt-4 bg-slate-800 rounded-xl p-4 border border-slate-700"
+        {/* NOW marker */}
+        <div
+          className="absolute top-0 bottom-0 w-px"
+          style={{ left: `${pct(nowTs)}%`, backgroundColor: COLORS.ink }}
+        />
+        <div
+          className="absolute"
+          style={{
+            top: 0,
+            left: `${pct(nowTs)}%`,
+            transform: "translate(-50%, -100%)",
+          }}
+        >
+          <div
+            className="text-[9px] uppercase tracking-[0.2em] font-medium whitespace-nowrap pb-1"
+            style={{ color: COLORS.ink }}
           >
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">
-                  {featureContributions[selectedNode].metadata.icon}
-                </span>
-                <div>
-                  <h4 className="text-white font-semibold">
-                    {featureContributions[selectedNode].metadata.name}
-                  </h4>
-                  <p className="text-sm text-slate-400">
-                    {featureContributions[selectedNode].metadata.description}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedNode(null)}
-                className="text-slate-400 hover:text-white"
+            Now
+          </div>
+        </div>
+
+        {/* DUE marker */}
+        {dueTs && (
+          <>
+            <div
+              className="absolute top-0 bottom-0"
+              style={{
+                left: `${pct(dueTs)}%`,
+                width: 2,
+                backgroundColor: dueAfterRange ? COLORS.rLow : dueBeforeRange ? COLORS.rCritical : COLORS.ink,
+                borderRadius: 1,
+              }}
+            />
+            <div
+              className="absolute"
+              style={{
+                top: 0,
+                left: `${pct(dueTs)}%`,
+                transform: "translate(-50%, -100%)",
+              }}
+            >
+              <div
+                className="flex flex-col items-center pb-2"
+                style={{ color: dueAfterRange ? COLORS.rLow : dueBeforeRange ? COLORS.rCritical : COLORS.ink }}
               >
-                <Icons.X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-4 gap-4 mt-4">
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <div className="text-xs text-slate-400">Input Value</div>
-                <div className="text-lg font-mono font-bold text-white">
-                  {featureContributions[selectedNode].value.toFixed(4)}
+                <div className="text-[9px] uppercase tracking-[0.2em] font-medium whitespace-nowrap">
+                  Due
                 </div>
-              </div>
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <div className="text-xs text-slate-400">Model Weight</div>
-                <div className="text-lg font-mono font-bold text-blue-400">
-                  {featureContributions[selectedNode].weight.toFixed(4)}
-                </div>
-              </div>
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <div className="text-xs text-slate-400">Contribution</div>
                 <div
-                  className={`text-lg font-mono font-bold ${
-                    featureContributions[selectedNode].contribution > 0
-                      ? "text-red-400"
-                      : "text-green-400"
-                  }`}
+                  className="text-xs font-light mt-0.5 whitespace-nowrap"
+                  style={{ fontWeight: 600 }}
                 >
-                  {featureContributions[selectedNode].contribution > 0
-                    ? "+"
-                    : ""}
-                  {featureContributions[selectedNode].contribution.toFixed(4)}
-                </div>
-              </div>
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <div className="text-xs text-slate-400">Impact</div>
-                <div className="text-lg font-bold text-white">
-                  {(
-                    (Math.abs(featureContributions[selectedNode].contribution) /
-                      maxContribution) *
-                    100
-                  ).toFixed(1)}
-                  %
+                  {dueDateCalc.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </div>
               </div>
             </div>
-
-            {featureContributions[selectedNode].metadata.interpret && (
-              <div className="mt-3 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                <div className="text-sm text-blue-300">
-                  💡{" "}
-                  {featureContributions[selectedNode].metadata.interpret(
-                    featureContributions[selectedNode].value
-                  ) || "No specific interpretation"}
-                </div>
-              </div>
-            )}
-          </motion.div>
+          </>
         )}
-      </AnimatePresence>
+      </div>
 
-      {/* Legend */}
-      <div className="mt-6 flex items-center justify-center gap-6 text-xs text-slate-400">
+      {/* Footer explanation */}
+      <div
+        className="mt-6 pt-4 flex items-center gap-6 text-[10px] uppercase tracking-[0.15em]"
+        style={{ color: COLORS.inkSoft, borderTop: `1px solid ${COLORS.divider}` }}
+      >
         <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full bg-red-500"
-            style={{ boxShadow: "0 0 8px #ef4444" }}
-          />
-          <span>Increases ETA (risk)</span>
+          <div className="w-6 h-[3px] rounded-sm" style={{ backgroundColor: COLORS.brass }} />
+          <span>Stage exit p10–p90</span>
         </div>
         <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full bg-green-500"
-            style={{ boxShadow: "0 0 8px #22c55e" }}
-          />
-          <span>Decreases ETA (favorable)</span>
+          <div className="w-6 h-[6px] rounded-sm" style={{ backgroundColor: COLORS.cognac }} />
+          <span>Completion p10–p90</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-slate-600" />
-          <span>Inactive / Zero</span>
+        {elapsedWorkHours > 0.5 && (
+          <div className="ml-auto" style={{ color: COLORS.inkFaint }}>
+            Elapsed: {formatHours(elapsedWorkHours)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * QuantileBar — compact visualization of a single quantile range with due date.
+ * Used in the Detail tab to show both stage exit and total separately.
+ */
+function QuantileBar({ title, quantiles, etas, dueDate, now }) {
+  const p10 = etas.p10.getTime();
+  const p50 = etas.p50.getTime();
+  const p75 = etas.p75.getTime();
+  const p90 = etas.p90.getTime();
+  const dueTs = dueDate ? dueDate.getTime() : null;
+  const nowTs = now.getTime();
+
+  const minTs = Math.min(nowTs, p10) - 60000;
+  const maxTs = Math.max(dueTs || p90, p90) + 60000;
+  const span = Math.max(1, maxTs - minTs);
+  const pct = (ts) => ((ts - minTs) / span) * 100;
+
+  const dueInRange = dueTs && dueTs >= p10 && dueTs <= p90;
+  const dueBehindP50 = dueTs && dueTs < p50;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between">
+        <div className="text-[11px] uppercase tracking-[0.18em] font-medium" style={{ color: COLORS.inkSoft }}>
+          {title}
+        </div>
+        <div
+          className="text-xs tabular-nums"
+          style={{ color: COLORS.ink, fontFamily: "monospace" }}
+        >
+          {formatHours(quantiles.p10)} — {formatHours(quantiles.p90)}
+        </div>
+      </div>
+      <div className="relative h-8 rounded-full" style={{ backgroundColor: COLORS.cream }}>
+        {/* Full range (p10 to p90) */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full"
+          style={{
+            left: `${pct(p10)}%`,
+            width: `${pct(p90) - pct(p10)}%`,
+            background: `linear-gradient(90deg, ${COLORS.cognacLight}80, ${COLORS.cognac}, ${COLORS.cognacLight}80)`,
+          }}
+        />
+        {/* Core range (p50 to p75) emphasized */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 h-3 rounded-full"
+          style={{
+            left: `${pct(p50)}%`,
+            width: `${pct(p75) - pct(p50)}%`,
+            backgroundColor: COLORS.cognac,
+          }}
+        />
+        {/* P50 dot */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
+          style={{
+            left: `${pct(p50)}%`,
+            transform: "translate(-50%, -50%)",
+            backgroundColor: COLORS.paper,
+            border: `2px solid ${COLORS.cognac}`,
+          }}
+        />
+        {/* NOW line */}
+        <div
+          className="absolute top-0 bottom-0"
+          style={{
+            left: `${pct(nowTs)}%`,
+            width: 1,
+            backgroundColor: COLORS.ink,
+          }}
+        />
+        {/* DUE marker */}
+        {dueTs && (
+          <div
+            className="absolute top-0 bottom-0"
+            style={{
+              left: `${pct(dueTs)}%`,
+              width: 2,
+              backgroundColor: dueBehindP50 ? COLORS.rCritical : COLORS.ink,
+            }}
+          />
+        )}
+      </div>
+      <div className="flex justify-between text-[10px]" style={{ color: COLORS.inkFaint }}>
+        <span>Now</span>
+        <span style={{ fontFamily: "monospace" }}>
+          p50: {formatDate(etas.p50, true)}
+        </span>
+        {dueDate && <span>Due {formatDate(dueDate, false)}</span>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * RiskFactors — shows the reasons the model flagged this case, with feature values.
+ */
+function RiskFactors({ prediction }) {
+  const { riskReasons, featureDict, riskLevel } = prediction;
+  const style = RISK_STYLE[riskLevel];
+
+  if (!riskReasons || riskReasons.length === 0) {
+    return (
+      <div
+        className="p-6 rounded-xl flex items-start gap-3"
+        style={{ backgroundColor: COLORS.rLowBg, border: `1px solid ${COLORS.rLow}22` }}
+      >
+        <CheckCircle2 size={18} style={{ color: COLORS.rLow, marginTop: 2 }} />
+        <div>
+          <div className="text-sm font-medium" style={{ color: COLORS.rLow }}>
+            No risk signals detected
+          </div>
+          <div className="text-xs mt-1" style={{ color: COLORS.inkSoft }}>
+            The model sees this case as operating within normal parameters.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {riskReasons.map((reason, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-3 p-4 rounded-xl"
+          style={{
+            backgroundColor: COLORS.paper,
+            border: `1px solid ${COLORS.borderSoft}`,
+          }}
+        >
+          <div
+            className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: style.fg }}
+          />
+          <div className="text-sm leading-relaxed" style={{ color: COLORS.ink }}>
+            {reason}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Feature table — all 108 features sorted by abs value, with human labels.
+ */
+function FeatureTable({ prediction }) {
+  const [filter, setFilter] = useState("all");
+
+  const rows = useMemo(() => {
+    const arr = prediction.featureNames.map((name, i) => ({
+      name,
+      label: FEATURE_LABELS[name] || name.replace(/_/g, " "),
+      value: prediction.featureArray[i],
+    }));
+    const nonzero = arr.filter((r) => Math.abs(r.value) > 1e-9);
+    const sorted = nonzero.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    if (filter === "nonzero") return sorted;
+    if (filter === "auto") return sorted.filter((r) => r.name.startsWith("h_to_") || r.name.startsWith("has_") || r.name.startsWith("count_"));
+    if (filter === "deep") return sorted.filter((r) =>
+      ["rush_added_late","hours_to_first_action","batch_siblings","early_actions","hold_cycles",
+       "longest_gap","gap_before_entry","due_changes_closer","due_changes_further","due_net_direction",
+       "mid_stage_actions","stage_position","stages_remaining","backward_count","unique_users",
+       "created_outside_hours","has_appt"].includes(r.name));
+    return arr;
+  }, [prediction, filter]);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-4">
+        {[
+          { k: "all",     label: "All 108" },
+          { k: "nonzero", label: "Active" },
+          { k: "deep",    label: "Deep signals" },
+          { k: "auto",    label: "Event timing" },
+        ].map(({ k, label }) => (
+          <button
+            key={k}
+            onClick={() => setFilter(k)}
+            className="text-[11px] uppercase tracking-[0.14em] px-3 py-1.5 rounded-lg transition-colors"
+            style={{
+              color: filter === k ? COLORS.paper : COLORS.inkSoft,
+              backgroundColor: filter === k ? COLORS.cognac : COLORS.cream,
+              border: `1px solid ${filter === k ? COLORS.cognac : COLORS.borderSoft}`,
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+      >
+        <div className="max-h-[460px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead
+              className="sticky top-0 z-10"
+              style={{ backgroundColor: COLORS.cream }}
+            >
+              <tr>
+                <th
+                  className="text-left px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-medium"
+                  style={{ color: COLORS.inkFaint }}
+                >
+                  Feature
+                </th>
+                <th
+                  className="text-right px-4 py-2.5 text-[10px] uppercase tracking-[0.15em] font-medium"
+                  style={{ color: COLORS.inkFaint }}
+                >
+                  Value
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr
+                  key={r.name}
+                  style={{
+                    borderTop: i === 0 ? "none" : `1px solid ${COLORS.divider}`,
+                    backgroundColor: Math.abs(r.value) > 1e-9 ? undefined : COLORS.cream,
+                  }}
+                >
+                  <td className="px-4 py-2">
+                    <div
+                      className="text-sm"
+                      style={{ color: Math.abs(r.value) > 1e-9 ? COLORS.ink : COLORS.inkFaint }}
+                    >
+                      {r.label}
+                    </div>
+                    <div className="text-[10px]" style={{ color: COLORS.inkFaint }}>
+                      {r.name}
+                    </div>
+                  </td>
+                  <td
+                    className="px-4 py-2 text-right font-light"
+                    style={{
+                      color: Math.abs(r.value) > 1e-9 ? COLORS.cognac : COLORS.inkFaint,
+                      fontFamily: "monospace",
+                      fontSize: 13,
+                    }}
+                  >
+                    {typeof r.value === "number"
+                      ? (Math.abs(r.value) < 0.001 && r.value !== 0
+                          ? r.value.toExponential(2)
+                          : r.value.toFixed(3))
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   );
-};
+}
 
-/** ======================= COMPACT CASE ROW ======================== **/
+/**
+ * Main Analytics Modal
+ */
+export function CaseRiskAnalyticsModal({ prediction, onClose }) {
+  const [tab, setTab] = useState("overview");
 
-const CompactCaseRow = ({ prediction, onOpenAnalytics }) => {
-  const status = getStatusFromPrediction(prediction);
-  const colors = COLORS.status[status];
-  const now = new Date();
-  const dueDate = prediction.dueDate ? new Date(prediction.dueDate) : null;
-  const isOverdue = dueDate && dueDate < now;
 
-  const getTimeDisplay = () => {
-    if (isOverdue)
-      return {
-        primary: "OVERDUE",
-        secondary: formatRelativeTime(dueDate),
-        color: colors.primary,
-        urgent: true,
-      };
-    if (prediction.willBeLate) {
-      const lateBy = formatHours(prediction.daysLate * 24);
-      return {
-        primary: `Late by ${lateBy}`,
-        secondary: `Due ${formatRelativeTime(dueDate)}`,
-        color: colors.primary,
-        urgent: true,
-      };
-    }
-    return {
-      primary: formatRelativeTime(dueDate),
-      secondary:
-        prediction.slackDays > 0
-          ? `${formatHours(prediction.slackDays * 24)} buffer`
-          : "On time",
-      color: colors.primary,
-      urgent: false,
-    };
-  };
-
-  const timeDisplay = getTimeDisplay();
+  if (!prediction) return null;
+  const style = RISK_STYLE[prediction.riskLevel];
+  const now = getCurrentTime();
 
   return (
-    <motion.div layout className="group">
-      <div className="relative bg-white rounded-xl border border-gray-200 transition-all hover:shadow-md hover:border-gray-300 overflow-hidden">
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl"
-          style={{ backgroundColor: colors.primary }}
-        />
-
-        <div className="pl-4 pr-4 py-3">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3 w-44">
-              <div>
-                <div className="font-mono text-base font-bold text-gray-900">
-                  {prediction.caseNumber}
-                </div>
-                <div className="text-xs text-gray-500 capitalize">
-                  {prediction.caseType}
-                </div>
-              </div>
-            </div>
-
-            <div className="w-24">
-              <StatusBadge status={status} />
-            </div>
-
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <div
-                  className={`text-lg font-bold ${
-                    timeDisplay.urgent ? "" : "text-gray-900"
-                  }`}
-                  style={timeDisplay.urgent ? { color: timeDisplay.color } : {}}
-                >
-                  {timeDisplay.primary}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {timeDisplay.secondary}
-                </div>
-              </div>
-            </div>
-
-            <div className="w-32">
-              <div className="flex items-center gap-2">
-                <ProgressBar value={prediction.progressPercent} size="sm" />
-                <span className="text-xs font-medium text-gray-600 w-10">
-                  {formatPercent(prediction.progressPercent)}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 w-32 justify-end">
-              {prediction.isRush && (
-                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded flex items-center gap-1">
-                  <Icons.Zap className="w-3 h-3" />
-                  RUSH
-                </span>
-              )}
-              {prediction.onHold && (
-                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded flex items-center gap-1">
-                  <Icons.Pause className="w-3 h-3" />
-                  HOLD
-                </span>
-              )}
-              {prediction.isETAAdjusted && (
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded flex items-center gap-1">
-                  <Icons.RefreshCw className="w-3 h-3" />
-                  ADJ
-                </span>
-              )}
-            </div>
-
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenAnalytics();
-              }}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors group/btn"
-            >
-              <Icons.Expand className="w-5 h-5 text-gray-400 group-hover/btn:text-blue-500" />
-            </button>
-          </div>
-        </div>
-
-        <div className="h-0.5 bg-gray-100">
-          <div
-            className="h-full transition-all duration-500"
-            style={{
-              width: `${prediction.progressPercent}%`,
-              backgroundColor: colors.primary,
-            }}
-          />
-        </div>
-      </div>
-    </motion.div>
-  );
-};
-
-/** ======================= ANALYTICS MODAL ======================== **/
-
-const AnalyticsModal = ({ prediction, open, onClose, onOpenHistory }) => {
-  const [activeTab, setActiveTab] = useState("overview");
-
-  if (!open || !prediction) return null;
-
-  const status = getStatusFromPrediction(prediction);
-  const colors = COLORS.status[status];
-  const now = new Date();
-  const dueDate = prediction.dueDate ? new Date(prediction.dueDate) : null;
-  const isOverdue = dueDate && dueDate < now;
-
-  const tabs = [
-    { id: "overview", label: "Overview", icon: Icons.Target },
-    { id: "timeline", label: "Timeline", icon: Icons.Clock },
-    { id: "risk", label: "Risk Analysis", icon: Icons.AlertTriangle },
-    { id: "neural", label: "Neural View", icon: Icons.Brain },
-    { id: "data", label: "Raw Data", icon: Icons.BarChart },
-  ];
-
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
+    <div
+      className="fixed inset-0 z-[10002] overflow-y-auto flex items-start justify-center p-6 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="glass-nb w-full max-w-5xl my-8 rounded-2xl overflow-hidden shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
       >
-        <motion.div
-          className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden"
-          initial={{ scale: 0.9, opacity: 0, y: 20 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.9, opacity: 0, y: 20 }}
-          onClick={(e) => e.stopPropagation()}
+        {/* ============ HEADER ============ */}
+        <div
+          className="glass-nb-dark relative px-10 pt-10 pb-8 border-b border-slate-200"
         >
-          {/* Header */}
-          <div className="flex-none px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div
-                  className="p-3 rounded-xl"
-                  style={{ backgroundColor: colors.light }}
-                >
-                  <div
-                    className="text-2xl font-mono font-bold"
-                    style={{ color: colors.text }}
-                  >
-                    {prediction.caseNumber}
-                  </div>
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={status} size="lg" />
-                    {prediction.isRush && (
-                      <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded">
-                        RUSH
-                      </span>
-                    )}
-                    {prediction.isETAAdjusted && (
-                      <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded">
-                        ETA ADJUSTED
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-sm text-gray-500 mt-1">
-                    {prediction.currentStage} stage •{" "}
-                    {formatPercent(prediction.progressPercent)} complete
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <Icons.X className="w-6 h-6 text-gray-400" />
-              </button>
-            </div>
+          <button
+            onClick={onClose}
+            className="absolute top-6 right-6 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+            style={{ color: COLORS.inkSoft }}
+          >
+            <X size={18} />
+          </button>
 
-            {/* Recommendation */}
+          <div className="flex items-start justify-between mb-6">
+            <div>
+              <div
+                className="text-[10px] uppercase tracking-[0.25em] font-medium mb-3"
+                style={{ color: COLORS.inkFaint }}
+              >
+                Case Analysis · {prediction.modelUsed}
+              </div>
+              <div
+                className="text-4xl font-semibold leading-none mb-3 tracking-tight"
+                style={{ color: COLORS.ink }}
+              >
+                {prediction.caseNumber}
+              </div>
+              <div className="flex items-center gap-3 text-sm" style={{ color: COLORS.inkSoft }}>
+                <span className="capitalize">{prediction.currentStage} stage</span>
+                <span style={{ color: COLORS.inkFaint }}>·</span>
+                <span>{Math.round(prediction.progressPercent)}% elapsed</span>
+                <span style={{ color: COLORS.inkFaint }}>·</span>
+                <span>{prediction.confidenceScore}% confidence</span>
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <RiskBadge level={prediction.riskLevel} size="lg" />
+              <div className="text-[10px]" style={{ color: COLORS.inkFaint }}>
+                Risk score {prediction.riskScore}
+              </div>
+            </div>
+          </div>
+
+          {/* Recommendation banner */}
+          <div
+            className="flex items-start gap-3 px-5 py-4 rounded-xl"
+            style={{
+              backgroundColor: style.bg,
+              border: `1px solid ${style.fg}22`,
+            }}
+          >
             <div
-              className="mt-4 p-4 rounded-xl"
-              style={{
-                backgroundColor: colors.light,
-                borderLeft: `4px solid ${colors.primary}`,
-              }}
-            >
-              <div className="flex items-start gap-3">
-                {status === "critical" ? (
-                  <Icons.XCircle
-                    className="w-5 h-5 mt-0.5"
-                    style={{ color: colors.text }}
-                  />
-                ) : status === "high" ? (
-                  <Icons.AlertTriangle
-                    className="w-5 h-5 mt-0.5"
-                    style={{ color: colors.text }}
-                  />
-                ) : status === "low" ? (
-                  <Icons.CheckCircle
-                    className="w-5 h-5 mt-0.5"
-                    style={{ color: colors.text }}
-                  />
-                ) : (
-                  <Icons.Info
-                    className="w-5 h-5 mt-0.5"
-                    style={{ color: colors.text }}
-                  />
-                )}
-                <div>
-                  <div className="font-semibold" style={{ color: colors.text }}>
-                    Recommendation
-                  </div>
-                  <div className="text-sm mt-1" style={{ color: colors.text }}>
-                    {prediction.recommendation}
-                  </div>
-                </div>
+              className="mt-0.5 w-1 self-stretch rounded-full flex-shrink-0"
+              style={{ backgroundColor: style.fg, width: 2 }}
+            />
+            <div className="flex-1">
+              <div className="text-[10px] uppercase tracking-[0.18em] font-medium mb-1" style={{ color: style.fg }}>
+                Recommendation
+              </div>
+              <div className="text-sm font-medium" style={{ color: COLORS.ink }}>
+                {prediction.recommendation}
               </div>
             </div>
           </div>
 
           {/* Tabs */}
-          <div className="flex-none border-b border-gray-200 px-6 bg-gray-50">
-            <div className="flex gap-1">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === tab.id
-                      ? "border-blue-500 text-blue-600 bg-white"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-                  } rounded-t-lg`}
-                >
-                  <tab.icon className="w-4 h-4" />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-auto p-6 bg-gray-50">
-            <AnimatePresence mode="wait">
-              {activeTab === "overview" && (
-                <motion.div
-                  key="overview"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <div className="grid grid-cols-4 gap-4 mb-6">
-                    <div
-                      className={`rounded-xl p-4 border ${
-                        prediction.riskScore >= 65
-                          ? "bg-red-50 border-red-200"
-                          : prediction.riskScore >= 40
-                          ? "bg-amber-50 border-amber-200"
-                          : "bg-green-50 border-green-200"
-                      }`}
-                    >
-                      <div className="text-xs text-gray-500 uppercase tracking-wide">
-                        Risk Score
-                      </div>
-                      <div
-                        className="text-3xl font-bold mt-1"
-                        style={{ color: colors.text }}
-                      >
-                        {prediction.riskScore}
-                      </div>
-                    </div>
-                    <div className="rounded-xl p-4 bg-white border border-gray-200">
-                      <div className="text-xs text-gray-500 uppercase tracking-wide">
-                        Time Remaining
-                      </div>
-                      <div className="text-3xl font-bold mt-1 text-gray-900">
-                        {formatHours(prediction.stageWorkHours)}
-                      </div>
-                    </div>
-                    <div
-                      className={`rounded-xl p-4 border ${
-                        prediction.slackDays < 0
-                          ? "bg-red-50 border-red-200"
-                          : "bg-green-50 border-green-200"
-                      }`}
-                    >
-                      <div className="text-xs text-gray-500 uppercase tracking-wide">
-                        Buffer
-                      </div>
-                      <div
-                        className={`text-3xl font-bold mt-1 ${
-                          prediction.slackDays < 0
-                            ? "text-red-600"
-                            : "text-green-600"
-                        }`}
-                      >
-                        {prediction.slackDays >= 0
-                          ? formatHours(prediction.slackDays * 24)
-                          : `−${formatHours(
-                              Math.abs(prediction.slackDays) * 24
-                            )}`}
-                      </div>
-                    </div>
-                    <div className="rounded-xl p-4 bg-white border border-gray-200">
-                      <div className="text-xs text-gray-500 uppercase tracking-wide">
-                        Queue Position
-                      </div>
-                      <div className="text-3xl font-bold mt-1 text-gray-900">
-                        #{prediction.queuePosition || 1}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Operational Metrics
-                      </h4>
-                      <div className="grid grid-cols-4 gap-4 text-center">
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <div className="text-2xl font-bold text-gray-900">
-                            {prediction.stageMoves}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            Stage Moves
-                          </div>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <div className="text-2xl font-bold text-gray-900">
-                            {prediction.dueChanges}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            Due Changes
-                          </div>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <div className="text-2xl font-bold text-gray-900">
-                            {prediction.qcLoops}
-                          </div>
-                          <div className="text-xs text-gray-500">QC Loops</div>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <div className="text-2xl font-bold text-gray-900">
-                            {formatHours(prediction.holdHours)}
-                          </div>
-                          <div className="text-xs text-gray-500">Hold Time</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Activity Status
-                      </h4>
-                      <div
-                        className={`p-4 rounded-xl ${
-                          prediction.hoursIdle >= 18
-                            ? "bg-amber-50 border border-amber-200"
-                            : "bg-green-50 border border-green-200"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-sm text-gray-600">
-                              Last Activity
-                            </div>
-                            <div
-                              className={`text-xl font-bold ${
-                                prediction.hoursIdle >= 18
-                                  ? "text-amber-600"
-                                  : "text-green-600"
-                              }`}
-                            >
-                              {prediction.hoursIdle < 1
-                                ? "Active now"
-                                : `${formatHours(prediction.hoursIdle)} ago`}
-                            </div>
-                          </div>
-                          <Icons.Activity
-                            className={`w-8 h-8 ${
-                              prediction.hoursIdle >= 18
-                                ? "text-amber-400"
-                                : "text-green-400"
-                            }`}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {activeTab === "timeline" && (
-                <motion.div
-                  key="timeline"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Case Timeline
-                      </h4>
-                      <div className="relative pl-8 space-y-6">
-                        <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-gray-200" />
-
-                        {[
-                          {
-                            label: "Stage Entry",
-                            time: formatDate(prediction.stageEnteredAt, {
-                              dayTime: true,
-                            }),
-                            color: "#3b82f6",
-                            active: true,
-                          },
-                          {
-                            label: "Current",
-                            time: formatDate(now, { dayTime: true }),
-                            color: "#8b5cf6",
-                            active: true,
-                            badge: `${formatHours(
-                              prediction.elapsedWorkHours
-                            )} elapsed`,
-                          },
-                          {
-                            label: prediction.isETAAdjusted
-                              ? "Adjusted ETA"
-                              : "Predicted ETA",
-                            time: formatDate(
-                              prediction.expectedCompletionDate,
-                              { dayTime: true }
-                            ),
-                            color: prediction.willBeLate
-                              ? "#f59e0b"
-                              : "#22c55e",
-                            badge: prediction.isETAAdjusted
-                              ? `+${formatHours(prediction.etaExtensionHours)}`
-                              : null,
-                          },
-                          {
-                            label: "Due Date",
-                            time: formatDate(dueDate, { dayTime: true }),
-                            color: isOverdue
-                              ? "#dc2626"
-                              : prediction.willBeLate
-                              ? "#f59e0b"
-                              : "#22c55e",
-                            badge: isOverdue ? "OVERDUE" : null,
-                          },
-                        ].map((event, idx) => (
-                          <div
-                            key={idx}
-                            className="relative flex items-start gap-4"
-                          >
-                            <div
-                              className="absolute -left-5 w-4 h-4 rounded-full border-4 border-white"
-                              style={{
-                                backgroundColor: event.color,
-                                boxShadow: event.active
-                                  ? `0 0 0 4px ${event.color}20`
-                                  : undefined,
-                              }}
-                            />
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-gray-900">
-                                  {event.label}
-                                </span>
-                                {event.badge && (
-                                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
-                                    {event.badge}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-sm text-gray-500">
-                                {event.time}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="bg-white rounded-xl border border-gray-200 p-5">
-                        <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                          Time Breakdown
-                        </h4>
-                        <div className="space-y-3">
-                          {[
-                            {
-                              label: "Stage Entry",
-                              value: formatDate(prediction.stageEnteredAt, {
-                                dayTime: true,
-                              }),
-                            },
-                            {
-                              label: "Time in Stage",
-                              value: formatHours(prediction.elapsedWorkHours),
-                            },
-                            {
-                              label: "Original Estimate",
-                              value: formatHours(
-                                prediction.originalTotalWorkHours
-                              ),
-                            },
-                            prediction.isETAAdjusted && {
-                              label: "Extension Added",
-                              value: `+${formatHours(
-                                prediction.etaExtensionHours
-                              )}`,
-                              highlight: true,
-                            },
-                            prediction.isETAAdjusted && {
-                              label: "Adjusted Total",
-                              value: formatHours(
-                                prediction.totalStageWorkHours
-                              ),
-                              highlight: true,
-                            },
-                            {
-                              label: "Remaining Work",
-                              value: formatHours(prediction.stageWorkHours),
-                            },
-                            {
-                              label: "Expected Exit",
-                              value: formatDate(
-                                prediction.expectedCompletionDate,
-                                { dayTime: true }
-                              ),
-                            },
-                            {
-                              label: "Due Date",
-                              value: formatDate(dueDate, { dayTime: true }),
-                            },
-                          ]
-                            .filter(Boolean)
-                            .map((row, idx) => (
-                              <div
-                                key={idx}
-                                className={`flex justify-between items-center py-2 ${
-                                  row.highlight
-                                    ? "bg-blue-50 -mx-2 px-2 rounded"
-                                    : ""
-                                }`}
-                              >
-                                <span className="text-sm text-gray-600">
-                                  {row.label}
-                                </span>
-                                <span
-                                  className={`text-sm font-mono font-semibold ${
-                                    row.highlight
-                                      ? "text-blue-700"
-                                      : "text-gray-900"
-                                  }`}
-                                >
-                                  {row.value}
-                                </span>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-
-                      {prediction.isETAAdjusted &&
-                        prediction.adjustmentFactors && (
-                          <div className="bg-blue-50 rounded-xl border border-blue-200 p-5">
-                            <h4 className="text-sm font-semibold text-blue-900 mb-3">
-                              ETA Adjustment Factors
-                            </h4>
-                            <div className="space-y-2 text-sm">
-                              {prediction.adjustmentFactors.idleTime >= 2 && (
-                                <div className="flex justify-between">
-                                  <span className="text-blue-700">
-                                    Idle Time
-                                  </span>
-                                  <span className="font-mono text-blue-900">
-                                    {formatHours(
-                                      prediction.adjustmentFactors.idleTime
-                                    )}
-                                  </span>
-                                </div>
-                              )}
-                              {prediction.adjustmentFactors.recentHolds > 0 && (
-                                <div className="flex justify-between">
-                                  <span className="text-blue-700">
-                                    Hold Time
-                                  </span>
-                                  <span className="font-mono text-blue-900">
-                                    {formatHours(
-                                      prediction.adjustmentFactors.recentHolds
-                                    )}
-                                  </span>
-                                </div>
-                              )}
-                              {prediction.adjustmentFactors.backlog > 2 && (
-                                <div className="flex justify-between">
-                                  <span className="text-blue-700">Backlog</span>
-                                  <span className="font-mono text-blue-900">
-                                    {prediction.adjustmentFactors.backlog} cases
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {activeTab === "risk" && (
-                <motion.div
-                  key="risk"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <div className="grid grid-cols-3 gap-6">
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Risk Score
-                      </h4>
-                      <div className="flex items-center justify-center mb-4">
-                        <div className="relative w-32 h-32">
-                          <svg className="w-full h-full transform -rotate-90">
-                            <circle
-                              cx="64"
-                              cy="64"
-                              r="56"
-                              fill="none"
-                              stroke="#e5e7eb"
-                              strokeWidth="12"
-                            />
-                            <circle
-                              cx="64"
-                              cy="64"
-                              r="56"
-                              fill="none"
-                              stroke={colors.primary}
-                              strokeWidth="12"
-                              strokeDasharray={`${
-                                prediction.riskScore * 3.52
-                              } 352`}
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span
-                              className="text-3xl font-bold"
-                              style={{ color: colors.text }}
-                            >
-                              {prediction.riskScore}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        {[
-                          {
-                            label: "Slack",
-                            value: prediction.riskComponents.slack,
-                          },
-                          {
-                            label: "Operations",
-                            value: prediction.riskComponents.ops,
-                          },
-                          {
-                            label: "Data",
-                            value: prediction.riskComponents.data,
-                          },
-                        ].map(({ label, value }) => (
-                          <div key={label}>
-                            <div className="flex justify-between text-sm mb-1">
-                              <span className="text-gray-600">{label}</span>
-                              <span className="font-mono">
-                                {formatPercent(value * 100)}
-                              </span>
-                            </div>
-                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-gray-400 rounded-full"
-                                style={{ width: `${value * 100}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Probabilities
-                      </h4>
-                      <div className="space-y-4">
-                        {[
-                          {
-                            label: "Late Probability",
-                            value: prediction.lateProbability,
-                            color: colors.primary,
-                          },
-                          {
-                            label: "Reschedule Prob",
-                            value: prediction.rescheduleProbability,
-                            color: "#ec4899",
-                          },
-                          {
-                            label: "Stall Risk",
-                            value: prediction.stallLateProbability || 0,
-                            color: "#f59e0b",
-                          },
-                        ].map(({ label, value, color }) => (
-                          <div key={label}>
-                            <div className="flex justify-between text-sm mb-1">
-                              <span className="text-gray-600">{label}</span>
-                              <span
-                                className="font-mono font-semibold"
-                                style={{ color }}
-                              >
-                                {formatPercent(value * 100, 1)}
-                              </span>
-                            </div>
-                            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className="h-full rounded-full"
-                                style={{
-                                  width: `${value * 100}%`,
-                                  backgroundColor: color,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Risk Factors
-                      </h4>
-                      <div className="space-y-2">
-                        {prediction.riskReasons.length > 0 ? (
-                          prediction.riskReasons.map((reason, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center gap-2 p-2 bg-amber-50 rounded-lg"
-                            >
-                              <div className="w-2 h-2 rounded-full bg-amber-500" />
-                              <span className="text-sm text-amber-800">
-                                {reason}
-                              </span>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-sm text-gray-500 text-center py-4">
-                            No significant risk factors
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {activeTab === "neural" && (
-                <motion.div
-                  key="neural"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <NeuralNetworkVisualization
-                    featureContributions={prediction.featureContributions}
-                    modelWeights={prediction.modelWeights}
-                    logPrediction={prediction.logPrediction}
-                    stageBias={prediction.stageBias}
-                    currentStage={prediction.currentStage}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === "data" && (
-                <motion.div
-                  key="data"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Feature Vector
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2 font-mono text-sm">
-                        {prediction.featureVector &&
-                          Object.entries(prediction.featureVector).map(
-                            ([key, value]) => (
-                              <div
-                                key={key}
-                                className="flex justify-between py-1 px-2 bg-gray-50 rounded"
-                              >
-                                <span className="text-gray-500 truncate">
-                                  {key}
-                                </span>
-                                <span className="text-gray-900">
-                                  {typeof value === "number"
-                                    ? value.toFixed(4)
-                                    : value}
-                                </span>
-                              </div>
-                            )
-                          )}
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-4">
-                        Model Weights ({prediction.currentStage})
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2 font-mono text-sm">
-                        {prediction.modelWeights &&
-                          Object.entries(prediction.modelWeights).map(
-                            ([key, value]) => (
-                              <div
-                                key={key}
-                                className="flex justify-between py-1 px-2 bg-gray-50 rounded"
-                              >
-                                <span className="text-gray-500 truncate">
-                                  {key}
-                                </span>
-                                <span
-                                  className={
-                                    value > 0
-                                      ? "text-red-600"
-                                      : value < 0
-                                      ? "text-green-600"
-                                      : "text-gray-900"
-                                  }
-                                >
-                                  {typeof value === "number"
-                                    ? value.toFixed(4)
-                                    : value}
-                                </span>
-                              </div>
-                            )
-                          )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 bg-gray-900 rounded-xl p-4">
-                    <h4 className="text-sm font-semibold text-white mb-3">
-                      Raw Prediction Data
-                    </h4>
-                    <pre className="text-xs font-mono text-gray-300 overflow-auto max-h-64">
-                      {JSON.stringify(prediction, null, 2)}
-                    </pre>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Footer */}
-          <div className="flex-none px-6 py-4 border-t border-gray-200 bg-gray-50">
-            <div className="flex items-center justify-between">
+          <div className="flex items-center gap-8 mt-8" style={{ borderBottom: "none" }}>
+            {[
+              { k: "overview",  label: "Overview",    icon: Target },
+              { k: "timeline",  label: "Timeline",    icon: Clock },
+              { k: "signals",   label: "Risk signals",icon: AlertCircle },
+              { k: "features",  label: "Features",    icon: Sparkles },
+            ].map(({ k, label, icon: Icon }) => (
               <button
-                onClick={() => onOpenHistory?.()}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                key={k}
+                onClick={() => setTab(k)}
+                className="relative flex items-center gap-2 pb-3 text-sm transition-colors"
+                style={{
+                  color: tab === k ? COLORS.cognac : COLORS.inkSoft,
+                  borderBottom: tab === k ? `2px solid ${COLORS.cognac}` : "2px solid transparent",
+                  marginBottom: -1,
+                  fontWeight: tab === k ? 600 : 400,
+                }}
               >
-                View Case History
+                <Icon size={14} />
+                {label}
               </button>
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-              >
-                Close
-              </button>
-            </div>
+            ))}
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>,
-    document.body
+        </div>
+
+        {/* ============ BODY ============ */}
+        <div className="px-10 py-8">
+          {tab === "overview" && <OverviewTab prediction={prediction} />}
+          {tab === "timeline" && <TimelineTab prediction={prediction} />}
+          {tab === "signals"  && <SignalsTab  prediction={prediction} />}
+          {tab === "features" && <FeaturesTab prediction={prediction} />}
+        </div>
+
+        {/* ============ FOOTER ============ */}
+        <div
+          className="glass-nb-dark px-10 py-5 flex items-center justify-between border-t border-slate-200"
+        >
+          <div className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkFaint }}>
+            Predictions update live · {prediction.backlogCount} concurrent in stage
+          </div>
+          <button
+            onClick={onClose}
+            className="px-5 py-2 text-sm rounded-lg transition-colors bg-slate-800 text-white hover:bg-slate-700"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
-};
+}
 
-/** ======================= MAIN MODAL COMPONENT ======================== **/
+/** ========================================================================
+ *  TAB PANES
+ *  ======================================================================== */
 
+function OverviewTab({ prediction }) {
+  const { totalHours, stageHours, lateProbability, rescheduleProbability,
+          confidenceScore, hoursIdle, backlogCount, qcLoops, stageMoves } = prediction;
+
+  const slackH = (prediction.dueDateCalc && prediction.completionETA)
+    ? (prediction.dueDateCalc.getTime() - prediction.completionETA.getTime()) / 3600000
+    : null;
+
+  return (
+    <div className="space-y-8">
+      {/* Hero timeline */}
+      <TimelineHero prediction={prediction} />
+
+      {/* Key metrics row */}
+      <div className="grid grid-cols-4 gap-3">
+        <MetricCard
+          label="Risk score"
+          value={prediction.riskScore}
+          sublabel={`${formatPercent(lateProbability * 100, 0)} chance of being late`}
+          accent={prediction.riskLevel === "critical" || prediction.riskLevel === "high"}
+        />
+        <MetricCard
+          label="Completion ETA"
+          value={formatDate(prediction.completionETA, false)}
+          sublabel={`p50 · ${formatHours(totalHours.p50)} work remaining`}
+        />
+        <MetricCard
+          label={slackH !== null && slackH < 0 ? "Past due by" : "Buffer"}
+          value={slackH !== null ? formatHours(Math.abs(slackH)) : "—"}
+          sublabel={slackH !== null
+            ? (slackH < 0 ? "overrun of due date" : "time left before due")
+            : "no due date"}
+          accent={slackH !== null && slackH < 0}
+        />
+        <MetricCard
+          label="Confidence"
+          value={`${confidenceScore}%`}
+          sublabel="increases as case progresses"
+        />
+      </div>
+
+      {/* Secondary row: Reschedule + Operational */}
+      <div className="grid grid-cols-3 gap-3">
+        <div
+          className="p-5 rounded-xl"
+          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+        >
+          <div
+            className="text-[10px] uppercase tracking-[0.18em] mb-3"
+            style={{ color: COLORS.inkFaint }}
+          >
+            Probability matrix
+          </div>
+          <div className="space-y-3">
+            <ProbRow label="Late" value={lateProbability} color={COLORS.cognac} />
+            <ProbRow label="Due rescheduled" value={rescheduleProbability} color={COLORS.brass} />
+          </div>
+        </div>
+
+        <div
+          className="p-5 rounded-xl col-span-2"
+          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+        >
+          <div
+            className="text-[10px] uppercase tracking-[0.18em] mb-3"
+            style={{ color: COLORS.inkFaint }}
+          >
+            Operational context
+          </div>
+          <div className="grid grid-cols-4 gap-4">
+            <KVStat label="Concurrent" value={backlogCount} />
+            <KVStat label="Hours idle" value={formatHours(hoursIdle)} />
+            <KVStat label="Hold time" value={formatHours(prediction.holdHours || 0)} />
+            <KVStat label="QC loops" value={qcLoops} />
+          </div>
+        </div>
+      </div>
+
+      {/* Stage-level breakdown */}
+      <div
+        className="p-6 rounded-xl"
+        style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+      >
+        <div
+          className="text-[10px] uppercase tracking-[0.18em] mb-5"
+          style={{ color: COLORS.inkFaint }}
+        >
+          Prediction breakdown
+        </div>
+        <div className="space-y-6">
+          <QuantileBar
+            title={`Stage exit · ${prediction.currentStage}`}
+            quantiles={stageHours}
+            etas={prediction.stageETAs}
+            dueDate={prediction.dueDateCalc}
+            now={getCurrentTime()}
+          />
+          <QuantileBar
+            title="Total completion · to done"
+            quantiles={totalHours}
+            etas={prediction.totalETAs}
+            dueDate={prediction.dueDateCalc}
+            now={getCurrentTime()}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimelineTab({ prediction }) {
+  const { stageHours, totalHours, stageETAs, totalETAs } = prediction;
+  const now = getCurrentTime();
+
+  const rows = [
+    { label: "Stage entered", value: formatDate(prediction.stageEnteredAt), muted: true },
+    { label: "Time in stage", value: formatDuration(prediction.timeInStageMs), muted: true },
+    { label: "Elapsed work", value: formatHours(prediction.elapsedWorkHours), muted: true },
+    { divider: true },
+    { label: "Stage exit · p10 (optimistic)",   value: formatDate(stageETAs.p10), sub: formatHours(stageHours.p10) },
+    { label: "Stage exit · p50 (best estimate)", value: formatDate(stageETAs.p50), sub: formatHours(stageHours.p50), bold: true },
+    { label: "Stage exit · p75 (conservative)", value: formatDate(stageETAs.p75), sub: formatHours(stageHours.p75) },
+    { label: "Stage exit · p90 (pessimistic)",  value: formatDate(stageETAs.p90), sub: formatHours(stageHours.p90) },
+    { divider: true },
+    { label: "Completion · p10 (optimistic)",   value: formatDate(totalETAs.p10), sub: formatHours(totalHours.p10) },
+    { label: "Completion · p50 (best estimate)", value: formatDate(totalETAs.p50), sub: formatHours(totalHours.p50), bold: true },
+    { label: "Completion · p75 (conservative)", value: formatDate(totalETAs.p75), sub: formatHours(totalHours.p75) },
+    { label: "Completion · p90 (pessimistic)",  value: formatDate(totalETAs.p90), sub: formatHours(totalHours.p90) },
+    { divider: true },
+    { label: "Due date", value: formatDate(prediction.dueDateCalc, false), highlight: true },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <TimelineHero prediction={prediction} />
+
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+      >
+        {rows.map((row, i) => {
+          if (row.divider) {
+            return <div key={i} style={{ height: 1, backgroundColor: COLORS.divider }} />;
+          }
+          return (
+            <div
+              key={i}
+              className="flex items-center justify-between px-6 py-3.5"
+              style={{
+                borderTop: i === 0 ? "none" : `1px solid ${COLORS.divider}`,
+                backgroundColor: row.highlight ? COLORS.cognacGlow : "transparent",
+              }}
+            >
+              <div
+                className="text-sm"
+                style={{
+                  color: row.muted ? COLORS.inkSoft : row.highlight ? COLORS.cognac : COLORS.ink,
+                  fontWeight: row.bold ? 500 : 400,
+                }}
+              >
+                {row.label}
+              </div>
+              <div className="flex items-center gap-4">
+                {row.sub && (
+                  <div
+                    className="text-xs tabular-nums"
+                    style={{ color: COLORS.inkFaint, fontFamily: "monospace" }}
+                  >
+                    {row.sub}
+                  </div>
+                )}
+                <div
+                  className="text-sm tabular-nums"
+                  style={{
+                    color: row.highlight ? COLORS.cognac : COLORS.ink,
+                    fontFamily: "monospace",
+                    fontWeight: row.bold || row.highlight ? 500 : 400,
+                  }}
+                >
+                  {row.value}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SignalsTab({ prediction }) {
+  const { riskLevel, lateProbability, rescheduleProbability,
+          lateProbabilityDirect, lateProbabilityQuantile,
+          riskFromClassifier, riskFromQuantiles, signalsAgree } = prediction;
+  const style = RISK_STYLE[riskLevel];
+  const hasClassifier = lateProbabilityDirect !== undefined && lateProbabilityDirect !== null;
+
+  return (
+    <div className="grid grid-cols-5 gap-6">
+      {/* Left: Probability gauges */}
+      <div className="col-span-2 space-y-4">
+        <div
+          className="p-6 rounded-xl"
+          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+        >
+          <div className="text-[10px] uppercase tracking-[0.18em] mb-4" style={{ color: COLORS.inkFaint }}>
+            Model outputs
+          </div>
+
+          <div className="flex justify-center py-4">
+            <RingGauge value={prediction.riskScore} max={100} color={style.fg} size={160} />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <ProbRow label="P(late)" value={lateProbability} color={COLORS.cognac} showPercent />
+            <ProbRow label="P(reschedule)" value={rescheduleProbability} color={COLORS.brass} showPercent />
+            <ProbRow label="Confidence" value={prediction.confidenceScore / 100} color={COLORS.rLow} showPercent />
+          </div>
+
+          <div
+            className="mt-5 pt-4 text-[11px] leading-relaxed"
+            style={{ color: COLORS.inkSoft, borderTop: `1px solid ${COLORS.divider}` }}
+          >
+            {hasClassifier ? (
+              <>P(late) comes from a dedicated binary classifier trained
+              directly on historical outcomes. The risk level reflects calibrated
+              operational thresholds.</>
+            ) : (
+              <>Risk level derived from where the due date falls in the
+              predicted completion range.</>
+            )}
+          </div>
+        </div>
+
+        {/* Signal agreement — the trust-building panel */}
+        {hasClassifier && (
+          <div
+            className="p-5 rounded-xl"
+            style={{
+              backgroundColor: signalsAgree ? COLORS.rLowBg : COLORS.rMediumBg,
+              border: `1px solid ${signalsAgree ? COLORS.rLow : COLORS.rMedium}44`,
+            }}
+          >
+            <div
+              className="text-[10px] uppercase tracking-[0.18em] mb-3"
+              style={{ color: signalsAgree ? COLORS.rLow : COLORS.rMedium, fontWeight: 500 }}
+            >
+              {signalsAgree ? "Model signals agree" : "Model signals disagree"}
+            </div>
+            <div className="space-y-2 text-[11px]">
+              <div className="flex justify-between">
+                <span style={{ color: COLORS.inkSoft }}>Classifier says:</span>
+                <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
+                  {riskFromClassifier} ({(lateProbabilityDirect * 100).toFixed(1)}%)
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: COLORS.inkSoft }}>Quantile view says:</span>
+                <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
+                  {riskFromQuantiles} ({(lateProbabilityQuantile * 100).toFixed(1)}%)
+                </span>
+              </div>
+            </div>
+            <div
+              className="mt-3 pt-3 text-[11px] leading-relaxed"
+              style={{ color: COLORS.inkSoft, borderTop: `1px solid ${COLORS.divider}` }}
+            >
+              {signalsAgree
+                ? "Both the direct classifier and the quantile geometry reach the same conclusion — high-confidence signal."
+                : "The classifier and quantile views disagree — this case has ambiguous signals and warrants human review."}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Right: Reasons */}
+      <div className="col-span-3 space-y-4">
+        <div className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkFaint }}>
+          What the model keys on for this case
+        </div>
+        <RiskFactors prediction={prediction} />
+
+        <div
+          className="p-6 rounded-xl"
+          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+        >
+          <div className="text-[10px] uppercase tracking-[0.18em] mb-4" style={{ color: COLORS.inkFaint }}>
+            Case attributes
+          </div>
+          <div className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
+            <AttrRow label="Type" value={prediction.caseType} />
+            <AttrRow label="Rush" value={prediction.isRush ? "Yes" : "No"} />
+            <AttrRow label="On hold" value={prediction.onHold ? "Yes" : "No"} />
+            <AttrRow label="Stage moves" value={prediction.stageMoves} />
+            <AttrRow label="Due changes" value={prediction.dueChanges} />
+            <AttrRow label="QC loops" value={prediction.qcLoops} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FeaturesTab({ prediction }) {
+  return (
+    <div className="space-y-4">
+      <div
+        className="p-4 rounded-xl text-[12px] leading-relaxed"
+        style={{ backgroundColor: COLORS.cognacGlow, color: COLORS.ink, border: `1px solid ${COLORS.cognac}22` }}
+      >
+        <strong style={{ color: COLORS.cognac, fontWeight: 500 }}>108 features</strong> are computed
+        fresh on every render. 52 base features + 20 verified deep features (pickup speed, batch
+        detection, hold cycles, due-change direction) + ~36 auto-generated event timing features.
+        XGBoost's 5,920 trees learned which combinations predict outcomes.
+      </div>
+
+      <FeatureTable prediction={prediction} />
+    </div>
+  );
+}
+
+/** ========================================================================
+ *  SMALL UI HELPERS
+ *  ======================================================================== */
+
+function ProbRow({ label, value, color, showPercent = false }) {
+  const pct = Math.max(0, Math.min(1, value || 0)) * 100;
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1.5">
+        <span style={{ color: COLORS.inkSoft }}>{label}</span>
+        <span
+          className="tabular-nums"
+          style={{ color, fontFamily: "monospace", fontWeight: 500 }}
+        >
+          {pct.toFixed(showPercent ? 1 : 0)}%
+        </span>
+      </div>
+      <div
+        className="h-1.5 rounded-full overflow-hidden"
+        style={{ backgroundColor: COLORS.cream }}
+      >
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function KVStat({ label, value }) {
+  return (
+    <div>
+      <div
+        className="text-[10px] uppercase tracking-[0.15em] mb-1"
+        style={{ color: COLORS.inkFaint }}
+      >
+        {label}
+      </div>
+      <div
+        className="text-2xl font-light leading-none"
+        style={{
+          color: COLORS.ink,
+          fontWeight: 600,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function AttrRow({ label, value }) {
+  return (
+    <div>
+      <div
+        className="text-[10px] uppercase tracking-[0.15em] mb-0.5"
+        style={{ color: COLORS.inkFaint }}
+      >
+        {label}
+      </div>
+      <div className="text-sm" style={{ color: COLORS.ink }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function RingGauge({ value, max, color, size = 120 }) {
+  const radius = (size - 14) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const pct = Math.max(0, Math.min(1, value / max));
+  const dash = pct * circumference;
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={COLORS.divider}
+          strokeWidth={4}
+          fill="none"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={5}
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray={`${dash} ${circumference}`}
+          strokeDashoffset={0}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div
+        className="absolute inset-0 flex flex-col items-center justify-center"
+      >
+        <div
+          style={{
+            fontSize: size * 0.32,
+            fontWeight: 300,
+            color,
+            fontWeight: 600,
+            lineHeight: 1,
+          }}
+        >
+          {Math.round(value)}
+        </div>
+        <div
+          className="text-[10px] uppercase tracking-[0.18em] mt-1"
+          style={{ color: COLORS.inkFaint }}
+        >
+          Risk
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** ========================================================================
+ *  LIST MODAL — beautifully designed, v8-aware list of all cases
+ *  ======================================================================== */
+
+function getStatusFromPrediction(p) {
+  // Risk level already comes from the model; elevate to "critical" if overdue
+  const now = new Date();
+  const due = p.dueDate ? new Date(p.dueDate) : p.dueDateCalc;
+  const isOverdue = due && due < now;
+  if (isOverdue && p.riskLevel === "low") return "medium";
+  if (isOverdue) return "critical";
+  return p.riskLevel || "low";
+}
+
+export function ProgressBar({ value, size = "md", color }) {
+  const heights = { sm: 2, md: 4, lg: 6 };
+  const h = heights[size] ?? 4;
+  const percent = Math.max(0, Math.min(100, value || 0));
+  return (
+    <div
+      className="w-full rounded-full overflow-hidden"
+      style={{ height: h, backgroundColor: COLORS.cream }}
+    >
+      <div
+        className="h-full rounded-full transition-all duration-500"
+        style={{ width: `${percent}%`, backgroundColor: color || COLORS.cognac }}
+      />
+    </div>
+  );
+}
+
+/** Alias for backwards compatibility with v7's StatusBadge API */
+export const StatusBadge = ({ status, size = "md" }) => (
+  <RiskBadge level={status} size={size} />
+);
+
+function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
+  const status = getStatusFromPrediction(prediction);
+  const style = RISK_STYLE[status] || RISK_STYLE.low;
+  const now = new Date();
+  const dueDate = prediction.dueDate ? new Date(prediction.dueDate) : prediction.dueDateCalc;
+  const completionETA = prediction.completionETA || prediction.expectedCompletionDate;
+  const isOverdue = dueDate && dueDate < now;
+
+  // Wall-clock buffer in same units as "due in X" so they don't contradict each other
+  const bufferMs = dueDate && completionETA ? dueDate.getTime() - completionETA.getTime() : null;
+  const bufferText = (() => {
+    if (bufferMs === null) return null;
+    const absMs = Math.abs(bufferMs);
+    const h = absMs / 3600000;
+    const d = h / 24;
+    if (h < 1) return "< 1h";
+    if (h < 24) return `${Math.round(h)}h`;
+    if (d < 7) return `${Math.round(d)}d`;
+    return `${Math.round(d / 7)}w`;
+  })();
+
+  const timeDisplay = (() => {
+    if (isOverdue) {
+      return { primary: "OVERDUE", secondary: formatRelativeTime(dueDate), urgent: true };
+    }
+    if (prediction.willBeLate) {
+      return {
+        primary: `Late ${bufferText}`,
+        secondary: `Due ${formatRelativeTime(dueDate)}`,
+        urgent: true,
+      };
+    }
+    return {
+      primary: formatRelativeTime(dueDate),
+      secondary: bufferText ? `${bufferText} before due` : "on time",
+      urgent: false,
+    };
+  })();
+
+  // Late probability display — more precision for small values
+  const latePctRaw = (prediction.lateProbability || 0) * 100;
+  const latePctDisplay = (() => {
+    if (latePctRaw < 1) return "<1";
+    if (latePctRaw < 10) return latePctRaw.toFixed(1);
+    return String(Math.round(latePctRaw));
+  })();
+
+  return (
+    <button
+      type="button"
+      onClick={onOpenAnalytics}
+      className="group relative w-full text-left rounded-xl transition-all"
+      style={{
+        backgroundColor: COLORS.paper,
+        border: `1px solid ${COLORS.borderSoft}`,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = COLORS.cognacLight; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = COLORS.borderSoft; }}
+    >
+      {/* Left accent stripe */}
+      <div
+        className="absolute left-0 top-0 bottom-0"
+        style={{ width: 3, backgroundColor: style.fg }}
+      />
+
+      <div className="pl-5 pr-4 py-4">
+        <div className="flex items-center gap-5">
+          {/* Risk badge */}
+          <div className="w-24 flex-shrink-0">
+            <RiskBadge level={status} size="sm" />
+          </div>
+
+          {/* Case number + type */}
+          <div className="w-40 flex-shrink-0">
+            <div
+              className="text-xl leading-tight"
+              style={{
+                fontWeight: 600,
+                color: COLORS.ink,
+                fontWeight: 400,
+                letterSpacing: "-0.005em",
+              }}
+            >
+              {prediction.caseNumber}
+            </div>
+            <div
+              className="text-[10px] uppercase tracking-[0.15em] mt-0.5"
+              style={{ color: COLORS.inkFaint }}
+            >
+              {prediction.caseType || "general"}
+            </div>
+          </div>
+
+          {/* Due / late info */}
+          <div className="flex-1 min-w-0">
+            <div
+              className="text-sm"
+              style={{
+                color: timeDisplay.urgent ? style.fg : COLORS.ink,
+                fontWeight: timeDisplay.urgent ? 500 : 400,
+                fontFamily: timeDisplay.urgent
+                  ? "'DM Sans', sans-serif"
+                  : "'Instrument Serif', Georgia, serif",
+                fontSize: timeDisplay.urgent ? 13 : 16,
+              }}
+            >
+              {timeDisplay.primary}
+            </div>
+            <div className="text-[11px] mt-0.5" style={{ color: COLORS.inkSoft }}>
+              {timeDisplay.secondary}
+            </div>
+          </div>
+
+          {/* Progress */}
+          <div className="w-28 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <ProgressBar value={prediction.progressPercent || 0} size="sm" color={style.fg} />
+              <span
+                className="text-[11px] tabular-nums"
+                style={{
+                  color: COLORS.inkSoft,
+                  fontFamily: "monospace",
+                }}
+              >
+                {Math.round(prediction.progressPercent || 0)}%
+              </span>
+            </div>
+            <div
+              className="text-[10px] uppercase tracking-[0.15em] mt-1"
+              style={{ color: COLORS.inkFaint }}
+            >
+              Elapsed
+            </div>
+          </div>
+
+          {/* Flags */}
+          <div className="flex items-center gap-1.5 w-20 justify-end flex-shrink-0">
+            {prediction.isRush && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
+                style={{
+                  color: COLORS.cognac,
+                  backgroundColor: COLORS.cognacGlow,
+                  fontWeight: 500,
+                }}
+              >
+                <Zap size={9} />
+                Rush
+              </span>
+            )}
+            {prediction.onHold && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
+                style={{
+                  color: COLORS.brass,
+                  backgroundColor: COLORS.rMediumBg,
+                  fontWeight: 500,
+                }}
+              >
+                Hold
+              </span>
+            )}
+            {prediction.signalsAgree === false && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
+                style={{
+                  color: COLORS.inkSoft,
+                  backgroundColor: COLORS.cream,
+                  border: `1px dashed ${COLORS.inkFaint}`,
+                  fontWeight: 500,
+                }}
+                title="Model signals disagree — review manually"
+              >
+                Review
+              </span>
+            )}
+          </div>
+
+          {/* Late probability — big, beautiful */}
+          <div className="w-20 flex-shrink-0 text-right">
+            <div
+              className="leading-none"
+              style={{
+                fontWeight: 600,
+                fontSize: 26,
+                fontWeight: 300,
+                color: style.fg,
+              }}
+            >
+              {latePctDisplay}
+              <span style={{ fontSize: 14, color: COLORS.inkFaint }}>%</span>
+            </div>
+            <div
+              className="text-[10px] uppercase tracking-[0.15em] mt-0.5"
+              style={{ color: COLORS.inkFaint }}
+            >
+              Late risk
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onOpenHistory(prediction.id, prediction.caseNumber); }}
+                className="text-[11px] uppercase tracking-[0.12em] px-2.5 py-1 rounded-lg transition-colors"
+                style={{
+                  color: COLORS.inkSoft,
+                  border: `1px solid ${COLORS.borderSoft}`,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = COLORS.cognac; e.currentTarget.style.borderColor = COLORS.cognacLight; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = COLORS.inkSoft; e.currentTarget.style.borderColor = COLORS.borderSoft; }}
+              >
+                History
+              </button>
+            )}
+            <ChevronRight
+              size={16}
+              style={{ color: COLORS.inkFaint }}
+              className="transition-transform group-hover:translate-x-0.5"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom progress sliver */}
+      <div style={{ height: 1.5, backgroundColor: COLORS.divider }}>
+        <div
+          className="h-full transition-all duration-500"
+          style={{
+            width: `${Math.min(100, prediction.progressPercent || 0)}%`,
+            backgroundColor: style.fg,
+            opacity: 0.6,
+          }}
+        />
+      </div>
+    </button>
+  );
+}
+
+/**
+ * CaseRiskModal — the list view. Shows all cases with search, filter, sort.
+ * Opens CaseRiskAnalyticsModal on click for full detail.
+ */
 export function CaseRiskModal({
   open,
   onClose,
@@ -3233,239 +2667,246 @@ export function CaseRiskModal({
   const [sortBy, setSortBy] = useState("risk");
   const [selectedPrediction, setSelectedPrediction] = useState(null);
 
+
   const processedPredictions = useMemo(() => {
-    let filtered = [...predictions];
-
+    let filtered = [...(predictions || [])];
     if (filterStatus !== "all") {
-      filtered = filtered.filter(
-        (p) => getStatusFromPrediction(p) === filterStatus
-      );
+      filtered = filtered.filter((p) => getStatusFromPrediction(p) === filterStatus);
     }
-
     if (query.trim()) {
       const q = query.trim().toLowerCase();
-      filtered = filtered.filter(
-        (p) =>
-          p.caseNumber?.toLowerCase().includes(q) ||
-          p.caseType?.toLowerCase().includes(q)
+      filtered = filtered.filter((p) =>
+        String(p.caseNumber || "").toLowerCase().includes(q) ||
+        String(p.caseType || "").toLowerCase().includes(q)
       );
     }
-
     const order = { critical: 0, high: 1, medium: 2, low: 3 };
     filtered.sort((a, b) => {
       if (sortBy === "risk") {
         return (
-          order[getStatusFromPrediction(a)] -
-            order[getStatusFromPrediction(b)] ||
-          b.lateProbability - a.lateProbability
+          order[getStatusFromPrediction(a)] - order[getStatusFromPrediction(b)] ||
+          (b.lateProbability || 0) - (a.lateProbability || 0)
         );
       }
       if (sortBy === "due") {
-        const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
-        const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
-        return aDue - bDue;
+        const aD = a.dueDateCalc || (a.dueDate ? new Date(a.dueDate) : null);
+        const bD = b.dueDateCalc || (b.dueDate ? new Date(b.dueDate) : null);
+        const at = aD ? aD.getTime() : Infinity;
+        const bt = bD ? bD.getTime() : Infinity;
+        return at - bt;
       }
-      if (sortBy === "progress") return a.progressPercent - b.progressPercent;
+      if (sortBy === "progress") return (a.progressPercent || 0) - (b.progressPercent || 0);
+      if (sortBy === "case")     return String(a.caseNumber || "").localeCompare(String(b.caseNumber || ""));
       return 0;
     });
-
     return filtered;
   }, [predictions, filterStatus, query, sortBy]);
 
-  const summary = useMemo(
-    () => ({
-      total: predictions.length,
-      critical: predictions.filter(
-        (p) => getStatusFromPrediction(p) === "critical"
-      ).length,
-      high: predictions.filter((p) => getStatusFromPrediction(p) === "high")
-        .length,
-      medium: predictions.filter((p) => getStatusFromPrediction(p) === "medium")
-        .length,
-      low: predictions.filter((p) => getStatusFromPrediction(p) === "low")
-        .length,
-      adjustedETACases: predictions.filter((p) => p.isETAAdjusted).length,
-      likelyReschedules: predictions.filter(
-        (p) => p.rescheduleProbability >= (p.rescheduleThreshold ?? 0.5)
-      ).length,
-      avgRisk: predictions.length
-        ? (predictions.reduce((s, p) => s + p.lateProbability, 0) /
-            predictions.length) *
-          100
-        : 0,
-      stageCapacity: predictions[0]?.stageCapacity || 1,
-    }),
-    [predictions]
-  );
+  const summary = useMemo(() => ({
+    total: predictions.length,
+    critical: predictions.filter((p) => getStatusFromPrediction(p) === "critical").length,
+    high:     predictions.filter((p) => getStatusFromPrediction(p) === "high").length,
+    medium:   predictions.filter((p) => getStatusFromPrediction(p) === "medium").length,
+    low:      predictions.filter((p) => getStatusFromPrediction(p) === "low").length,
+    avgRisk:  predictions.length
+      ? (predictions.reduce((s, p) => s + (p.lateProbability || 0), 0) / predictions.length) * 100
+      : 0,
+    avgConfidence: predictions.length
+      ? predictions.reduce((s, p) => s + (p.confidenceScore || 0), 0) / predictions.length
+      : 0,
+    concurrent: predictions[0]?.backlogCount || 0,
+  }), [predictions]);
 
   useEffect(() => {
     onDataProcessed?.({
-      processedPredictions,
-      summary,
-      stage,
-      filterStatus,
-      query,
+      processedPredictions, summary, stage, filterStatus, query,
       rawPredictions: predictions,
     });
-  }, [
-    processedPredictions,
-    summary,
-    stage,
-    filterStatus,
-    query,
-    predictions,
-    onDataProcessed,
-  ]);
+  }, [processedPredictions, summary, stage, filterStatus, query, predictions, onDataProcessed]);
 
   if (!open) return null;
 
   return createPortal(
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+    <>
+      <div
+        className="fixed inset-0 z-[10001] flex items-center justify-center p-6 overflow-y-auto bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       >
-        <motion.div
-          className="bg-gray-50 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden"
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
+        <div
+          className="glass-nb w-full max-w-6xl my-8 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          style={{ maxHeight: "90vh" }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex-none px-6 py-5 bg-white border-b border-gray-200">
-            <div className="flex items-center justify-between">
+          <div
+            className="glass-nb-dark flex-none px-10 pt-9 pb-7 border-b border-slate-200"
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute top-6 right-6 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              style={{ color: COLORS.inkSoft }}
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-baseline justify-between mb-5">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">
-                  Case Risk Analysis
-                </h2>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  <span className="font-medium capitalize">{stage}</span> Stage
-                  • {summary.total} cases • Avg Risk:{" "}
-                  {formatPercent(summary.avgRisk, 1)}
-                </p>
+                <div
+                  className="text-[10px] uppercase tracking-[0.25em] font-medium mb-3"
+                  style={{ color: COLORS.inkFaint }}
+                >
+                  Case Risk Predictions · v8
+                </div>
+                <div
+                  className="text-4xl font-light leading-none"
+                  style={{
+                    color: COLORS.ink,
+                    fontWeight: 600,
+                    letterSpacing: "-0.01em",
+                  }}
+                >
+                  {summary.total} {summary.total === 1 ? "case" : "cases"}
+                  {stage && (
+                    <span
+                      className="ml-3 text-lg capitalize"
+                      style={{ color: COLORS.inkSoft, fontStyle: "italic" }}
+                    >
+                      in {stage}
+                    </span>
+                  )}
+                </div>
+                <div
+                  className="mt-2 flex items-center gap-3 text-sm"
+                  style={{ color: COLORS.inkSoft }}
+                >
+                  <span>Avg risk {formatPercent(summary.avgRisk, 1)}</span>
+                  <span style={{ color: COLORS.inkFaint }}>·</span>
+                  <span>Avg confidence {Math.round(summary.avgConfidence)}%</span>
+                  <span style={{ color: COLORS.inkFaint }}>·</span>
+                  <span>{summary.concurrent} concurrent</span>
+                </div>
               </div>
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <Icons.X className="w-5 h-5 text-gray-400" />
-              </button>
             </div>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-6 gap-3 mt-4">
-              {Object.entries({
-                critical: summary.critical,
-                high: summary.high,
-                medium: summary.medium,
-                low: summary.low,
-              }).map(([status, count]) => {
-                const colors = COLORS.status[status];
-                const isActive = filterStatus === status;
+            {/* Filter pills */}
+            <div className="grid grid-cols-5 gap-2.5">
+              {[
+                { k: "all",      label: "All",      count: summary.total,    color: COLORS.ink,       bg: COLORS.cream },
+                { k: "critical", label: "Critical", count: summary.critical, color: COLORS.rCritical, bg: COLORS.rCriticalBg },
+                { k: "high",     label: "High",     count: summary.high,     color: COLORS.rHigh,     bg: COLORS.rHighBg },
+                { k: "medium",   label: "Medium",   count: summary.medium,   color: COLORS.rMedium,   bg: COLORS.rMediumBg },
+                { k: "low",      label: "Low",      count: summary.low,      color: COLORS.rLow,      bg: COLORS.rLowBg },
+              ].map(({ k, label, count, color, bg }) => {
+                const active = filterStatus === k || (k === "all" && filterStatus === "all");
                 return (
                   <button
-                    key={status}
-                    onClick={() =>
-                      setFilterStatus(filterStatus === status ? "all" : status)
-                    }
-                    className={`rounded-xl p-3 border-2 transition-all ${
-                      isActive ? "scale-105 shadow-md" : "hover:shadow-sm"
-                    }`}
+                    key={k}
+                    type="button"
+                    onClick={() => setFilterStatus(filterStatus === k ? "all" : k)}
+                    className="relative rounded-xl px-4 py-3 text-left transition-all"
                     style={{
-                      backgroundColor: colors.light,
-                      borderColor: isActive ? colors.primary : colors.border,
+                      backgroundColor: active ? bg : COLORS.paper,
+                      border: `1px solid ${active ? color + "55" : COLORS.borderSoft}`,
                     }}
                   >
                     <div
-                      className="text-2xl font-bold"
-                      style={{ color: colors.text }}
+                      className="text-[10px] uppercase tracking-[0.18em] font-medium mb-1"
+                      style={{ color: active ? color : COLORS.inkFaint }}
                     >
-                      {count}
+                      {label}
                     </div>
                     <div
-                      className="text-xs font-semibold uppercase tracking-wide"
-                      style={{ color: colors.text }}
+                      className="text-3xl font-light leading-none"
+                      style={{
+                        color: active ? color : COLORS.ink,
+                        fontWeight: 600,
+                      }}
                     >
-                      {status}
+                      {count}
                     </div>
                   </button>
                 );
               })}
-              <div className="rounded-xl p-3 bg-blue-50 border-2 border-blue-200">
-                <div className="text-2xl font-bold text-blue-700">
-                  {summary.adjustedETACases}
-                </div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                  Adjusted
-                </div>
-              </div>
-              <div className="rounded-xl p-3 bg-pink-50 border-2 border-pink-200">
-                <div className="text-2xl font-bold text-pink-700">
-                  {summary.likelyReschedules}
-                </div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-pink-700">
-                  Resched
-                </div>
-              </div>
             </div>
 
-            {/* Controls */}
-            <div className="flex items-center gap-4 mt-4">
-              <div className="relative flex-1 max-w-sm">
-                <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            {/* Search + sort */}
+            <div className="flex items-center gap-3 mt-5">
+              <div className="relative flex-1 max-w-xs">
                 <input
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search cases..."
-                  className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2 text-sm rounded-lg focus:outline-none transition-colors"
+                  style={{
+                    color: COLORS.ink,
+                    backgroundColor: COLORS.cream,
+                    border: `1px solid ${COLORS.borderSoft}`,
+                  }}
+                  onFocus={(e) => { e.target.style.borderColor = COLORS.cognacLight; }}
+                  onBlur={(e) => { e.target.style.borderColor = COLORS.borderSoft; }}
                 />
               </div>
-
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-3 py-2 text-sm rounded-lg focus:outline-none cursor-pointer"
+                style={{
+                  color: COLORS.ink,
+                  backgroundColor: COLORS.cream,
+                  border: `1px solid ${COLORS.borderSoft}`,
+                }}
               >
-                <option value="risk">Sort by Risk</option>
-                <option value="due">Sort by Due Date</option>
-                <option value="progress">Sort by Progress</option>
+                <option value="risk">Sort by risk</option>
+                <option value="due">Sort by due date</option>
+                <option value="progress">Sort by progress</option>
+                <option value="case">Sort by case number</option>
               </select>
-
               {filterStatus !== "all" && (
                 <button
+                  type="button"
                   onClick={() => setFilterStatus("all")}
-                  className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                  className="text-[11px] uppercase tracking-[0.14em] px-3 py-2 rounded-lg transition-colors"
+                  style={{
+                    color: COLORS.inkSoft,
+                    backgroundColor: COLORS.paper,
+                    border: `1px solid ${COLORS.borderSoft}`,
+                  }}
                 >
-                  Clear Filter
+                  Clear filter
                 </button>
               )}
             </div>
           </div>
 
-          {/* Content */}
-          <div className="flex-1 overflow-auto p-4">
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-8 py-6" style={{ backgroundColor: COLORS.cream }}>
             {processedPredictions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16">
-                <Icons.Search className="w-16 h-16 text-gray-300 mb-4" />
-                <p className="text-lg font-semibold text-gray-600">
-                  No cases found
-                </p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Try adjusting your search or filters
-                </p>
+              <div
+                className="flex flex-col items-center justify-center py-20"
+                style={{ color: COLORS.inkFaint }}
+              >
+                <CircleDot size={32} style={{ color: COLORS.inkFaint }} />
+                <div
+                  className="mt-4 text-2xl font-light"
+                  style={{
+                    color: COLORS.ink,
+                    fontWeight: 600,
+                  }}
+                >
+                  No cases match
+                </div>
+                <div className="mt-1 text-sm">Try adjusting your filters or search</div>
               </div>
             ) : (
-              <div className="space-y-2">
-                {processedPredictions.map((prediction) => (
+              <div className="space-y-2.5">
+                {processedPredictions.map((p) => (
                   <CompactCaseRow
-                    key={prediction.id || prediction.caseNumber}
-                    prediction={prediction}
-                    onOpenAnalytics={() => setSelectedPrediction(prediction)}
+                    key={p.id || p.caseNumber}
+                    prediction={p}
+                    onOpenAnalytics={() => setSelectedPrediction(p)}
+                    onOpenHistory={onOpenCaseHistory}
                   />
                 ))}
               </div>
@@ -3473,40 +2914,60 @@ export function CaseRiskModal({
           </div>
 
           {/* Footer */}
-          <div className="flex-none px-6 py-3 bg-white border-t border-gray-200">
-            <div className="flex items-center justify-between text-sm text-gray-500">
-              <span>
-                Showing {processedPredictions.length} of {predictions.length}{" "}
-                cases
-              </span>
-              <span>Capacity: {summary.stageCapacity} workers</span>
+          <div
+            className="flex-none px-10 py-4 flex items-center justify-between"
+            style={{
+              backgroundColor: COLORS.paper,
+              borderTop: `1px solid ${COLORS.divider}`,
+            }}
+          >
+            <div
+              className="text-[10px] uppercase tracking-[0.18em]"
+              style={{ color: COLORS.inkFaint }}
+            >
+              {processedPredictions.length} of {predictions.length} cases · Live predictions update every render
             </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2 text-sm rounded-lg transition-colors"
+              style={{ color: COLORS.paper, backgroundColor: COLORS.ink }}
+            >
+              Close
+            </button>
           </div>
-        </motion.div>
+        </div>
+      </div>
 
-        {/* Analytics Modal */}
-        <AnalyticsModal
+      {/* Analytics detail modal opens on top */}
+      {selectedPrediction && (
+        <CaseRiskAnalyticsModal
           prediction={selectedPrediction}
-          open={!!selectedPrediction}
           onClose={() => setSelectedPrediction(null)}
-          onOpenHistory={() => {
-            if (selectedPrediction) {
-              onOpenCaseHistory?.(
-                selectedPrediction.id,
-                selectedPrediction.caseNumber
-              );
-            }
-          }}
         />
-      </motion.div>
-    </AnimatePresence>,
+      )}
+    </>,
     document.body
   );
 }
 
-/** ======================= STANDALONE EXPORTS ======================== **/
+/** ========================================================================
+ *  BACKWARDS-COMPAT EXPORTS
+ *  ======================================================================== */
 
+// Stub — kept so any old code calling this doesn't break
+export const calculateRiskWithVelocityEngine = async () => ({
+  predictions: [],
+  velocityImpact: null,
+});
+
+// Aliases for the standalone components so external code can import them
 export const StandaloneCompactRow = CompactCaseRow;
-export const StandaloneAnalyticsModal = AnalyticsModal;
-export const NeuralFeatureVisualization = NeuralNetworkVisualization;
-export { StatusBadge, ProgressBar, COLORS };
+export const StandaloneAnalyticsModal = CaseRiskAnalyticsModal;
+export { COLORS };
+
+/** ========================================================================
+ *  DEFAULT EXPORT
+ *  ======================================================================== */
+
+export default CaseRiskAnalyticsModal;

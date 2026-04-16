@@ -1,13 +1,13 @@
-# Release Notes: Case Entry Tracking
+# Release Notes: Case Risk Prediction System v8.3
 
-## New in 11.4 ✨
-- **Staff-entered indicator** in the header — shows the percentage of cases not entered by front office at intake
-- The pill changes color as the percentage climbs — amber at 5%, red at 10%
-- Hover for a full breakdown of what's happening and where
+## What's New ✨
+- Upgraded ML model to XGBoost v8.3 with improved prediction accuracy
+- Redesigned Case Risk modal to match the system's visual theme — glass effects, CSS theme variables, and consistent rounded corners across all three themes
 
-## Updated in 11.4.1 🔧
-- Tracking now **resets at the start of each month** instead of rolling 90 days — clearer picture of how the current month is going
-- A **trend line** shows whether things are improving or getting worse through the month — hover any point for the exact value
-- **Department breakdown** shows where cases are being missed
-- **Year-to-date percentage** for a bigger-picture view across the year
-- Summary text explains the data in plain language — how many per day, which department, and the trend direction
+## What Got Fixed 🐛
+- Risk modal now shows the same cases as the board — brand-new cases with no stage history were previously missing from risk predictions
+- Archived cases and internal broadcast rows no longer appear in risk predictions
+
+## For Users 👤
+- The risk modal case count will now match what you see on the board for that stage
+- The risk modal looks consistent with the rest of the app in white, pink, and dark themes

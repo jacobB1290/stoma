@@ -360,10 +360,11 @@ export const calculateStageStatistics = async (stage, onProgress) => {
 
     // Fetch cases
     console.log("[calculateStageStatistics] Fetching cases from database...");
-    const { data: casesWithHistory, error: dbError } = await db
+    const { data: rawCases, error: dbError } = await db
       .from("cases")
       .select("*, case_history(*)")
       .eq("department", "General")
+      .eq("archived", false)
       .order("created_at", { ascending: false });
 
     if (dbError) {
@@ -371,14 +372,47 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       throw dbError;
     }
 
-    if (!casesWithHistory) {
+    if (!rawCases) {
       console.log("[calculateStageStatistics] No cases returned from database");
       return null;
     }
 
+    // Filter out sentinel rows used for update/sys broadcast signaling
+    const casesWithHistory = rawCases.filter((r) => {
+      const cn = r.casenumber?.trim().toLowerCase();
+      return cn !== "update" && cn !== "syscmd" && cn !== "force-cmd";
+    });
+
     console.log(
-      `[calculateStageStatistics] Fetched ${casesWithHistory.length} cases`
+      `[calculateStageStatistics] Fetched ${casesWithHistory.length} cases (${rawCases.length - casesWithHistory.length} sentinel rows filtered)`
     );
+
+    // Board-parity list: every non-completed case whose stage-* modifier matches the target stage.
+    // Feeds risk predictions directly so brand-new cases (which lack stage history or trip
+    // MIN_STAGE_TIME) still surface in the risk modal.
+    const allCasesInStage = casesWithHistory
+      .filter((c) => !c.completed && getStageFromModifiers(c.modifiers || []) === stage)
+      .map((c) => ({
+        id: c.id,
+        caseNumber: c.casenumber,
+        casenumber: c.casenumber,
+        caseType: c.modifiers?.includes("bbs")
+          ? "bbs"
+          : c.modifiers?.includes("flex")
+          ? "flex"
+          : "general",
+        modifiers: c.modifiers || [],
+        created_at: c.created_at,
+        due: c.due,
+        completed: false,
+        completed_at: c.completed_at,
+        priority: !!c.priority,
+        rush: c.modifiers?.includes("rush") || !!c.priority,
+        department: c.department,
+        case_history: c.case_history || [],
+        isActive: true,
+        currentStage: stage,
+      }));
 
     // Data quality thresholds
     const MIN_STAGE_TIME = {
@@ -546,6 +580,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       return {
         noData: true,
         excludedCases,
+        allCasesInStage,
         message: "No valid cases found for this stage",
       };
     }
@@ -560,6 +595,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       casesByType,
       casesWithHistory
     );
+    stats.allCasesInStage = allCasesInStage;
 
     console.log("[calculateStageStatistics] Complete. Returning stats:", {
       averageTime: stats.averageTime,
