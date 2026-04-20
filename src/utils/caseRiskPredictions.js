@@ -1301,6 +1301,25 @@ export function generateCaseRiskPredictions(
   const labContext = options.labContext
     || computeLabContextV9(activeCases, recentCompletedVisits, now);
 
+  if (typeof console !== "undefined") {
+    const stgCtx = labContext.perStage?.[currentStage] || {};
+    console.log("[v9 labContext]", {
+      stage: currentStage,
+      labActive: labContext.labActive,
+      labRush: labContext.labRush,
+      labOverdue: labContext.labOverdue,
+      labDueToday: labContext.labDueToday,
+      labDue3d: labContext.labDue3d,
+      stageActiveCount: stgCtx.stageActiveCount,
+      stageActiveRush: stgCtx.stageActiveRush,
+      stageAvg7d: stgCtx.stageAvg7d,
+      stageThroughput7d: stgCtx.stageThroughput7d,
+      stageAvg30d: stgCtx.stageAvg30d,
+      stageTrend: stgCtx.stageTrend,
+      recentCompletedVisitsCount: recentCompletedVisits.length,
+    });
+  }
+
   const predictions = activeCases.map((c) => {
     const caseType = c.caseType ||
       (c.modifiers?.includes?.("bbs") ? "bbs" :
