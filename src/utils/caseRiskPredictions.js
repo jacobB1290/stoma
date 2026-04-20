@@ -81,6 +81,21 @@ const V8_FEATURE_NAMES = [
   "h_to_due_changed", "has_due_changed", "count_due_changed",
 ];
 
+const V9_CONTEXT_NAMES = [
+  "lab_active", "lab_rush", "lab_overdue", "lab_due_today", "lab_due_3d",
+  "stage_active_count", "stage_active_rush",
+  "stage_avg_7d", "stage_throughput_7d", "stage_avg_30d", "stage_trend_7d_30d",
+  "cases_ahead_earlier_due", "cases_ahead_rush", "target_due_rank",
+  "log_lab_active",
+];
+
+const V9_INTERACTION_NAMES = [
+  "hour_sin", "hour_cos", "dow_sin", "dow_cos",
+  "lab_x_stage_active", "lab_x_stage_trend", "sqrt_lab_active",
+  "stage_load_ratio_vs_typical",
+];
+
+
 // Human-readable labels for the features tab
 const FEATURE_LABELS = {
   intercept: "Bias term", log_allowed_wh: "Allowed hours (log)", allowed_wh_raw: "Allowed work hours",
@@ -117,9 +132,9 @@ const WORK_WINDOWS = [
   [8, 0, 9, 30], [9, 45, 12, 0], [13, 0, 14, 30], [14, 45, 17, 0],
 ];
 
-// Color system — uses theme CSS variables so all three themes are respected
+// Color system — warm lux aesthetic (cognac, brass, walnut, cream)
 const COLORS = {
-  // Surfaces (glass.css + theme vars)
+  // Surfaces — mapped to CSS theme variables so the modal follows the active theme
   cream:       "var(--w-surface-2, #f3f4f6)",
   paper:       "var(--w-surface, #ffffff)",
   bg:          "var(--w-bg, #f7f8fb)",
@@ -129,12 +144,12 @@ const COLORS = {
   divider:     "var(--w-border, rgba(15,23,42,0.12))",
   borderSoft:  "var(--w-border, rgba(15,23,42,0.12))",
   surface:     "var(--w-surface-2, #f3f4f6)",
-  // Accent — teal system accent
+  // Accents
   cognac:      "var(--w-accent, #16525f)",
   cognacLight: "var(--w-accent-hover, #1f6f7c)",
   cognacGlow:  "var(--w-accent-surface, #a7bec2)",
   brass:       "var(--w-text-muted, #475569)",
-  // Risk — map to system status token vars
+  // Risk
   rCritical:   "var(--w-priority-ink, #9f1239)",
   rCriticalBg: "var(--w-priority-surface, #ffe4e6)",
   rHigh:       "var(--w-rush-ink, #9a3412)",
@@ -708,7 +723,7 @@ function xgbPredictProba(subModel, features) {
 let XGB_MODELS = null;
 let modelLoadPromise = null;
 
-export function loadModels(modelUrl = "/xgb_v8_3_final.json") {
+export function loadModels(modelUrl = "/xgb_v9_final.json") {
   if (XGB_MODELS) return Promise.resolve(XGB_MODELS);
   if (modelLoadPromise) return modelLoadPromise;
   modelLoadPromise = fetch(modelUrl)
@@ -826,14 +841,258 @@ function predictLateProb(stageModel, features) {
   return rawProb;
 }
 
-function predictCaseML(c, stage, stageEnteredAt, activeCases) {
+
+// ============================================================================
+// v9 CROSS-CASE CONTEXT & INTERACTION FEATURES
+// ============================================================================
+
+/**
+ * Parse case_history arrays and return every stage visit that ended
+ * within the past `windowDays` days. Output shape matches computeLabContextV9:
+ *   [{ stage, entry, exit, case }, ...]
+ *
+ * Stage transitions are detected from history actions like
+ *   "moved from design to production"  (ends a design visit, starts a production visit)
+ *   "moved from quality control back to finishing"
+ *   "marked done" (ends the current visit)
+ *
+ * Completed visits = visits with both entry and exit timestamps; in-progress
+ * (still-active) visits are skipped here — they're counted via activeCases.
+ */
+export function extractRecentCompletedVisits(cases, now = null, windowDays = 30) {
+  const effectiveNow = now || getCurrentTime();
+  const cutoff = new Date(effectiveNow.getTime() - windowDays * 86400000);
+  const visits = [];
+
+  for (const c of (cases || [])) {
+    const history = c.case_history || c.caseHistory || [];
+    if (!history.length) continue;
+
+    const sorted = [...history].sort(
+      (a, b) => new Date(a.created_at) - new Date(b.created_at)
+    );
+
+    let currentStage = null;
+    let currentEntry = null;
+
+    const close = (exitDate) => {
+      if (currentStage && currentEntry && exitDate && exitDate >= cutoff) {
+        visits.push({ stage: currentStage, entry: currentEntry, exit: exitDate, case: c });
+      }
+      currentStage = null;
+      currentEntry = null;
+    };
+
+    for (const entry of sorted) {
+      const action = String(entry.action || "").toLowerCase();
+      const ts = new Date(entry.created_at);
+      if (isNaN(ts)) continue;
+
+      let newStage = null;
+      if (action.includes("moved from") && action.includes("to")) {
+        if (action.includes("to design")) newStage = "design";
+        else if (action.includes("to production")) newStage = "production";
+        else if (action.includes("to finishing")) newStage = "finishing";
+        else if (action.includes("to quality control")) newStage = "qc";
+      } else if (action.includes("assigned to") && action.includes("stage")) {
+        if (action.includes("design")) newStage = "design";
+        else if (action.includes("production")) newStage = "production";
+        else if (action.includes("finishing")) newStage = "finishing";
+      } else if (action === "marked done") {
+        close(ts);
+        continue;
+      }
+
+      if (newStage) {
+        close(ts);
+        currentStage = newStage;
+        currentEntry = ts;
+      }
+    }
+  }
+
+  return visits;
+}
+
+/**
+ * Compute the 15 cross-case context features from the full dashboard state.
+ * These depend on what OTHER cases are doing right now + recent completions.
+ * Compute once per render and reuse across all case predictions.
+ *
+ * @param {Array} activeCases - all non-completed cases
+ * @param {Array} recentCompletedVisits - visits completed in past 30 days
+ *   [{stage, entry, exit, case}, ...]
+ * @param {Date} now - current time
+ * @returns {Object} labContext — shared across all cases
+ */
+export function computeLabContextV9(activeCases, recentCompletedVisits, now = null) {
+  now = now || getCurrentTime();
+  
+  // Lab-wide load (same for every case on this render)
+  let labActive = 0, labRush = 0, labOverdue = 0, labDueToday = 0, labDue3d = 0;
+  for (const c of (activeCases || [])) {
+    if (c.completed || c.archived) continue;
+    labActive++;
+    const mods = strSet(c.modifiers);
+    if (mods.has("rush") || c.priority) labRush++;
+    const due = dueEOD(c.due);
+    if (due) {
+      const daysToDue = (due - now) / 86400000;
+      if (daysToDue < 0) labOverdue++;
+      else if (daysToDue < 1) labDueToday++;
+      if (daysToDue < 3) labDue3d++;
+    }
+  }
+  
+  // Per-stage load + recent performance
+  const stages = ["design", "production", "finishing", "qc"];
+  const perStage = {};
+  
+  for (const stg of stages) {
+    let stageActiveCount = 0, stageActiveRush = 0;
+    const stageActiveCases = [];
+    for (const c of (activeCases || [])) {
+      if (c.completed || c.archived) continue;
+      const cStage = normalizeStage(c.stage || c.current_stage);
+      if (cStage !== stg) continue;
+      stageActiveCount++;
+      const mods = strSet(c.modifiers);
+      if (mods.has("rush") || c.priority) stageActiveRush++;
+      stageActiveCases.push(c);
+    }
+    
+    // Recent completed visits for this stage
+    const stg7dCutoff = new Date(now - 7 * 86400000);
+    const stg30dCutoff = new Date(now - 30 * 86400000);
+    let stg7d = [], stg30d = [];
+    for (const v of (recentCompletedVisits || [])) {
+      if (v.stage !== stg) continue;
+      if (v.exit >= stg7dCutoff) stg7d.push(v);
+      if (v.exit >= stg30dCutoff) stg30d.push(v);
+    }
+    
+    let stageAvg7d = 0, stageThroughput7d = 0, stageAvg30d = 0;
+    if (stg7d.length > 0) {
+      stageAvg7d = stg7d.reduce((s, v) => 
+        s + businessHoursBetween(v.entry, v.exit), 0) / stg7d.length;
+      stageThroughput7d = stg7d.length / 7.0;
+    }
+    if (stg30d.length > 0) {
+      stageAvg30d = stg30d.reduce((s, v) => 
+        s + businessHoursBetween(v.entry, v.exit), 0) / stg30d.length;
+    } else {
+      stageAvg30d = stageAvg7d;
+    }
+    const stageTrend = stageAvg7d / Math.max(0.5, stageAvg30d);
+    
+    perStage[stg] = {
+      stageActiveCount, stageActiveRush, stageActiveCases,
+      stageAvg7d, stageThroughput7d, stageAvg30d, stageTrend,
+    };
+  }
+  
+  return {
+    now,
+    labActive, labRush, labOverdue, labDueToday, labDue3d,
+    perStage,
+  };
+}
+
+/**
+ * Compute per-case v9 extras (15 context + 8 interaction = 23 features).
+ * Uses the shared labContext for efficiency.
+ * 
+ * @param {Object} caseObj - the target case
+ * @param {string} stage - normalized stage
+ * @param {Date} entryTime - when case entered this stage
+ * @param {Object} labContext - output of computeLabContextV9
+ * @returns {Array<number>} 23 feature values in exact order
+ */
+export function computeV9ExtraFeatures(caseObj, stage, entryTime, labContext) {
+  const { labActive, labRush, labOverdue, labDueToday, labDue3d, perStage } = labContext;
+  const stageCtx = perStage[stage] || {
+    stageActiveCount: 0, stageActiveRush: 0, stageActiveCases: [],
+    stageAvg7d: 0, stageThroughput7d: 0, stageAvg30d: 0, stageTrend: 1.0,
+  };
+  
+  const targetDue = dueEOD(caseObj.due);
+  
+  // Queue position within target stage
+  let casesAheadEarlierDue = 0, casesAheadRush = 0;
+  for (const other of stageCtx.stageActiveCases) {
+    if (other.id === caseObj.id) continue;
+    const otherEntry = getStageEnteredAtFor(other, stage);
+    if (!otherEntry || otherEntry >= entryTime) continue;
+    const otherDue = dueEOD(other.due);
+    if (otherDue && targetDue && otherDue <= targetDue) casesAheadEarlierDue++;
+    const otherMods = strSet(other.modifiers);
+    if (otherMods.has("rush") || other.priority) casesAheadRush++;
+  }
+  
+  // Due-date rank (0 = earliest, 1 = latest)
+  let targetDueRank = 0.5;
+  if (targetDue && stageCtx.stageActiveCases.length > 0) {
+    const otherDues = [];
+    for (const other of stageCtx.stageActiveCases) {
+      const d = dueEOD(other.due);
+      if (d) otherDues.push(d);
+    }
+    if (otherDues.length > 0) {
+      targetDueRank = otherDues.filter(d => d < targetDue).length / otherDues.length;
+    }
+  }
+  
+  // 15 context features (exact order matches V9_CONTEXT_NAMES in training)
+  const contextFeatures = [
+    labActive, labRush, labOverdue, labDueToday, labDue3d,
+    stageCtx.stageActiveCount, stageCtx.stageActiveRush,
+    stageCtx.stageAvg7d, stageCtx.stageThroughput7d, stageCtx.stageAvg30d,
+    stageCtx.stageTrend,
+    casesAheadEarlierDue, casesAheadRush, targetDueRank,
+    Math.log1p(labActive),
+  ];
+  
+  // 8 interaction/cyclical features
+  const entryHour = entryTime.getHours() + entryTime.getMinutes() / 60;
+  const dow = entryTime.getDay(); // 0=Sun..6=Sat. Note: Python uses 0=Mon..6=Sun
+  // Match Python weekday() convention: Mon=0..Sun=6
+  const pyDow = (dow + 6) % 7;
+  
+  const interactionFeatures = [
+    Math.sin(2 * Math.PI * entryHour / 24),
+    Math.cos(2 * Math.PI * entryHour / 24),
+    Math.sin(2 * Math.PI * pyDow / 7),
+    Math.cos(2 * Math.PI * pyDow / 7),
+    labActive * stageCtx.stageActiveCount,
+    labActive * stageCtx.stageTrend,
+    Math.sqrt(labActive),
+    stageCtx.stageActiveCount / Math.max(0.1, stageCtx.stageAvg7d),
+  ];
+  
+  return [...contextFeatures, ...interactionFeatures];
+}
+
+function predictCaseML(c, stage, stageEnteredAt, activeCases, labContext = null, recentCompletedVisits = null) {
   const now = getCurrentTime();
   const entry = stageEnteredAt ? new Date(stageEnteredAt) : now;
   const due = dueEOD(c.due || null);
   const stg = normalizeStage(stage);
 
   const feats = computeV8Features(c, stg, entry, due, activeCases, now);
-  const featureArray = feats.array;
+  const v83Features = feats.array;
+  
+  // v9: compute 23 extra features (15 context + 8 interaction)
+  // labContext can be precomputed once per render; falls back to per-case computation
+  let v9Extras;
+  try {
+    const ctx = labContext || computeLabContextV9(activeCases || [], recentCompletedVisits || [], now);
+    v9Extras = computeV9ExtraFeatures(c, stg, entry, ctx);
+  } catch (e) {
+    console.warn("v9 extras failed, falling back to zeros:", e);
+    v9Extras = new Array(23).fill(0);
+  }
+  
+  const featureArray = [...v83Features, ...v9Extras];
 
   const model = XGB_MODELS?.[stg];
   let stageQ = null, totalQ = null, pResched = 0.05, modelUsed = "fallback";
@@ -855,7 +1114,7 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases) {
       };
     }
     
-    modelUsed = "xgboost-v8.3";
+    modelUsed = "xgboost-v9";
   } else {
     const rem = Math.max(0.5, feats.remainingBudget || 4);
     stageQ = { p10: rem * 0.5, p50: rem, p75: rem * 1.3, p90: rem * 1.8 };
@@ -961,7 +1220,7 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases) {
     modelUsed,
     featureArray,
     featureDict: feats.dict,
-    featureNames: V8_FEATURE_NAMES,
+    featureNames: [...V8_FEATURE_NAMES, ...V9_CONTEXT_NAMES, ...V9_INTERACTION_NAMES],
   };
 }
 
@@ -1013,7 +1272,13 @@ function interpolatePLate(etas, due) {
  *  MAIN GENERATOR — produces prediction objects for all active cases
  *  ======================================================================== */
 
-export function generateCaseRiskPredictions(activeCases, throughputAnalysis, stage = null, _stageStats = null) {
+export function generateCaseRiskPredictions(
+  activeCases,
+  throughputAnalysis,
+  stage = null,
+  _stageStats = null,
+  options = {},
+) {
   if (!activeCases || activeCases.length === 0) {
     return {
       atRisk: 0, predictions: [], urgent: [],
@@ -1022,8 +1287,19 @@ export function generateCaseRiskPredictions(activeCases, throughputAnalysis, sta
     };
   }
 
-  const nowTs = getCurrentTime().getTime();
+  const now = getCurrentTime();
+  const nowTs = now.getTime();
   const currentStage = normalizeStage(stage || "design");
+
+  // v9: compute lab-wide context once per render and reuse across all cases.
+  // Accepts a pre-computed labContext from the caller, or builds one from
+  // activeCases + recentCompletedVisits (falls back to activeCases-only if
+  // visits aren't available — the model degrades gracefully).
+  const recentCompletedVisits = Array.isArray(options.recentCompletedVisits)
+    ? options.recentCompletedVisits
+    : extractRecentCompletedVisits(activeCases, now);
+  const labContext = options.labContext
+    || computeLabContextV9(activeCases, recentCompletedVisits, now);
 
   const predictions = activeCases.map((c) => {
     const caseType = c.caseType ||
@@ -1032,7 +1308,7 @@ export function generateCaseRiskPredictions(activeCases, throughputAnalysis, sta
     const stageEnteredAt = getStageEnteredAtFor(c, currentStage);
     const timeInStageMs = Math.max(0, nowTs - (stageEnteredAt?.getTime?.() || nowTs));
 
-    const ml = predictCaseML(c, currentStage, stageEnteredAt, activeCases);
+    const ml = predictCaseML(c, currentStage, stageEnteredAt, activeCases, labContext, recentCompletedVisits);
     const dueDateCalc = dueEOD(c.due);
     const dueDateDisplay = parseDueDateForDisplay(c.due);
     const isRush = !!(c?.rush || c?.priority);
@@ -1302,7 +1578,7 @@ function MetricCard({ label, value, sublabel, accent = false, size = "md" }) {
       {sublabel && (
         <div
           className={`${sizes.sub} mt-2 font-normal`}
-          style={{ color: COLORS.inkSoft, fontSize: "0.75rem" }}
+          style={{ color: COLORS.inkSoft }}
         >
           {sublabel}
         </div>
@@ -1794,23 +2070,24 @@ function FeatureTable({ prediction }) {
 export function CaseRiskAnalyticsModal({ prediction, onClose }) {
   const [tab, setTab] = useState("overview");
 
-
   if (!prediction) return null;
   const style = RISK_STYLE[prediction.riskLevel];
   const now = getCurrentTime();
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[10002] overflow-y-auto flex items-start justify-center p-6 bg-black/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="glass-nb w-full max-w-5xl my-8 rounded-2xl overflow-hidden shadow-2xl"
+        className="w-full max-w-5xl my-8 glass-nb rounded-2xl overflow-hidden shadow-2xl"
+        style={{ backgroundColor: COLORS.cream }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* ============ HEADER ============ */}
         <div
-          className="glass-nb-dark relative px-10 pt-10 pb-8 border-b border-slate-200"
+          className="relative px-10 pt-10 pb-8"
+          style={{ backgroundColor: COLORS.paper, borderBottom: `1px solid ${COLORS.divider}` }}
         >
           <button
             onClick={onClose}
@@ -1829,8 +2106,12 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
                 Case Analysis · {prediction.modelUsed}
               </div>
               <div
-                className="text-4xl font-semibold leading-none mb-3 tracking-tight"
-                style={{ color: COLORS.ink }}
+                className="text-5xl font-light leading-none mb-3"
+                style={{
+                  color: COLORS.ink,
+                  fontWeight: 600,
+                  letterSpacing: "-0.01em",
+                }}
               >
                 {prediction.caseNumber}
               </div>
@@ -1888,7 +2169,7 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
                   color: tab === k ? COLORS.cognac : COLORS.inkSoft,
                   borderBottom: tab === k ? `2px solid ${COLORS.cognac}` : "2px solid transparent",
                   marginBottom: -1,
-                  fontWeight: tab === k ? 600 : 400,
+                  fontWeight: tab === k ? 500 : 400,
                 }}
               >
                 <Icon size={14} />
@@ -1908,20 +2189,26 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
         {/* ============ FOOTER ============ */}
         <div
-          className="glass-nb-dark px-10 py-5 flex items-center justify-between border-t border-slate-200"
+          className="px-10 py-5 flex items-center justify-between"
+          style={{ backgroundColor: COLORS.paper, borderTop: `1px solid ${COLORS.divider}` }}
         >
           <div className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkFaint }}>
             Predictions update live · {prediction.backlogCount} concurrent in stage
           </div>
           <button
             onClick={onClose}
-            className="px-5 py-2 text-sm rounded-lg transition-colors bg-slate-800 text-white hover:bg-slate-700"
+            className="px-5 py-2 text-sm rounded-lg transition-colors"
+            style={{
+              color: COLORS.paper,
+              backgroundColor: COLORS.ink,
+            }}
           >
             Close
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2667,7 +2954,6 @@ export function CaseRiskModal({
   const [sortBy, setSortBy] = useState("risk");
   const [selectedPrediction, setSelectedPrediction] = useState(null);
 
-
   const processedPredictions = useMemo(() => {
     let filtered = [...(predictions || [])];
     if (filterStatus !== "all") {
@@ -2733,13 +3019,17 @@ export function CaseRiskModal({
         onClick={onClose}
       >
         <div
-          className="glass-nb w-full max-w-6xl my-8 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-          style={{ maxHeight: "90vh" }}
+          className="w-full max-w-6xl my-8 glass-nb rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          style={{ backgroundColor: COLORS.cream, maxHeight: "90vh" }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div
-            className="glass-nb-dark flex-none px-10 pt-9 pb-7 border-b border-slate-200"
+            className="flex-none px-10 pt-9 pb-7"
+            style={{
+              backgroundColor: COLORS.paper,
+              borderBottom: `1px solid ${COLORS.divider}`,
+            }}
           >
             <button
               type="button"

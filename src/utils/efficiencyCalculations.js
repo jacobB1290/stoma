@@ -1,7 +1,11 @@
 // /src/utils/efficiencyCalculations.js
 
 import { formatDuration } from "./stageTimeCalculations";
-import { generateCaseRiskPredictions } from "./caseRiskPredictions";
+import {
+  generateCaseRiskPredictions,
+  computeLabContextV9,
+  extractRecentCompletedVisits,
+} from "./caseRiskPredictions";
 
 /**
  * =================== OVERVIEW ===================
@@ -1467,11 +1471,24 @@ export const calculateDepartmentEfficiency = async (
   );
 
   // Use ALL active cases for risk predictions
+  // v9 lab context: build from the full active pool across all stages so the
+  // cross-case features (queue depth, trend, throughput) see the whole lab,
+  // not just the cases in the current stage. Falls back to just the risk
+  // list if the broader pool isn't available.
+  const labPoolSource = Array.isArray(stageStatistics.allActiveCases)
+    && stageStatistics.allActiveCases.length > 0
+      ? stageStatistics.allActiveCases
+      : allActiveCasesForRisk;
+  const labNow = new Date(referenceTime);
+  const recentCompletedVisits = extractRecentCompletedVisits(labPoolSource, labNow, 30);
+  const labContext = computeLabContextV9(labPoolSource, recentCompletedVisits, labNow);
+
   const predictions = generateCaseRiskPredictions(
-    allActiveCasesForRisk, // This now includes excluded cases but ONLY those currently in stage
+    allActiveCasesForRisk,
     throughputAnalysis,
     currentStage,
-    stageStatistics
+    stageStatistics,
+    { labContext, recentCompletedVisits }
   );
 
   const explanation = explanationFor(
