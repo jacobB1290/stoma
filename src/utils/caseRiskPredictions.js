@@ -1,6 +1,6 @@
 // /src/utils/caseRiskPredictions.js
 // =================================================================
-// v8 — Unified Quantile Prediction System
+// v9 — Unified Quantile Prediction System (with cross-case lab context)
 // =================================================================
 // ALL outputs derived from trained models. Zero hand-tuned constants.
 //
@@ -16,11 +16,14 @@
 //   • P(late)             interpolated from the quantile range vs due date
 //
 // SETUP
-//   1. Place xgb_v8_final.json in /public
+//   1. Place xgb_v9_final.json in /public
 //   2. Import { loadModels, generateCaseRiskPredictions, CaseRiskAnalyticsModal }
 //   3. Call loadModels() once at app init (returns a Promise)
 //
-// 108 features. 5,920 trees. ~2.4 MB gzipped.
+// v9: 131 features total (108 base + 23 cross-case context features).
+// The extra 23 features cover lab-wide load, per-stage queue depth, recent
+// throughput trends, and temporal interaction terms. labContext is computed
+// once per render via computeLabContextV9() and shared across all cases.
 // =================================================================
 
 import React, { useState, useMemo, useEffect } from "react";
