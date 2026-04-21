@@ -1706,42 +1706,64 @@ function unifiedStatus(prediction) {
 
   const pLateClassifier = prediction.lateProbabilityDirect;
   const pLateQuantile   = prediction.lateProbabilityQuantile;
-  const pLate = (pLateClassifier ?? pLateQuantile ?? prediction.lateProbability ?? 0);
+  const hasClassifier = pLateClassifier !== null && pLateClassifier !== undefined;
 
-  // 1. Geometric verdict — where the due date falls in the predicted band
-  let geomKey;
-  if (!due || !p50) geomKey = "unknown";
-  else if (due.getTime() < now.getTime()) geomKey = "overdue";
-  else if (p50 > due.getTime()) geomKey = "miss";
-  else if (p75 && p75 > due.getTime()) geomKey = "tight";
-  else if (p90 && p90 > due.getTime()) geomKey = "cautious";
-  else geomKey = "ontime";
-
-  // 2. Classifier verdict — from the dedicated late-classifier's P(late)
-  let clsKey = null;
-  if (pLateClassifier !== null && pLateClassifier !== undefined) {
-    if (pLateClassifier >= 0.70)      clsKey = "miss";
-    else if (pLateClassifier >= 0.40) clsKey = "tight";
-    else if (pLateClassifier >= 0.20) clsKey = "cautious";
-    else                               clsKey = "ontime";
+  // The dedicated late-classifier is our primary signal — it was trained
+  // directly on the binary late/not-late outcome and scored 0.99 AUC on
+  // eval. The quantile model is used for the "how much work is left" and
+  // the band visualization, but it does NOT drive the severity call.
+  //
+  // Hard "overdue" overrides everything (wall-clock fact, not a prediction).
+  // If the classifier is unavailable we fall back to quantile geometry.
+  let key;
+  if (!due || !eta) {
+    key = "unknown";
+  } else if (due.getTime() < now.getTime()) {
+    key = "overdue";
+  } else if (hasClassifier) {
+    if (pLateClassifier >= 0.70)      key = "miss";
+    else if (pLateClassifier >= 0.40) key = "tight";
+    else if (pLateClassifier >= 0.20) key = "cautious";
+    else                               key = "ontime";
+  } else {
+    // Fallback: pure quantile geometry when classifier is missing
+    if (p50 > due.getTime())                  key = "miss";
+    else if (p75 && p75 > due.getTime())      key = "tight";
+    else if (p90 && p90 > due.getTime())      key = "cautious";
+    else                                       key = "ontime";
   }
 
-  // 3. Combine — take the more conservative of the two; flag ambiguity
-  //    internally only (for confidence downgrading, not for UI display).
-  const rank = { unknown: -1, ontime: 0, cautious: 1, tight: 2, miss: 3, overdue: 4 };
-  let key = geomKey;
-  if (clsKey && rank[clsKey] > rank[key]) key = clsKey;
-  const ambiguous = clsKey != null && Math.abs(rank[geomKey] - rank[clsKey]) >= 2;
+  // Displayed P(late) comes from the same source as the call — so the
+  // number and the label never contradict each other.
+  let pLate = hasClassifier ? pLateClassifier : (pLateQuantile ?? 0);
+  if (key === "overdue") pLate = 1;
+
+  // Internal only: flag when the classifier and the quantile geometry
+  // strongly disagree. We don't surface this as a banner; we just let
+  // it downgrade "confidence" so the user sees a subtle hedge.
+  let ambiguous = false;
+  if (hasClassifier && due && p50) {
+    const geomKey =
+      (p50 > due.getTime())                  ? "miss" :
+      (p75 && p75 > due.getTime())           ? "tight" :
+      (p90 && p90 > due.getTime())           ? "cautious" :
+                                                "ontime";
+    const rank = { ontime: 0, cautious: 1, tight: 2, miss: 3 };
+    const clsKey = key === "overdue" ? "miss" : key;
+    if (rank[clsKey] != null && Math.abs(rank[clsKey] - rank[geomKey]) >= 2) {
+      ambiguous = true;
+    }
+  }
 
   const META = {
     overdue:  { label: "Overdue",     tone: "critical",
                 rec: "Escalate now — already past the due date." },
     miss:     { label: "Will miss",   tone: "critical",
-                rec: "Escalate — projected to miss the due date." },
+                rec: "Escalate — high probability of missing the due date." },
     tight:    { label: "At risk",     tone: "high",
-                rec: "Prioritize — finishing on time is roughly a coin flip." },
+                rec: "Prioritize — finishing on time is close to a coin flip." },
     cautious: { label: "Watch",       tone: "medium",
-                rec: "Keep an eye on it — slippage is possible." },
+                rec: "Monitor — elevated chance of slippage." },
     ontime:   { label: "On track",    tone: "low",     rec: null },
     unknown:  { label: "No due date", tone: "low",     rec: null },
   };
@@ -1764,10 +1786,10 @@ function unifiedStatus(prediction) {
   // One-line sub — the explanation the headline wants to give
   let sub;
   if (key === "overdue")       sub = `Due ${formatRelativeTime(due, now)}.`;
-  else if (key === "miss")     sub = `Best estimate ${formatRelativeTime(eta, now)}; due ${formatRelativeTime(due, now)}.`;
-  else if (key === "tight")    sub = `Best estimate ${formatRelativeTime(eta, now)} — inside the likely-finish band.`;
-  else if (key === "cautious") sub = `Best estimate on time; upper estimate slips past due.`;
-  else if (key === "ontime")   sub = `Expected ${formatRelativeTime(eta, now)} — buffer intact.`;
+  else if (key === "miss")     sub = `Expected ${formatRelativeTime(eta, now)}; due ${formatRelativeTime(due, now)}. History says this profile lands late.`;
+  else if (key === "tight")    sub = `Expected ${formatRelativeTime(eta, now)}. History says this profile is a close call.`;
+  else if (key === "cautious") sub = `Expected ${formatRelativeTime(eta, now)}. Slight elevated late risk.`;
+  else if (key === "ontime")   sub = `Expected ${formatRelativeTime(eta, now)}. Cases like this finish on time.`;
   else                          sub = "No due date to evaluate against.";
 
   return {
