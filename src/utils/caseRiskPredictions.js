@@ -1681,6 +1681,143 @@ function VerdictChip({ verdict, size = "md" }) {
 }
 
 /**
+ * unifiedStatus — the ONLY status the UI should ever read.
+ *
+ * This function does the reconciliation the user should never have to do:
+ * it combines the dedicated late-classifier, the quantile geometry, and the
+ * due-date position into one authoritative answer.
+ *
+ * Returns:
+ *   { key, label, tone, pLate, eta, etaLabel, headline, sub,
+ *     recommendation, confidence, slackH, dueInPast, ambiguous }
+ *
+ * Tone maps to RISK_STYLE keys (critical|high|medium|low) so color language
+ * is consistent everywhere.  `ambiguous` is an internal hint — we *don't*
+ * surface dual readings in the UI, but we can soften confidence when the
+ * two signals disagree sharply.
+ */
+function unifiedStatus(prediction) {
+  const now = getCurrentTime();
+  const due = prediction.dueDateCalc;
+  const eta = prediction.completionETA || prediction.totalETAs?.p50;
+  const p50 = prediction.totalETAs?.p50?.getTime();
+  const p75 = prediction.totalETAs?.p75?.getTime();
+  const p90 = prediction.totalETAs?.p90?.getTime();
+
+  const pLateClassifier = prediction.lateProbabilityDirect;
+  const pLateQuantile   = prediction.lateProbabilityQuantile;
+  const pLate = (pLateClassifier ?? pLateQuantile ?? prediction.lateProbability ?? 0);
+
+  // 1. Geometric verdict — where the due date falls in the predicted band
+  let geomKey;
+  if (!due || !p50) geomKey = "unknown";
+  else if (due.getTime() < now.getTime()) geomKey = "overdue";
+  else if (p50 > due.getTime()) geomKey = "miss";
+  else if (p75 && p75 > due.getTime()) geomKey = "tight";
+  else if (p90 && p90 > due.getTime()) geomKey = "cautious";
+  else geomKey = "ontime";
+
+  // 2. Classifier verdict — from the dedicated late-classifier's P(late)
+  let clsKey = null;
+  if (pLateClassifier !== null && pLateClassifier !== undefined) {
+    if (pLateClassifier >= 0.70)      clsKey = "miss";
+    else if (pLateClassifier >= 0.40) clsKey = "tight";
+    else if (pLateClassifier >= 0.20) clsKey = "cautious";
+    else                               clsKey = "ontime";
+  }
+
+  // 3. Combine — take the more conservative of the two; flag ambiguity
+  //    internally only (for confidence downgrading, not for UI display).
+  const rank = { unknown: -1, ontime: 0, cautious: 1, tight: 2, miss: 3, overdue: 4 };
+  let key = geomKey;
+  if (clsKey && rank[clsKey] > rank[key]) key = clsKey;
+  const ambiguous = clsKey != null && Math.abs(rank[geomKey] - rank[clsKey]) >= 2;
+
+  const META = {
+    overdue:  { label: "Overdue",     tone: "critical",
+                rec: "Escalate now — already past the due date." },
+    miss:     { label: "Will miss",   tone: "critical",
+                rec: "Escalate — projected to miss the due date." },
+    tight:    { label: "At risk",     tone: "high",
+                rec: "Prioritize — finishing on time is roughly a coin flip." },
+    cautious: { label: "Watch",       tone: "medium",
+                rec: "Keep an eye on it — slippage is possible." },
+    ontime:   { label: "On track",    tone: "low",     rec: null },
+    unknown:  { label: "No due date", tone: "low",     rec: null },
+  };
+  const meta = META[key];
+
+  const slackH = (due && eta) ? (due.getTime() - eta.getTime()) / 3600000 : null;
+  const dueInPast = !!(due && due.getTime() < now.getTime());
+
+  // Confidence — qualitative, from band width; downgrade when ambiguous.
+  const bandH = prediction.totalHours
+    ? prediction.totalHours.p90 - prediction.totalHours.p10 : null;
+  let confidence = "medium";
+  if (bandH != null) {
+    if (bandH < 4)       confidence = "high";
+    else if (bandH > 10) confidence = "low";
+  }
+  if (ambiguous && confidence === "high") confidence = "medium";
+  if (ambiguous && confidence === "medium") confidence = "low";
+
+  // One-line sub — the explanation the headline wants to give
+  let sub;
+  if (key === "overdue")       sub = `Due ${formatRelativeTime(due, now)}.`;
+  else if (key === "miss")     sub = `Best estimate ${formatRelativeTime(eta, now)}; due ${formatRelativeTime(due, now)}.`;
+  else if (key === "tight")    sub = `Best estimate ${formatRelativeTime(eta, now)} — inside the likely-finish band.`;
+  else if (key === "cautious") sub = `Best estimate on time; upper estimate slips past due.`;
+  else if (key === "ontime")   sub = `Expected ${formatRelativeTime(eta, now)} — buffer intact.`;
+  else                          sub = "No due date to evaluate against.";
+
+  return {
+    key,
+    label: meta.label,
+    tone: meta.tone,
+    recommendation: meta.rec,
+    pLate,
+    eta,
+    etaLabel: eta ? formatDate(eta, false) : "—",
+    sub,
+    slackH,
+    dueInPast,
+    confidence,
+    ambiguous,
+  };
+}
+
+/**
+ * StatusPill — the single, canonical status pill. Replaces the badge+chip duo.
+ * Sizes: sm (list rows), md (modal header inline), lg (timeline hero corner).
+ */
+function StatusPill({ status, size = "md" }) {
+  if (!status) return null;
+  const style = RISK_STYLE[status.tone] || RISK_STYLE.low;
+  const dims = {
+    sm: { pad: "px-2 py-0.5", text: "text-[10px]", dot: 6,  track: "tracking-[0.14em]" },
+    md: { pad: "px-3 py-1",   text: "text-[11px]", dot: 7,  track: "tracking-[0.16em]" },
+    lg: { pad: "px-4 py-1.5", text: "text-xs",    dot: 8,  track: "tracking-[0.18em]" },
+  }[size];
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-md font-medium uppercase ${dims.pad} ${dims.text} ${dims.track}`}
+      style={{
+        color: style.fg,
+        backgroundColor: style.bg,
+        border: `1px solid ${style.fg}33`,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span
+        className="inline-block rounded-full"
+        style={{ width: dims.dot, height: dims.dot, backgroundColor: style.fg }}
+      />
+      {status.label}
+    </span>
+  );
+}
+
+/**
  * bandGeometry — given a target (stage|total), now, due date and full-axis span,
  * compute percent positions for the p10, p50, p75, p90, now and due markers,
  * plus widths of the core (p10-p75) and confidence (p10-p90) bands.
@@ -1790,7 +1927,7 @@ function MetricCard({ label, value, sublabel, accent = false, size = "md" }) {
 function TimelineHero({ prediction }) {
   const { stageETAs, totalETAs, dueDateCalc, stageEnteredAt, elapsedWorkHours } = prediction;
   const now = getCurrentTime();
-  const verdict = computeVerdict(prediction);
+  const status = unifiedStatus(prediction);
 
   const entryTs = (stageEnteredAt || now).getTime();
   const nowTs = now.getTime();
@@ -1809,7 +1946,7 @@ function TimelineHero({ prediction }) {
     etas: totalETAs, now, due: dueDateCalc, minTs, maxTs,
   });
 
-  // Draw a labeled date tick on the axis every ~20% across the span.
+  // Draw a labeled date tick on the axis every ~25% across the span.
   const ticks = [];
   for (let i = 0; i <= 4; i++) {
     const pctPos = (i / 4) * 100;
@@ -1817,7 +1954,15 @@ function TimelineHero({ prediction }) {
     ticks.push({ pct: pctPos, ts: tickTs });
   }
 
-  const stageTone = RISK_STYLE[verdict.tone]?.fg || COLORS.inkSoft;
+  // If the P50 pin falls too close to a tick mark OR the Due marker, suppress
+  // its inline date label (the tick already says the same date).
+  const nearestTickDist = Math.min(
+    ...ticks.map((t) => Math.abs(t.pct - totalG.p50Pct))
+  );
+  const dueDist = totalG.duePct != null ? Math.abs(totalG.duePct - totalG.p50Pct) : 999;
+  const showP50Label = nearestTickDist > 10 && dueDist > 8;
+
+  const toneFg = RISK_STYLE[status.tone]?.fg || COLORS.inkSoft;
 
   return (
     <div
@@ -1827,22 +1972,20 @@ function TimelineHero({ prediction }) {
         border: `1px solid ${COLORS.borderSoft}`,
       }}
     >
-      {/* Header: label + verdict */}
+      {/* Header: one-line headline + single status pill */}
       <div className="flex items-start justify-between mb-6 gap-6">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div
-            className="text-[10px] uppercase tracking-[0.2em] font-medium mb-1"
+            className="text-[10px] uppercase tracking-[0.2em] font-medium mb-1.5"
             style={{ color: COLORS.inkFaint }}
           >
-            Prediction Timeline
+            Prediction timeline
           </div>
-          <div className="text-sm" style={{ color: COLORS.ink }}>
-            <span style={{ fontWeight: 500 }}>{verdict.label}</span>
-            <span className="mx-2" style={{ color: COLORS.inkFaint }}>·</span>
-            <span style={{ color: COLORS.inkSoft }}>{verdict.sub}</span>
+          <div className="text-sm leading-snug" style={{ color: COLORS.inkSoft }}>
+            {status.sub}
           </div>
         </div>
-        <VerdictChip verdict={verdict} size="lg" />
+        <StatusPill status={status} size="lg" />
       </div>
 
       {/* Axis container — two rows (stage on top, total on bottom) */}
@@ -1948,20 +2091,23 @@ function TimelineHero({ prediction }) {
                 boxShadow: `0 1px 6px ${COLORS.cognac}66`,
               }}
             />
-            {/* P50 date label below the pin */}
-            <div
-              className="absolute text-[10px] uppercase tracking-[0.12em] whitespace-nowrap"
-              style={{
-                top: "100%",
-                left: `${totalG.p50Pct}%`,
-                transform: "translate(-50%, 4px)",
-                color: COLORS.cognac,
-                fontWeight: 500,
-                fontFamily: "monospace",
-              }}
-            >
-              {formatDate(totalETAs.p50, false)}
-            </div>
+            {/* P50 date label below the pin — only when it won't collide
+                with an axis tick or the Due marker. */}
+            {showP50Label && (
+              <div
+                className="absolute text-[10px] uppercase tracking-[0.12em] whitespace-nowrap"
+                style={{
+                  top: "100%",
+                  left: `${totalG.p50Pct}%`,
+                  transform: "translate(-50%, 4px)",
+                  color: COLORS.cognac,
+                  fontWeight: 500,
+                  fontFamily: "monospace",
+                }}
+              >
+                {formatDate(totalETAs.p50, false)}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1998,7 +2144,7 @@ function TimelineHero({ prediction }) {
               style={{
                 left: `${totalG.duePct}%`,
                 width: 2,
-                backgroundColor: stageTone,
+                backgroundColor: toneFg,
                 borderRadius: 1,
               }}
             />
@@ -2008,7 +2154,7 @@ function TimelineHero({ prediction }) {
                 top: 0,
                 left: `${totalG.duePct}%`,
                 transform: "translate(-50%, -105%)",
-                color: stageTone,
+                color: toneFg,
               }}
             >
               <div className="text-[9px] uppercase tracking-[0.2em] font-medium">
@@ -2074,7 +2220,7 @@ function TimelineHero({ prediction }) {
           <span>Uncertainty p75–p90</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-[2px] h-3 rounded-sm" style={{ backgroundColor: stageTone }} />
+          <div className="w-[2px] h-3 rounded-sm" style={{ backgroundColor: toneFg }} />
           <span>Due</span>
         </div>
         {elapsedWorkHours > 0.5 && (
@@ -2134,13 +2280,19 @@ function RangeBar({
   const coreH = compact ? 8 : 12;
   const outerH = compact ? 4 : 6;
 
-  // Footer sentence — the "answer"
+  // Footer sentence — collapses cleanly when dates overlap at day granularity.
   const footerText = (() => {
     const p50S = formatDate(etas.p50, false);
     const p75S = formatDate(etas.p75, false);
     const p90S = formatDate(etas.p90, false);
+    if (p50S === p75S && p75S === p90S) {
+      return `Should complete ${p50S}.`;
+    }
     if (p50S === p75S) {
       return `Likely ${p50S}; could slip to ${p90S}.`;
+    }
+    if (p75S === p90S) {
+      return `Likely ${p50S}; slip risk to ${p90S}.`;
     }
     return `Likely ${p50S}–${p75S}; could slip to ${p90S}.`;
   })();
@@ -2157,10 +2309,9 @@ function RangeBar({
           </div>
           <div
             className="text-[11px] tabular-nums"
-            style={{ color: COLORS.inkSoft, fontFamily: "monospace" }}
+            style={{ color: COLORS.inkFaint, fontFamily: "monospace" }}
           >
-            {formatHours(quantiles.p50)} <span style={{ color: COLORS.inkFaint }}>±</span>{" "}
-            {formatHours(quantiles.p90 - quantiles.p10)} wide
+            {formatHours(quantiles.p50)} remaining
           </div>
         </div>
       )}
@@ -2283,25 +2434,51 @@ function RangeBar({
 const QuantileBar = RangeBar;
 
 /**
- * RiskFactors — shows the reasons the model flagged this case, with feature values.
+ * RiskFactors — shows the reasons the model flagged this case.
+ * When reasons are empty but the status is elevated, shows a neutral
+ * "risk from overall pattern" message instead of a contradictory "no
+ * signals detected" one.
  */
-function RiskFactors({ prediction }) {
-  const { riskReasons, featureDict, riskLevel } = prediction;
-  const style = RISK_STYLE[riskLevel];
+function RiskFactors({ prediction, status }) {
+  const { riskReasons } = prediction;
+  const s = status || unifiedStatus(prediction);
+  const tone = RISK_STYLE[s.tone] || RISK_STYLE.low;
+  const isElevated = s.tone !== "low";
 
   if (!riskReasons || riskReasons.length === 0) {
+    // Truly "on track" — green reassurance
+    if (!isElevated) {
+      return (
+        <div
+          className="p-6 rounded-xl flex items-start gap-3"
+          style={{ backgroundColor: COLORS.rLowBg, border: `1px solid ${COLORS.rLow}22` }}
+        >
+          <CheckCircle2 size={18} style={{ color: COLORS.rLow, marginTop: 2 }} />
+          <div>
+            <div className="text-sm font-medium" style={{ color: COLORS.rLow }}>
+              No specific triggers
+            </div>
+            <div className="text-xs mt-1" style={{ color: COLORS.inkSoft }}>
+              This case is running within normal parameters.
+            </div>
+          </div>
+        </div>
+      );
+    }
+    // Elevated but no individual reasons — risk is from overall pattern
     return (
       <div
         className="p-6 rounded-xl flex items-start gap-3"
-        style={{ backgroundColor: COLORS.rLowBg, border: `1px solid ${COLORS.rLow}22` }}
+        style={{ backgroundColor: tone.bg, border: `1px solid ${tone.fg}22` }}
       >
-        <CheckCircle2 size={18} style={{ color: COLORS.rLow, marginTop: 2 }} />
+        <AlertCircle size={18} style={{ color: tone.fg, marginTop: 2 }} />
         <div>
-          <div className="text-sm font-medium" style={{ color: COLORS.rLow }}>
-            No risk signals detected
+          <div className="text-sm font-medium" style={{ color: tone.fg }}>
+            Risk comes from the overall pattern
           </div>
-          <div className="text-xs mt-1" style={{ color: COLORS.inkSoft }}>
-            The model sees this case as operating within normal parameters.
+          <div className="text-xs mt-1 leading-relaxed" style={{ color: COLORS.inkSoft }}>
+            No single red flag — the combination of feature values pushes this
+            case above the threshold. See the Features tab for the full picture.
           </div>
         </div>
       </div>
@@ -2321,7 +2498,7 @@ function RiskFactors({ prediction }) {
         >
           <div
             className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0"
-            style={{ backgroundColor: style.fg }}
+            style={{ backgroundColor: tone.fg }}
           />
           <div className="text-sm leading-relaxed" style={{ color: COLORS.ink }}>
             {reason}
@@ -2456,7 +2633,8 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
   const [tab, setTab] = useState("overview");
 
   if (!prediction) return null;
-  const style = RISK_STYLE[prediction.riskLevel];
+  const status = unifiedStatus(prediction);
+  const style = RISK_STYLE[status.tone];
   const now = getCurrentTime();
 
   return createPortal(
@@ -2482,16 +2660,16 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
             <X size={18} />
           </button>
 
-          <div className="flex items-start justify-between mb-6">
-            <div>
+          <div className="flex items-start justify-between mb-6 gap-8">
+            <div className="min-w-0">
               <div
                 className="text-[10px] uppercase tracking-[0.25em] font-medium mb-3"
                 style={{ color: COLORS.inkFaint }}
               >
-                Case Analysis · {prediction.modelUsed}
+                Case analysis
               </div>
               <div
-                className="text-5xl font-light leading-none mb-3"
+                className="text-5xl leading-none mb-3"
                 style={{
                   color: COLORS.ink,
                   fontWeight: 600,
@@ -2500,46 +2678,52 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
               >
                 {prediction.caseNumber}
               </div>
-              <div className="flex items-center gap-3 text-sm" style={{ color: COLORS.inkSoft }}>
+              <div className="flex items-center gap-3 text-sm flex-wrap" style={{ color: COLORS.inkSoft }}>
                 <span className="capitalize">{prediction.currentStage} stage</span>
                 <span style={{ color: COLORS.inkFaint }}>·</span>
                 <span>{Math.round(prediction.progressPercent)}% elapsed</span>
-                <span style={{ color: COLORS.inkFaint }}>·</span>
-                <span>{prediction.confidenceScore}% confidence</span>
+                {prediction.isRush && (
+                  <>
+                    <span style={{ color: COLORS.inkFaint }}>·</span>
+                    <span style={{ color: COLORS.cognac, fontWeight: 500 }}>Rush</span>
+                  </>
+                )}
               </div>
             </div>
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-2">
-                <VerdictChip verdict={computeVerdict(prediction)} size="md" />
-                <RiskBadge level={prediction.riskLevel} size="lg" />
-              </div>
-              <div className="text-[10px]" style={{ color: COLORS.inkFaint }}>
-                Risk score {prediction.riskScore}
+            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+              <StatusPill status={status} size="lg" />
+              <div
+                className="text-[10px] uppercase tracking-[0.18em]"
+                style={{ color: COLORS.inkFaint }}
+              >
+                {status.confidence} confidence
               </div>
             </div>
           </div>
 
-          {/* Recommendation banner */}
-          <div
-            className="flex items-start gap-3 px-5 py-4 rounded-xl"
-            style={{
-              backgroundColor: style.bg,
-              border: `1px solid ${style.fg}22`,
-            }}
-          >
+          {/* Recommendation banner — only shown when there's something to do */}
+          {status.recommendation && (
             <div
-              className="mt-0.5 w-1 self-stretch rounded-full flex-shrink-0"
-              style={{ backgroundColor: style.fg, width: 2 }}
-            />
-            <div className="flex-1">
-              <div className="text-[10px] uppercase tracking-[0.18em] font-medium mb-1" style={{ color: style.fg }}>
-                Recommendation
-              </div>
-              <div className="text-sm font-medium" style={{ color: COLORS.ink }}>
-                {prediction.recommendation}
+              className="flex items-start gap-3 px-5 py-4 rounded-xl"
+              style={{
+                backgroundColor: style.bg,
+                border: `1px solid ${style.fg}22`,
+              }}
+            >
+              <div
+                className="mt-0.5 self-stretch rounded-full flex-shrink-0"
+                style={{ backgroundColor: style.fg, width: 2 }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] uppercase tracking-[0.18em] font-medium mb-1" style={{ color: style.fg }}>
+                  Recommendation
+                </div>
+                <div className="text-sm" style={{ color: COLORS.ink, fontWeight: 500 }}>
+                  {status.recommendation}
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Tabs */}
           <div className="flex items-center gap-8 mt-8" style={{ borderBottom: "none" }}>
@@ -2605,152 +2789,110 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
  *  ======================================================================== */
 
 function OverviewTab({ prediction }) {
-  const { totalHours, stageHours, lateProbability, rescheduleProbability,
-          confidenceScore, hoursIdle, backlogCount, qcLoops } = prediction;
-  const verdict = computeVerdict(prediction);
-  const verdictStyle = RISK_STYLE[verdict.tone] || RISK_STYLE.low;
+  const { totalHours, stageHours, hoursIdle, backlogCount, qcLoops } = prediction;
+  const status = unifiedStatus(prediction);
+  const tone = RISK_STYLE[status.tone] || RISK_STYLE.low;
 
-  const slackH = (prediction.dueDateCalc && prediction.completionETA)
-    ? (prediction.dueDateCalc.getTime() - prediction.completionETA.getTime()) / 3600000
-    : null;
-
-  // Uncertainty width in hours — the "how certain" answer in a single number
-  const uncertaintyH = (totalHours.p90 - totalHours.p10);
-  const uncertaintyText = uncertaintyH < 2 ? "tight" : uncertaintyH < 6 ? "typical" : "wide";
-
-  // P(late) precision
-  const latePctRaw = (lateProbability || 0) * 100;
-  const latePctDisplay =
-    latePctRaw < 1 ? "<1" : latePctRaw < 10 ? latePctRaw.toFixed(1) : String(Math.round(latePctRaw));
+  const slackH = status.slackH;
+  const slackLabel = (() => {
+    if (slackH === null) return { title: "Buffer", sub: "No due date set", sign: 0 };
+    if (status.dueInPast) return { title: "Past due by", sub: "Already overdue", sign: -1 };
+    if (slackH < 0)       return { title: "Projected overrun", sub: "Best estimate slips past due", sign: -1 };
+    return { title: "Buffer", sub: "Slack before due date", sign: 1 };
+  })();
 
   return (
     <div className="space-y-8">
-      {/* === THE FOUR ANSWERS — front and center === */}
-      <div className="grid grid-cols-4 gap-3">
-        {/* 1 · Will it be late? */}
+      {/* === THREE CARDS — the whole answer at a glance === */}
+      <div className="grid grid-cols-3 gap-3">
+        {/* 1 · Status — the headline */}
         <div
           className="p-5 rounded-xl relative overflow-hidden"
           style={{
-            backgroundColor: verdictStyle.bg,
-            border: `1px solid ${verdictStyle.fg}33`,
+            backgroundColor: tone.bg,
+            border: `1px solid ${tone.fg}33`,
           }}
         >
           <div
-            className="text-[10px] uppercase tracking-[0.2em] font-medium mb-2"
-            style={{ color: verdictStyle.fg }}
+            className="text-[10px] uppercase tracking-[0.22em] font-medium mb-2"
+            style={{ color: tone.fg }}
           >
-            Will it be late?
-          </div>
-          <div className="flex items-baseline gap-2">
-            <div
-              className="text-4xl leading-none tabular-nums"
-              style={{
-                fontWeight: 600,
-                color: verdictStyle.fg,
-                fontFeatureSettings: "'tnum'",
-              }}
-            >
-              {latePctDisplay}
-              <span className="text-lg" style={{ fontWeight: 400, marginLeft: 2 }}>%</span>
-            </div>
-            <VerdictChip verdict={verdict} size="sm" />
+            Status
           </div>
           <div
-            className="text-xs mt-2"
-            style={{ color: COLORS.inkSoft }}
+            className="leading-none"
+            style={{
+              fontSize: 30,
+              fontWeight: 600,
+              color: tone.fg,
+              letterSpacing: "-0.01em",
+            }}
           >
-            {verdict.sub}
+            {status.label}
+          </div>
+          <div className="text-xs mt-3 leading-relaxed" style={{ color: COLORS.inkSoft }}>
+            {status.sub}
           </div>
         </div>
 
-        {/* 2 · When will it finish? */}
+        {/* 2 · Finishes — when + relative time */}
         <div
           className="p-5 rounded-xl"
           style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
         >
           <div
-            className="text-[10px] uppercase tracking-[0.2em] font-medium mb-2"
+            className="text-[10px] uppercase tracking-[0.22em] font-medium mb-2"
             style={{ color: COLORS.inkFaint }}
           >
-            When will it finish?
+            Finishes
           </div>
           <div
-            className="text-2xl leading-tight"
+            className="leading-none tabular-nums"
             style={{
+              fontSize: 26,
               fontWeight: 600,
               color: COLORS.ink,
               fontFamily: "monospace",
               fontFeatureSettings: "'tnum'",
             }}
           >
-            {formatDate(prediction.completionETA, false)}
+            {status.etaLabel}
           </div>
-          <div
-            className="text-xs mt-2"
-            style={{ color: COLORS.inkSoft }}
-          >
-            p50 · {formatHours(totalHours.p50)} remaining work
-          </div>
-        </div>
-
-        {/* 3 · How certain? */}
-        <div
-          className="p-5 rounded-xl"
-          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
-        >
-          <div
-            className="text-[10px] uppercase tracking-[0.2em] font-medium mb-2"
-            style={{ color: COLORS.inkFaint }}
-          >
-            How certain?
-          </div>
-          <div className="flex items-baseline gap-1">
-            <div
-              className="text-4xl leading-none"
-              style={{ fontWeight: 600, color: COLORS.ink }}
-            >
-              {confidenceScore}
-              <span className="text-lg" style={{ fontWeight: 400 }}>%</span>
-            </div>
-          </div>
-          <div className="text-xs mt-2" style={{ color: COLORS.inkSoft }}>
-            ±{formatHours(uncertaintyH / 2)} range · {uncertaintyText}
+          <div className="text-xs mt-3" style={{ color: COLORS.inkSoft }}>
+            {status.eta
+              ? `${formatRelativeTime(status.eta, getCurrentTime())} · ${formatHours(totalHours.p50)} of work left`
+              : `${formatHours(totalHours.p50)} of work left`}
           </div>
         </div>
 
-        {/* 4 · Buffer / slack */}
+        {/* 3 · Buffer — signed, clearly labeled */}
         <div
           className="p-5 rounded-xl"
           style={{
-            backgroundColor: slackH !== null && slackH < 0 ? COLORS.rCriticalBg : COLORS.paper,
-            border: `1px solid ${slackH !== null && slackH < 0 ? `${COLORS.rCritical}33` : COLORS.borderSoft}`,
+            backgroundColor: slackLabel.sign < 0 ? COLORS.rCriticalBg : COLORS.paper,
+            border: `1px solid ${slackLabel.sign < 0 ? `${COLORS.rCritical}33` : COLORS.borderSoft}`,
           }}
         >
           <div
-            className="text-[10px] uppercase tracking-[0.2em] font-medium mb-2"
-            style={{
-              color: slackH !== null && slackH < 0 ? COLORS.rCritical : COLORS.inkFaint,
-            }}
+            className="text-[10px] uppercase tracking-[0.22em] font-medium mb-2"
+            style={{ color: slackLabel.sign < 0 ? COLORS.rCritical : COLORS.inkFaint }}
           >
-            {slackH !== null && slackH < 0 ? "Past due by" : "Buffer"}
+            {slackLabel.title}
           </div>
           <div
-            className="text-3xl leading-none"
+            className="leading-none tabular-nums"
             style={{
+              fontSize: 30,
               fontWeight: 600,
-              color: slackH !== null && slackH < 0 ? COLORS.rCritical : COLORS.ink,
+              color: slackLabel.sign < 0 ? COLORS.rCritical : COLORS.ink,
               fontFamily: "monospace",
               fontFeatureSettings: "'tnum'",
             }}
           >
             {slackH !== null ? formatHours(Math.abs(slackH)) : "—"}
           </div>
-          <div className="text-xs mt-2" style={{ color: COLORS.inkSoft }}>
-            {slackH === null
-              ? "no due date"
-              : slackH < 0
-                ? "overrun of the due date"
-                : "slack before due date"}
+          <div className="text-xs mt-3" style={{ color: COLORS.inkSoft }}>
+            {slackLabel.sub}
           </div>
         </div>
       </div>
@@ -2763,9 +2905,7 @@ function OverviewTab({ prediction }) {
         className="p-6 rounded-xl"
         style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
       >
-        <div
-          className="flex items-baseline justify-between mb-5"
-        >
+        <div className="flex items-baseline justify-between mb-5">
           <div
             className="text-[10px] uppercase tracking-[0.18em]"
             style={{ color: COLORS.inkFaint }}
@@ -2794,40 +2934,22 @@ function OverviewTab({ prediction }) {
         </div>
       </div>
 
-      {/* === SECONDARY SIGNALS + OPERATIONAL CONTEXT === */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* === OPERATIONAL CONTEXT — facts only, no probability clutter === */}
+      <div
+        className="p-5 rounded-xl"
+        style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+      >
         <div
-          className="p-5 rounded-xl"
-          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+          className="text-[10px] uppercase tracking-[0.18em] mb-4"
+          style={{ color: COLORS.inkFaint }}
         >
-          <div
-            className="text-[10px] uppercase tracking-[0.18em] mb-3"
-            style={{ color: COLORS.inkFaint }}
-          >
-            Probabilities
-          </div>
-          <div className="space-y-3">
-            <ProbRow label="Late" value={lateProbability} color={verdictStyle.fg} />
-            <ProbRow label="Due rescheduled" value={rescheduleProbability} color={COLORS.brass} />
-          </div>
+          Operational context
         </div>
-
-        <div
-          className="p-5 rounded-xl col-span-2"
-          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
-        >
-          <div
-            className="text-[10px] uppercase tracking-[0.18em] mb-3"
-            style={{ color: COLORS.inkFaint }}
-          >
-            Operational context
-          </div>
-          <div className="grid grid-cols-4 gap-4">
-            <KVStat label="Concurrent" value={backlogCount} />
-            <KVStat label="Hours idle" value={formatHours(hoursIdle)} />
-            <KVStat label="Hold time" value={formatHours(prediction.holdHours || 0)} />
-            <KVStat label="QC loops" value={qcLoops} />
-          </div>
+        <div className="grid grid-cols-4 gap-4">
+          <KVStat label="Concurrent" value={backlogCount} />
+          <KVStat label="Hours idle" value={formatHours(hoursIdle)} />
+          <KVStat label="Hold time" value={formatHours(prediction.holdHours || 0)} />
+          <KVStat label="QC loops" value={qcLoops} />
         </div>
       </div>
     </div>
@@ -2915,96 +3037,163 @@ function TimelineTab({ prediction }) {
 }
 
 function SignalsTab({ prediction }) {
-  const { riskLevel, lateProbability, rescheduleProbability,
-          lateProbabilityDirect, lateProbabilityQuantile,
-          riskFromClassifier, riskFromQuantiles, signalsAgree } = prediction;
-  const style = RISK_STYLE[riskLevel];
+  const status = unifiedStatus(prediction);
+  const tone = RISK_STYLE[status.tone] || RISK_STYLE.low;
+  const [showDetail, setShowDetail] = useState(false);
+
+  const { lateProbabilityDirect, lateProbabilityQuantile,
+          riskFromClassifier, riskFromQuantiles } = prediction;
   const hasClassifier = lateProbabilityDirect !== undefined && lateProbabilityDirect !== null;
+
+  const latePct = Math.round((status.pLate || 0) * 100);
 
   return (
     <div className="grid grid-cols-5 gap-6">
-      {/* Left: Probability gauges */}
+      {/* Left: Single answer + late% */}
       <div className="col-span-2 space-y-4">
         <div
           className="p-6 rounded-xl"
-          style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+          style={{
+            backgroundColor: tone.bg,
+            border: `1px solid ${tone.fg}33`,
+          }}
         >
-          <div className="text-[10px] uppercase tracking-[0.18em] mb-4" style={{ color: COLORS.inkFaint }}>
-            Model outputs
+          <div
+            className="text-[10px] uppercase tracking-[0.2em] font-medium mb-3"
+            style={{ color: tone.fg }}
+          >
+            The call
           </div>
-
-          <div className="flex justify-center py-4">
-            <RingGauge value={prediction.riskScore} max={100} color={style.fg} size={160} />
+          <div
+            className="leading-none"
+            style={{
+              fontSize: 34,
+              fontWeight: 600,
+              color: tone.fg,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            {status.label}
           </div>
-
-          <div className="mt-4 space-y-3">
-            <ProbRow label="P(late)" value={lateProbability} color={COLORS.cognac} showPercent />
-            <ProbRow label="P(reschedule)" value={rescheduleProbability} color={COLORS.brass} showPercent />
-            <ProbRow label="Confidence" value={prediction.confidenceScore / 100} color={COLORS.rLow} showPercent />
+          <div className="text-xs mt-3 leading-relaxed" style={{ color: COLORS.inkSoft }}>
+            {status.sub}
           </div>
 
           <div
-            className="mt-5 pt-4 text-[11px] leading-relaxed"
-            style={{ color: COLORS.inkSoft, borderTop: `1px solid ${COLORS.divider}` }}
+            className="mt-5 pt-4 flex items-baseline justify-between"
+            style={{ borderTop: `1px solid ${tone.fg}22` }}
           >
-            {hasClassifier ? (
-              <>P(late) comes from a dedicated binary classifier trained
-              directly on historical outcomes. The risk level reflects calibrated
-              operational thresholds.</>
-            ) : (
-              <>Risk level derived from where the due date falls in the
-              predicted completion range.</>
-            )}
+            <span className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkSoft }}>
+              Chance of being late
+            </span>
+            <span
+              className="tabular-nums"
+              style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: tone.fg,
+                fontFamily: "monospace",
+                fontFeatureSettings: "'tnum'",
+              }}
+            >
+              {latePct}<span style={{ fontSize: 14, fontWeight: 400, marginLeft: 2 }}>%</span>
+            </span>
+          </div>
+          <div
+            className="mt-3 pt-3 flex items-baseline justify-between"
+            style={{ borderTop: `1px solid ${tone.fg}22` }}
+          >
+            <span className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkSoft }}>
+              Confidence in this call
+            </span>
+            <span
+              className="text-sm uppercase tracking-[0.14em]"
+              style={{ color: COLORS.ink, fontWeight: 500 }}
+            >
+              {status.confidence}
+            </span>
           </div>
         </div>
 
-        {/* Signal agreement — the trust-building panel */}
+        {/* Advanced: dual-signal breakdown, hidden by default */}
         {hasClassifier && (
           <div
-            className="p-5 rounded-xl"
-            style={{
-              backgroundColor: signalsAgree ? COLORS.rLowBg : COLORS.rMediumBg,
-              border: `1px solid ${signalsAgree ? COLORS.rLow : COLORS.rMedium}44`,
-            }}
+            className="rounded-xl overflow-hidden"
+            style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
           >
-            <div
-              className="text-[10px] uppercase tracking-[0.18em] mb-3"
-              style={{ color: signalsAgree ? COLORS.rLow : COLORS.rMedium, fontWeight: 500 }}
+            <button
+              type="button"
+              onClick={() => setShowDetail((v) => !v)}
+              className="w-full flex items-center justify-between px-5 py-3 text-left transition-colors"
+              style={{ color: COLORS.inkSoft }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.cream; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
             >
-              {signalsAgree ? "Model signals agree" : "Model signals disagree"}
-            </div>
-            <div className="space-y-2 text-[11px]">
-              <div className="flex justify-between">
-                <span style={{ color: COLORS.inkSoft }}>Classifier says:</span>
-                <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
-                  {riskFromClassifier} ({(lateProbabilityDirect * 100).toFixed(1)}%)
-                </span>
+              <span className="text-[10px] uppercase tracking-[0.18em]">
+                How the call was made
+              </span>
+              <ChevronRight
+                size={14}
+                style={{
+                  transform: showDetail ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: "transform 160ms ease",
+                }}
+              />
+            </button>
+            {showDetail && (
+              <div
+                className="px-5 pb-5 pt-1 space-y-3 text-[11px]"
+                style={{ borderTop: `1px solid ${COLORS.divider}` }}
+              >
+                <div className="flex justify-between pt-3">
+                  <span style={{ color: COLORS.inkSoft }}>Late-classifier probability</span>
+                  <span
+                    className="tabular-nums"
+                    style={{ color: COLORS.ink, fontWeight: 500, fontFamily: "monospace" }}
+                  >
+                    {(lateProbabilityDirect * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: COLORS.inkSoft }}>Quantile geometry reading</span>
+                  <span
+                    className="tabular-nums"
+                    style={{ color: COLORS.ink, fontWeight: 500, fontFamily: "monospace" }}
+                  >
+                    {(lateProbabilityQuantile * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: COLORS.inkSoft }}>Classifier severity</span>
+                  <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
+                    {riskFromClassifier}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: COLORS.inkSoft }}>Quantile severity</span>
+                  <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
+                    {riskFromQuantiles}
+                  </span>
+                </div>
+                <div
+                  className="pt-3 leading-relaxed"
+                  style={{ color: COLORS.inkFaint, borderTop: `1px solid ${COLORS.divider}` }}
+                >
+                  The call is the more conservative of these two readings. Confidence is
+                  downgraded automatically when they disagree.
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span style={{ color: COLORS.inkSoft }}>Quantile view says:</span>
-                <span style={{ color: COLORS.ink, fontWeight: 500, textTransform: "capitalize" }}>
-                  {riskFromQuantiles} ({(lateProbabilityQuantile * 100).toFixed(1)}%)
-                </span>
-              </div>
-            </div>
-            <div
-              className="mt-3 pt-3 text-[11px] leading-relaxed"
-              style={{ color: COLORS.inkSoft, borderTop: `1px solid ${COLORS.divider}` }}
-            >
-              {signalsAgree
-                ? "Both the direct classifier and the quantile geometry reach the same conclusion — high-confidence signal."
-                : "The classifier and quantile views disagree — this case has ambiguous signals and warrants human review."}
-            </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Right: Reasons */}
+      {/* Right: Reasons + attributes */}
       <div className="col-span-3 space-y-4">
         <div className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkFaint }}>
-          What the model keys on for this case
+          Why
         </div>
-        <RiskFactors prediction={prediction} />
+        <RiskFactors prediction={prediction} status={status} />
 
         <div
           className="p-6 rounded-xl"
@@ -3113,7 +3302,7 @@ function AttrRow({ label, value }) {
   );
 }
 
-function RingGauge({ value, max, color, size = 120 }) {
+function RingGauge({ value, max, color, size = 120, label = "Late %" }) {
   const radius = (size - 14) / 2;
   const circumference = 2 * Math.PI * radius;
   const pct = Math.max(0, Math.min(1, value / max));
@@ -3161,7 +3350,7 @@ function RingGauge({ value, max, color, size = 120 }) {
           className="text-[10px] uppercase tracking-[0.18em] mt-1"
           style={{ color: COLORS.inkFaint }}
         >
-          Risk
+          {label}
         </div>
       </div>
     </div>
@@ -3205,27 +3394,24 @@ export const StatusBadge = ({ status, size = "md" }) => (
 );
 
 /**
- * CompactCaseRow — list row with the four answers visible without clicking:
- *   1. Will it be late?  →  RiskBadge + VerdictChip + late% pill
- *   2. When will it finish?  →  Completion ETA (monospace date)
- *   3. How certain?  →  Inline mini RangeBar (widths tell the story)
- *   4. What to do?  →  Rush/Hold/Review flags + next-step chip from verdict
+ * CompactCaseRow — list row with a single confident status read.
+ * Column layout (fixed-width zones so rows align cleanly):
  *
- * Layout (fixed-width zones so rows align cleanly):
+ *  [stripe][ STATUS 160 ][ CASE 150 ][ ETA + RANGE flex ][ LATE% 80 ][ FLAGS 92 ][ → ]
  *
- *  [stripe][ STATUS 180 ][ CASE 160 ][ ETA + RANGE flex 320 ][ LATE% 72 ][ FLAGS 120 ][ → ]
+ * There is exactly one status pill and one P(late) number — no dual
+ * chips and no hidden "review" tag for the user to puzzle over.
  */
 function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
-  const status = getStatusFromPrediction(prediction);
-  const style = RISK_STYLE[status] || RISK_STYLE.low;
-  const verdict = computeVerdict(prediction);
+  const status = unifiedStatus(prediction);
+  const tone = RISK_STYLE[status.tone] || RISK_STYLE.low;
   const now = new Date();
   const dueDate = prediction.dueDate ? new Date(prediction.dueDate) : prediction.dueDateCalc;
   const completionETA = prediction.completionETA || prediction.expectedCompletionDate;
-  const isOverdue = dueDate && dueDate < now;
+  const isOverdue = status.dueInPast;
 
   // Late probability display — more precision for small values
-  const latePctRaw = (prediction.lateProbability || 0) * 100;
+  const latePctRaw = (status.pLate || 0) * 100;
   const latePctDisplay = (() => {
     if (latePctRaw < 1) return "<1";
     if (latePctRaw < 10) return latePctRaw.toFixed(1);
@@ -3247,20 +3433,19 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
       {/* Left accent stripe (tone-colored) */}
       <div
         className="absolute left-0 top-0 bottom-0 rounded-l-xl"
-        style={{ width: 3, backgroundColor: style.fg }}
+        style={{ width: 3, backgroundColor: tone.fg }}
       />
 
       <div className="pl-5 pr-4 py-3.5">
         <div className="flex items-center gap-4">
 
-          {/* STATUS — badge + verdict stacked (180px) */}
-          <div className="w-[180px] flex-shrink-0 flex flex-col gap-1.5">
-            <RiskBadge level={status} size="sm" />
-            <VerdictChip verdict={verdict} size="sm" />
+          {/* STATUS — one pill (160px) */}
+          <div className="w-[160px] flex-shrink-0">
+            <StatusPill status={status} size="sm" />
           </div>
 
-          {/* CASE — number + type + stage (160px) */}
-          <div className="w-[160px] flex-shrink-0 min-w-0">
+          {/* CASE — number + type + stage (150px) */}
+          <div className="w-[150px] flex-shrink-0 min-w-0">
             <div
               className="text-lg leading-tight truncate"
               style={{
@@ -3281,7 +3466,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
 
           {/* ETA + inline mini range (flex, main zone) */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-baseline gap-3 mb-2">
+            <div className="flex items-baseline gap-3 mb-2 flex-wrap">
               <div
                 className="text-[10px] uppercase tracking-[0.16em]"
                 style={{ color: COLORS.inkFaint }}
@@ -3291,7 +3476,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
               <div
                 className="text-sm tabular-nums"
                 style={{
-                  color: isOverdue ? style.fg : COLORS.ink,
+                  color: isOverdue ? tone.fg : COLORS.ink,
                   fontFamily: "monospace",
                   fontWeight: 500,
                 }}
@@ -3310,7 +3495,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
                 </div>
               )}
             </div>
-            {/* Inline mini RangeBar — height 22 */}
+            {/* Inline mini RangeBar — widths carry the uncertainty shape */}
             {prediction.totalETAs && (
               <RangeBar
                 quantiles={prediction.totalHours}
@@ -3323,14 +3508,14 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
             )}
           </div>
 
-          {/* Late % — big number (72px) */}
-          <div className="w-[72px] flex-shrink-0 text-right">
+          {/* Late % — big number (80px) */}
+          <div className="w-[80px] flex-shrink-0 text-right">
             <div
               className="leading-none tabular-nums"
               style={{
                 fontSize: 28,
-                fontWeight: 300,
-                color: style.fg,
+                fontWeight: 400,
+                color: tone.fg,
                 fontFeatureSettings: "'tnum'",
               }}
             >
@@ -3341,12 +3526,12 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
               className="text-[10px] uppercase tracking-[0.14em] mt-0.5"
               style={{ color: COLORS.inkFaint }}
             >
-              Late risk
+              Late
             </div>
           </div>
 
-          {/* Flags column (120px) */}
-          <div className="w-[120px] flex-shrink-0 flex flex-wrap items-center gap-1 justify-end">
+          {/* Flags column (92px) */}
+          <div className="w-[92px] flex-shrink-0 flex flex-wrap items-center gap-1 justify-end">
             {prediction.isRush && (
               <span
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
@@ -3362,7 +3547,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
             )}
             {prediction.onHold && (
               <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
+                className="inline-flex items-center px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
                 style={{
                   color: COLORS.rMedium,
                   backgroundColor: COLORS.rMediumBg,
@@ -3374,7 +3559,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
             )}
             {prediction.qcLoops > 0 && (
               <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
+                className="inline-flex items-center px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
                 style={{
                   color: COLORS.inkSoft,
                   backgroundColor: COLORS.cream,
@@ -3383,20 +3568,6 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
                 title="QC loops"
               >
                 QC×{prediction.qcLoops}
-              </span>
-            )}
-            {prediction.signalsAgree === false && (
-              <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] rounded-md"
-                style={{
-                  color: COLORS.inkSoft,
-                  backgroundColor: COLORS.cream,
-                  border: `1px dashed ${COLORS.inkFaint}`,
-                  fontWeight: 500,
-                }}
-                title="Model signals disagree — review manually"
-              >
-                Review
               </span>
             )}
           </div>
