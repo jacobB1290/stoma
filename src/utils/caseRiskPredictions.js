@@ -3604,7 +3604,7 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
           className="h-full transition-all duration-500"
           style={{
             width: `${Math.min(100, prediction.progressPercent || 0)}%`,
-            backgroundColor: style.fg,
+            backgroundColor: tone.fg,
             opacity: 0.55,
           }}
         />
