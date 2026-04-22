@@ -387,32 +387,43 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       `[calculateStageStatistics] Fetched ${casesWithHistory.length} cases (${rawCases.length - casesWithHistory.length} sentinel rows filtered)`
     );
 
+    // Shape a raw DB row into the format the risk pipeline expects.
+    const shapeCase = (c, currentStageOverride = null) => ({
+      id: c.id,
+      caseNumber: c.casenumber,
+      casenumber: c.casenumber,
+      caseType: c.modifiers?.includes("bbs")
+        ? "bbs"
+        : c.modifiers?.includes("flex")
+        ? "flex"
+        : "general",
+      modifiers: c.modifiers || [],
+      created_at: c.created_at,
+      due: c.due,
+      completed: !!c.completed,
+      completed_at: c.completed_at,
+      priority: !!c.priority,
+      rush: c.modifiers?.includes("rush") || !!c.priority,
+      department: c.department,
+      case_history: c.case_history || [],
+      isActive: !c.completed,
+      stage: getStageFromModifiers(c.modifiers || []),
+      currentStage:
+        currentStageOverride || getStageFromModifiers(c.modifiers || []),
+    });
+
     // Board-parity list: every non-completed case whose stage-* modifier matches the target stage.
     // Feeds risk predictions directly so brand-new cases (which lack stage history or trip
     // MIN_STAGE_TIME) still surface in the risk modal.
     const allCasesInStage = casesWithHistory
       .filter((c) => !c.completed && getStageFromModifiers(c.modifiers || []) === stage)
-      .map((c) => ({
-        id: c.id,
-        caseNumber: c.casenumber,
-        casenumber: c.casenumber,
-        caseType: c.modifiers?.includes("bbs")
-          ? "bbs"
-          : c.modifiers?.includes("flex")
-          ? "flex"
-          : "general",
-        modifiers: c.modifiers || [],
-        created_at: c.created_at,
-        due: c.due,
-        completed: false,
-        completed_at: c.completed_at,
-        priority: !!c.priority,
-        rush: c.modifiers?.includes("rush") || !!c.priority,
-        department: c.department,
-        case_history: c.case_history || [],
-        isActive: true,
-        currentStage: stage,
-      }));
+      .map((c) => shapeCase(c, stage));
+
+    // Lab-wide active pool across all stages — feeds v9 labContext so cross-case
+    // features (lab load, per-stage queues, throughput) see the full picture.
+    const allActiveCases = casesWithHistory
+      .filter((c) => !c.completed)
+      .map((c) => shapeCase(c));
 
     // Data quality thresholds
     const MIN_STAGE_TIME = {
@@ -581,6 +592,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
         noData: true,
         excludedCases,
         allCasesInStage,
+        allActiveCases,
         message: "No valid cases found for this stage",
       };
     }
@@ -596,6 +608,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       casesWithHistory
     );
     stats.allCasesInStage = allCasesInStage;
+    stats.allActiveCases = allActiveCases;
 
     console.log("[calculateStageStatistics] Complete. Returning stats:", {
       averageTime: stats.averageTime,
@@ -858,7 +871,7 @@ export const StageDetailsModal = ({
                 <p className="text-sm mt-1 opacity-80">
                   {stageStats.sampleSize} valid cases analyzed • Data Quality:{" "}
                   {stageStats.dataQuality?.score.toFixed(0)}% • Working hours
-                  only (8AM-5PM MST)
+                  only (8AM-5PM local time)
                 </p>
               </div>
               <button
