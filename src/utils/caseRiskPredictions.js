@@ -151,6 +151,8 @@ const FEATURE_LABELS = {
 };
 
 // Work-day definition must match Python training: 8–9:30, 9:45–12, 1–2:30, 2:45–5
+// These hours are in the device's LOCAL timezone — intentionally so, since cases
+// are managed by a single lab and times are always interpreted as local time.
 const WORK_WINDOWS = [
   [8, 0, 9, 30], [9, 45, 12, 0], [13, 0, 14, 30], [14, 45, 17, 0],
 ];
@@ -215,6 +217,11 @@ function advanceToNextWorkMoment(c) {
   return c;
 }
 
+// Both `start` and `end` may come from different sources (Supabase UTC timestamps
+// or locally-constructed Date objects). This is safe: JS Date objects store UTC
+// internally and all local getters used here (.getHours(), .getDay() etc.) return
+// the same local-timezone value regardless of how the Date was constructed.
+// Net result: business-hour counting operates entirely in device local time.
 export function businessHoursBetween(start, end) {
   if (!start || !end || end <= start) return 0;
   let c = new Date(start.getTime());
@@ -268,29 +275,48 @@ function snapToMinutes(d, step = 5) {
   return new Date(Math.round(d.getTime() / ms) * ms);
 }
 
+// Parses the date portion from any Supabase date/timestamp string into [y, m, d].
+// We NEVER use `new Date("YYYY-MM-DD")` directly because the spec defines that
+// date-only ISO strings are parsed as UTC midnight, which shifts the calendar
+// date in any non-UTC timezone (e.g. "2025-06-01" → May 31 at 5 PM MT).
+// Instead we always split the string manually and construct a local Date.
+function parseDateParts(dueStr) {
+  if (!dueStr) return null;
+  const base = String(dueStr).split("T")[0]; // works for date, datetime, or timestamp
+  const parts = base.split("-").map(Number);
+  if (parts.length === 3 && !parts.some(isNaN)) return parts; // [y, m, d]
+  return null;
+}
+
+// Returns a Date representing end-of-business-day (17:00 local) on the due date.
+// Used for all internal risk and ETA comparisons.
 export function dueEOD(dueStr) {
   if (!dueStr) return null;
-  const base = String(dueStr).split("T")[0];
-  const parts = base.split("-").map(Number);
-  if (parts.length === 3 && !parts.some(isNaN)) {
-    return new Date(parts[0], parts[1] - 1, parts[2], 17, 0, 0, 0);
-  }
+  const parts = parseDateParts(dueStr);
+  if (parts) return new Date(parts[0], parts[1] - 1, parts[2], 17, 0, 0, 0);
+  // Fallback for non-ISO strings (e.g. "June 1, 2025") — parsed locally by JS engine.
+  // These are not expected from Supabase but handled defensively.
   const d = new Date(dueStr);
   if (isNaN(d)) return null;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 17, 0, 0, 0);
 }
 
+// Same parsing as dueEOD — returns EOD local Date for consistency so that
+// display-date comparisons (e.g. isOverdue) use the same reference as risk logic.
 export function parseDueDateForDisplay(dueStr) {
   if (!dueStr) return null;
-  const base = String(dueStr).split("T")[0];
-  const parts = base.split("-").map(Number);
-  if (parts.length === 3 && !parts.some(isNaN)) {
-    return new Date(parts[0], parts[1] - 1, parts[2], 17, 0, 0, 0);
-  }
+  const parts = parseDateParts(dueStr);
+  if (parts) return new Date(parts[0], parts[1] - 1, parts[2], 17, 0, 0, 0);
   const d = new Date(dueStr);
-  return isNaN(d) ? null : d;
+  if (isNaN(d)) return null;
+  // Apply EOD here too so display date comparisons stay consistent with dueEOD.
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 17, 0, 0, 0);
 }
 
+// Parses a Supabase UTC ISO timestamp ("2025-06-01T15:30:00Z" or "+00:00" suffix)
+// into a JS Date. JS Date objects have no timezone — they're always UTC internally.
+// All local getters (.getHours(), .getDay() etc.) return local-timezone values,
+// which is correct for our single-lab, single-timezone use case.
 function parseTimestamp(s) {
   if (!s) return null;
   const d = new Date(s);

@@ -871,7 +871,7 @@ export const StageDetailsModal = ({
                 <p className="text-sm mt-1 opacity-80">
                   {stageStats.sampleSize} valid cases analyzed • Data Quality:{" "}
                   {stageStats.dataQuality?.score.toFixed(0)}% • Working hours
-                  only (8AM-5PM MST)
+                  only (8AM-5PM local time)
                 </p>
               </div>
               <button
