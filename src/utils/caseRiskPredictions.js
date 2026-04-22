@@ -16,7 +16,7 @@
 //   • P(late)             interpolated from the quantile range vs due date
 //
 // SETUP
-//   1. Place xgb_v10_final.json in /public
+//   1. Place xgb_v10_origdue.json in /public
 //   2. Import { loadModels, generateCaseRiskPredictions, CaseRiskAnalyticsModal }
 //   3. Call loadModels() once at app init (returns a Promise)
 //   4. IMPORTANT: pass `recentCompletedVisits` OR `completedCasesForContext`
@@ -772,7 +772,7 @@ function xgbPredictProba(subModel, features) {
 let XGB_MODELS = null;
 let modelLoadPromise = null;
 
-export function loadModels(modelUrl = "/xgb_v10_final.json") {
+export function loadModels(modelUrl = "/xgb_v10_origdue.json") {
   if (XGB_MODELS) return Promise.resolve(XGB_MODELS);
   if (modelLoadPromise) return modelLoadPromise;
   modelLoadPromise = fetch(modelUrl)
