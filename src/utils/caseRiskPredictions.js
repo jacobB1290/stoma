@@ -1292,6 +1292,156 @@ function interpolatePLate(etas, due) {
 }
 
 /** ========================================================================
+ *  CASE STATE RESOLVER — classifier / quantile reconciliation (v10.4)
+ *  ========================================================================
+ *  Derived from three audits on 1,955 snapshots (1,090 completed cases):
+ *    Audit 1 — ETA error distribution on the classifier-alert branch (n=18):
+ *              heavily right-skewed, median -1.38h, mean +2.35h (tail-dragged),
+ *              centered P10/P90 at -6.16h / +14.51h. Late rate: 11.1%.
+ *    Audit 2 — Per-stage calibration. Design calibrated at 0.25, production
+ *              overpredicts in 0.25-0.40 (28% pred vs 6.5% actual). False-alarm
+ *              rows have ~0 bias across stages. Classifier wins 100%.
+ *    Audit 3 — Global knee at 0.30. Combined w/ Audit 2, cutoffs split by stage.
+ *
+ *  Thin spots: Audit 1 n=18, Audit 2 classifier-alert n=15/3/0 per stage.
+ *  The classifier-alert branch is labeled "weak alert" to reflect this.
+ *  Re-tune ALERT_BAND_LOW_H / HIGH_H when the sample grows (especially once
+ *  isotonic recalibration is deployed and old classifier scores are replaced).
+ *  ======================================================================== */
+
+// Stage-specific late cutoffs (Audit 2 + Audit 3)
+const LATE_CUTOFF_BY_STAGE = {
+  design:     0.25, // calibrated in [0.25, 0.40) — 31% pred vs 25.8% actual
+  production: 0.40, // overpredicts in [0.25, 0.40) — 28.1% pred vs 6.5% actual
+  finishing:  0.30, // Audit 3 global knee; classifier rarely fires above 0.25 here
+  qc:         0.30, // no per-stage audit — use global knee
+};
+const LATE_CUTOFF_FALLBACK = 0.30;
+
+// Quantile's binary call uses its own natural 0.50 threshold — the point at
+// which the CDF past deadline crosses 50%.
+const QUANTILE_LATE_THRESHOLD = 0.50;
+
+// ETA bias corrections.
+const GLOBAL_ETA_BIAS_H = 1.7;   // Audit 2: agreement + false-alarm rows, all stages
+const ALERT_ETA_BIAS_H = 0.0;    // Audit 1: median-centered (mean is tail-dragged)
+
+// Classifier-alert branch band (Audit 1 centered residuals).
+// Asymmetric because the error distribution is skewed by design.
+const ALERT_BAND_LOW_H = -6.16;
+const ALERT_BAND_HIGH_H = 14.51;
+
+// Empirical precision for UI explainer copy
+const FALSE_ALARM_LATE_RATE = 0.10;
+const ALERT_LATE_RATE = 0.111;
+
+/**
+ * Resolve a case's display state from classifier + quantile outputs.
+ * @param {Object} inputs
+ * @param {number} inputs.clfRaw            Classifier pre-calibration, 0-1
+ * @param {number} inputs.clfCalibrated     Classifier after isotonic fit, 0-1
+ * @param {number} inputs.qtlPLate          Quantile-CDF derived P(late), 0-1
+ * @param {number} inputs.p10Hours          Quantile p10, hours from now
+ * @param {number} inputs.p50Hours          Quantile p50, hours from now
+ * @param {number} inputs.p90Hours          Quantile p90, hours from now
+ * @param {string} inputs.stage
+ * @returns {Object} resolution
+ */
+export function resolveCaseState(inputs) {
+  const {
+    clfRaw,
+    clfCalibrated,
+    qtlPLate,
+    p10Hours,
+    p50Hours,
+    p90Hours,
+    stage,
+  } = inputs;
+
+  const stageCutoff = LATE_CUTOFF_BY_STAGE[stage] ?? LATE_CUTOFF_FALLBACK;
+
+  const clfSaysLate = clfCalibrated >= stageCutoff;
+  const qtlSaysLate = qtlPLate >= QUANTILE_LATE_THRESHOLD;
+
+  // Branch — binary-call disagreement, not gap thresholds.
+  let branch;
+  if (clfSaysLate === qtlSaysLate) {
+    branch = "agreement";
+  } else if (qtlSaysLate && !clfSaysLate) {
+    branch = "false_alarm";
+  } else {
+    branch = "classifier_alert";
+  }
+
+  // State always driven by the classifier.
+  const stateCall = clfSaysLate ? "at_risk" : "on_track";
+
+  const stateConfidence = {
+    agreement:        "high",
+    false_alarm:      "high", // 100% classifier win in audits
+    classifier_alert: "low",  // n=18, only 11% actually late
+  }[branch];
+
+  // ETA: median-centered on alert branch, +1.7h bias-corrected elsewhere.
+  let etaHours, etaLow, etaHigh, etaConfidence;
+  if (branch === "classifier_alert") {
+    etaHours = p50Hours + ALERT_ETA_BIAS_H;
+    etaLow   = etaHours + ALERT_BAND_LOW_H;
+    etaHigh  = etaHours + ALERT_BAND_HIGH_H;
+    etaConfidence = "low";
+  } else {
+    etaHours = p50Hours + GLOBAL_ETA_BIAS_H;
+    etaLow   = p10Hours + GLOBAL_ETA_BIAS_H;
+    etaHigh  = p90Hours + GLOBAL_ETA_BIAS_H;
+    etaConfidence = "high";
+  }
+
+  const stateExplanation = {
+    agreement: null,
+    false_alarm:
+      `Duration model flagged ${Math.round(qtlPLate * 100)}% late risk, but the ` +
+      `classifier (primary on ${stage}) disagrees. Historical late rate on this ` +
+      `pattern: ${Math.round(FALSE_ALARM_LATE_RATE * 100)}% — most cases flagged ` +
+      `this way finish on time.`,
+    classifier_alert:
+      `Classifier detected risk signals the duration model doesn't see (queue ` +
+      `depth, rework, concurrency). Sample is thin and this pattern's historical ` +
+      `late rate is only ${Math.round(ALERT_LATE_RATE * 100)}% — treat as a weak ` +
+      `alert, not a definitive call.`,
+  }[branch];
+
+  const etaExplanation =
+    branch === "classifier_alert"
+      ? `ETA shown is the quantile p50 without bias correction. Band is asymmetric ` +
+        `(-6h to +15h) because audit data shows a long right tail: roughly 10% of ` +
+        `cases on this branch run 15h+ later than p50 suggests. The other 90% land ` +
+        `near the point estimate.`
+      : null;
+
+  return {
+    branch,
+    stateCall,
+    stateConfidence,
+    stageCutoff,
+    displayedLateRisk: clfCalibrated,
+    etaHours,
+    etaBand: { low: etaLow, high: etaHigh },
+    etaConfidence,
+    stateExplanation,
+    etaExplanation,
+    signals: {
+      classifier: { raw: clfRaw, calibrated: clfCalibrated, role: "primary" },
+      quantile: {
+        pLate: qtlPLate,
+        role: branch === "classifier_alert" ? "overridden" : "diagnostic",
+      },
+      stage,
+      stageCutoffApplied: stageCutoff,
+    },
+  };
+}
+
+/** ========================================================================
  *  MAIN GENERATOR — produces prediction objects for all active cases
  *  ======================================================================== */
 
@@ -1366,6 +1516,9 @@ export function generateCaseRiskPredictions(
     });
   }
 
+  // v10.4: per-call branch counter (logged once for analytics)
+  const branchCounts = { agreement: 0, false_alarm: 0, classifier_alert: 0 };
+
   const predictions = activeCases.map((c) => {
     const caseType = c.caseType ||
       (c.modifiers?.includes?.("bbs") ? "bbs" :
@@ -1377,9 +1530,46 @@ export function generateCaseRiskPredictions(
     const dueDateCalc = dueEOD(c.due);
     const dueDateDisplay = parseDueDateForDisplay(c.due);
     const isRush = !!(c?.rush || c?.priority);
+
+    // v10.4: resolver reconciles classifier + quantile and returns bias-corrected ETA.
+    const resolution = resolveCaseState({
+      clfRaw: ml.pLateDirect ?? 0,
+      clfCalibrated: ml.pLateDirect ?? 0,
+      qtlPLate: ml.pLateFromQuantiles ?? 0,
+      p10Hours: ml.totalHours.p10,
+      p50Hours: ml.totalHours.p50,
+      p90Hours: ml.totalHours.p90,
+      stage: currentStage,
+    });
+    branchCounts[resolution.branch] = (branchCounts[resolution.branch] || 0) + 1;
+
+    // Resolver-driven completion ETA (bias-corrected) replaces raw p50.
+    const completionETA = snapToMinutes(addBusinessHours(now, resolution.etaHours), 5);
+    // UI band — asymmetric on classifier_alert, bias-shifted p10/p90 otherwise.
+    const etaBandETAs = {
+      low: addBusinessHours(now, resolution.etaBand.low),
+      p50: completionETA,
+      high: addBusinessHours(now, resolution.etaBand.high),
+    };
+
+    // Resolver-driven risk level for list sorting / summary rollups.
+    //   on_track → low
+    //   at_risk + low_conf   → medium (classifier_alert, weak alert)
+    //   at_risk + high_conf  → critical (≥0.7 classifier) or high
+    let riskLevel;
+    if (resolution.stateCall === "on_track") {
+      riskLevel = "low";
+    } else if (resolution.stateConfidence === "low") {
+      riskLevel = "medium";
+    } else if (resolution.displayedLateRisk >= 0.7) {
+      riskLevel = "critical";
+    } else {
+      riskLevel = "high";
+    }
+
     const daysUntilDue = dueDateCalc ? (dueDateCalc.getTime() - nowTs) / 86400000 : Number.POSITIVE_INFINITY;
-    const expectedDaysToComplete = (ml.totalETA.getTime() - nowTs) / 86400000;
-    const willBeLate = dueDateCalc ? ml.totalETA > dueDateCalc : false;
+    const expectedDaysToComplete = (completionETA.getTime() - nowTs) / 86400000;
+    const willBeLate = dueDateCalc ? completionETA > dueDateCalc : false;
     const slackDays = daysUntilDue - expectedDaysToComplete;
 
     const progressPercent = Math.min(98, (ml.elapsedWorkHours / Math.max(1e-6, ml.elapsedWorkHours + ml.stageWorkHours)) * 100);
@@ -1394,15 +1584,15 @@ export function generateCaseRiskPredictions(
       timeInStageMs,
       stageEnteredAt,
 
-      // ETAs (primary)
+      // ETAs — primary display values are resolver-driven
       stageETA: ml.stageETA,
-      completionETA: ml.totalETA,
-      expectedCompletionDate: ml.totalETA, // alias for old UI
+      completionETA,
+      expectedCompletionDate: completionETA, // alias for old UI
 
-      // Quantile ranges
-      stageHours: ml.stageHours,      // {p10, p50, p75, p90} remaining in stage
-      totalHours: ml.totalHours,      // {p10, p50, p75, p90} remaining to done
-      stageETAs: ml.stageETAs,        // {p10, p50, p75, p90} as Date objects
+      // Quantile ranges (raw, unbiased — for diagnostics / audit drawer)
+      stageHours: ml.stageHours,
+      totalHours: ml.totalHours,
+      stageETAs: ml.stageETAs,
       totalETAs: ml.totalETAs,
 
       // Work-hour shortcuts
@@ -1424,17 +1614,32 @@ export function generateCaseRiskPredictions(
       slackHours: slackDays * 24,
 
       // Model outputs
-      riskLevel: ml.riskLevel,
-      lateProbability: ml.pLate,
-      lateProbabilityDirect: ml.pLateDirect,  // from dedicated classifier
-      lateProbabilityQuantile: ml.pLateFromQuantiles,  // from quantile position
+      riskLevel,
+      lateProbability: resolution.displayedLateRisk,
+      lateProbabilityDirect: ml.pLateDirect,
+      lateProbabilityQuantile: ml.pLateFromQuantiles,
       riskFromClassifier: ml.riskFromClassifier,
       riskFromQuantiles: ml.riskFromQuantiles,
       signalsAgree: ml.signalsAgree,
       rescheduleProbability: ml.pResched,
-      confidence: ml.confidenceScore >= 80 ? "high" : ml.confidenceScore >= 60 ? "medium" : "low",
+      confidence: resolution.stateConfidence,
       confidenceScore: ml.confidenceScore,
-      riskScore: Math.round(ml.pLate * 100),
+      riskScore: Math.round(resolution.displayedLateRisk * 100),
+
+      // Resolver output (v10.4) — drives pill, band, explainers
+      resolution,
+      branch: resolution.branch,
+      stateCall: resolution.stateCall,
+      stateConfidence: resolution.stateConfidence,
+      stateExplanation: resolution.stateExplanation,
+      etaExplanation: resolution.etaExplanation,
+      stageCutoffApplied: resolution.stageCutoff,
+      etaBandHours: {
+        low: resolution.etaBand.low,
+        p50: resolution.etaHours,
+        high: resolution.etaBand.high,
+      },
+      etaBandETAs,
 
       // Context
       isRush,
@@ -1460,6 +1665,21 @@ export function generateCaseRiskPredictions(
       _case: c,
     };
   });
+
+  // Log branch distribution once per render (not once per case) for analytics.
+  if (typeof console !== "undefined" && predictions.length > 0) {
+    const total = predictions.length;
+    console.log("[v10.4 resolver branches]", {
+      stage: currentStage,
+      total,
+      agreement: branchCounts.agreement,
+      false_alarm: branchCounts.false_alarm,
+      classifier_alert: branchCounts.classifier_alert,
+      pctAgreement: (branchCounts.agreement / total * 100).toFixed(1) + "%",
+      pctFalseAlarm: (branchCounts.false_alarm / total * 100).toFixed(1) + "%",
+      pctClassifierAlert: (branchCounts.classifier_alert / total * 100).toFixed(1) + "%",
+    });
+  }
 
   // Build risk reasons from the feature dict (data-driven, not hand-rules)
   for (const p of predictions) {
@@ -1700,60 +1920,50 @@ function unifiedStatus(prediction) {
   const now = getCurrentTime();
   const due = prediction.dueDateCalc;
   const eta = prediction.completionETA || prediction.totalETAs?.p50;
-  const p50 = prediction.totalETAs?.p50?.getTime();
-  const p75 = prediction.totalETAs?.p75?.getTime();
-  const p90 = prediction.totalETAs?.p90?.getTime();
+  const res = prediction.resolution;
 
-  const pLateClassifier = prediction.lateProbabilityDirect;
-  const pLateQuantile   = prediction.lateProbabilityQuantile;
-  const hasClassifier = pLateClassifier !== null && pLateClassifier !== undefined;
-
-  // The dedicated late-classifier is our primary signal — it was trained
-  // directly on the binary late/not-late outcome and scored 0.99 AUC on
-  // eval. The quantile model is used for the "how much work is left" and
-  // the band visualization, but it does NOT drive the severity call.
-  //
-  // Hard "overdue" overrides everything (wall-clock fact, not a prediction).
-  // If the classifier is unavailable we fall back to quantile geometry.
   let key;
   if (!due || !eta) {
     key = "unknown";
   } else if (due.getTime() < now.getTime()) {
     key = "overdue";
-  } else if (hasClassifier) {
-    if (pLateClassifier >= 0.70)      key = "miss";
-    else if (pLateClassifier >= 0.40) key = "tight";
-    else if (pLateClassifier >= 0.20) key = "cautious";
-    else                               key = "ontime";
+  } else if (res) {
+    // v10.4 resolver path — branch + confidence decide the pill.
+    if (res.branch === "classifier_alert") {
+      // Weak alert: classifier flagged, quantile disagrees, n=18 support.
+      // Deliberately use the "cautious" tone (amber) rather than critical.
+      key = "cautious";
+    } else if (res.stateCall === "on_track") {
+      // agreement or false_alarm — classifier says fine.
+      key = "ontime";
+    } else {
+      // agreement + at_risk, high confidence. Severity by magnitude.
+      key = res.displayedLateRisk >= 0.7 ? "miss" : "tight";
+    }
   } else {
-    // Fallback: pure quantile geometry when classifier is missing
-    if (p50 > due.getTime())                  key = "miss";
-    else if (p75 && p75 > due.getTime())      key = "tight";
-    else if (p90 && p90 > due.getTime())      key = "cautious";
-    else                                       key = "ontime";
-  }
-
-  // Displayed P(late) comes from the same source as the call — so the
-  // number and the label never contradict each other.
-  let pLate = hasClassifier ? pLateClassifier : (pLateQuantile ?? 0);
-  if (key === "overdue") pLate = 1;
-
-  // Internal only: flag when the classifier and the quantile geometry
-  // strongly disagree. We don't surface this as a banner; we just let
-  // it downgrade "confidence" so the user sees a subtle hedge.
-  let ambiguous = false;
-  if (hasClassifier && due && p50) {
-    const geomKey =
-      (p50 > due.getTime())                  ? "miss" :
-      (p75 && p75 > due.getTime())           ? "tight" :
-      (p90 && p90 > due.getTime())           ? "cautious" :
-                                                "ontime";
-    const rank = { ontime: 0, cautious: 1, tight: 2, miss: 3 };
-    const clsKey = key === "overdue" ? "miss" : key;
-    if (rank[clsKey] != null && Math.abs(rank[clsKey] - rank[geomKey]) >= 2) {
-      ambiguous = true;
+    // Fallback when resolution hasn't been attached (legacy callers).
+    const pLateClassifier = prediction.lateProbabilityDirect;
+    const hasClassifier = pLateClassifier !== null && pLateClassifier !== undefined;
+    if (hasClassifier) {
+      if (pLateClassifier >= 0.70)      key = "miss";
+      else if (pLateClassifier >= 0.40) key = "tight";
+      else if (pLateClassifier >= 0.20) key = "cautious";
+      else                               key = "ontime";
+    } else {
+      const p50 = prediction.totalETAs?.p50?.getTime();
+      const p75 = prediction.totalETAs?.p75?.getTime();
+      const p90 = prediction.totalETAs?.p90?.getTime();
+      if (p50 && p50 > due.getTime())      key = "miss";
+      else if (p75 && p75 > due.getTime()) key = "tight";
+      else if (p90 && p90 > due.getTime()) key = "cautious";
+      else                                  key = "ontime";
     }
   }
+
+  // Displayed P(late): classifier-calibrated when we have it.
+  let pLate = res ? res.displayedLateRisk
+    : (prediction.lateProbabilityDirect ?? prediction.lateProbabilityQuantile ?? 0);
+  if (key === "overdue") pLate = 1;
 
   const META = {
     overdue:  { label: "Overdue",     tone: "critical",
@@ -1762,8 +1972,11 @@ function unifiedStatus(prediction) {
                 rec: "Escalate — high probability of missing the due date." },
     tight:    { label: "At risk",     tone: "high",
                 rec: "Prioritize — finishing on time is close to a coin flip." },
-    cautious: { label: "Watch",       tone: "medium",
-                rec: "Monitor — elevated chance of slippage." },
+    cautious: { label: res?.branch === "classifier_alert" ? "At risk · weak" : "Watch",
+                tone: "medium",
+                rec: res?.branch === "classifier_alert"
+                  ? "Monitor — weak alert, not a definitive call (small sample)."
+                  : "Monitor — elevated chance of slippage." },
     ontime:   { label: "On track",    tone: "low",     rec: null },
     unknown:  { label: "No due date", tone: "low",     rec: null },
   };
@@ -1772,20 +1985,28 @@ function unifiedStatus(prediction) {
   const slackH = (due && eta) ? (due.getTime() - eta.getTime()) / 3600000 : null;
   const dueInPast = !!(due && due.getTime() < now.getTime());
 
-  // Confidence — qualitative, from band width; downgrade when ambiguous.
-  const bandH = prediction.totalHours
-    ? prediction.totalHours.p90 - prediction.totalHours.p10 : null;
-  let confidence = "medium";
-  if (bandH != null) {
-    if (bandH < 4)       confidence = "high";
-    else if (bandH > 10) confidence = "low";
+  // Confidence — driven by resolver when available.
+  let confidence;
+  if (res) {
+    confidence = res.stateConfidence;
+  } else {
+    const bandH = prediction.totalHours
+      ? prediction.totalHours.p90 - prediction.totalHours.p10 : null;
+    confidence = "medium";
+    if (bandH != null) {
+      if (bandH < 4)       confidence = "high";
+      else if (bandH > 10) confidence = "low";
+    }
   }
-  if (ambiguous && confidence === "high") confidence = "medium";
-  if (ambiguous && confidence === "medium") confidence = "low";
+  const ambiguous = res ? res.branch !== "agreement" : false;
 
-  // One-line sub — the explanation the headline wants to give
+  // One-line sub. Resolver-aware when a branch is set.
   let sub;
-  if (key === "overdue")       sub = `Due ${formatRelativeTime(due, now)}.`;
+  if (key === "overdue")                   sub = `Due ${formatRelativeTime(due, now)}.`;
+  else if (res?.branch === "classifier_alert")
+    sub = `Expected ${formatRelativeTime(eta, now)}. Weak alert — classifier sees risk signals the duration model doesn't.`;
+  else if (res?.branch === "false_alarm")
+    sub = `Expected ${formatRelativeTime(eta, now)}. Quantile flagged it, but the classifier (primary) disagrees.`;
   else if (key === "miss")     sub = `Expected ${formatRelativeTime(eta, now)}; due ${formatRelativeTime(due, now)}. History says this profile lands late.`;
   else if (key === "tight")    sub = `Expected ${formatRelativeTime(eta, now)}. History says this profile is a close call.`;
   else if (key === "cautious") sub = `Expected ${formatRelativeTime(eta, now)}. Slight elevated late risk.`;
@@ -1805,6 +2026,9 @@ function unifiedStatus(prediction) {
     dueInPast,
     confidence,
     ambiguous,
+    branch: res?.branch || null,
+    stateExplanation: prediction.stateExplanation || null,
+    etaExplanation: prediction.etaExplanation || null,
   };
 }
 
@@ -2007,8 +2231,78 @@ function TimelineHero({ prediction }) {
             {status.sub}
           </div>
         </div>
-        <StatusPill status={status} size="lg" />
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <StatusPill status={status} size="lg" />
+          {status.confidence && (
+            <div
+              className="text-[10px] uppercase tracking-[0.14em]"
+              style={{
+                color: status.confidence === "low" ? COLORS.rMedium : COLORS.inkFaint,
+                fontWeight: 500,
+              }}
+            >
+              {status.confidence === "high" ? "High confidence · calibrated" : "Low confidence"}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* v10.4 resolver callout — branch-specific explainer for false_alarm
+          and classifier_alert. Omitted on the agreement branch where there's
+          nothing novel to say. */}
+      {prediction.resolution && prediction.resolution.branch !== "agreement" && (
+        <div
+          className="mb-6 p-3.5 rounded-lg"
+          style={{
+            backgroundColor: prediction.resolution.branch === "classifier_alert"
+              ? `${COLORS.rMediumBg}80`
+              : `${COLORS.cognacGlow}55`,
+            border: `1px solid ${
+              prediction.resolution.branch === "classifier_alert"
+                ? COLORS.rMedium + "44"
+                : COLORS.borderSoft
+            }`,
+          }}
+        >
+          <div
+            className="text-[10px] uppercase tracking-[0.16em] mb-1.5"
+            style={{
+              color: prediction.resolution.branch === "classifier_alert"
+                ? COLORS.rMedium : COLORS.cognac,
+              fontWeight: 600,
+            }}
+          >
+            {prediction.resolution.branch === "classifier_alert"
+              ? "Weak alert · classifier-driven"
+              : "Quantile false alarm · classifier disagrees"}
+          </div>
+          <div className="text-xs leading-relaxed" style={{ color: COLORS.ink }}>
+            {prediction.resolution.stateExplanation}
+          </div>
+          {prediction.resolution.etaExplanation && (
+            <div
+              className="text-[11px] leading-relaxed mt-2 pt-2"
+              style={{
+                color: COLORS.inkSoft,
+                borderTop: `1px dashed ${COLORS.borderSoft}`,
+              }}
+            >
+              <strong style={{ color: COLORS.ink, fontWeight: 600 }}>ETA note · </strong>
+              {prediction.resolution.etaExplanation}
+            </div>
+          )}
+          <div
+            className="text-[10px] uppercase tracking-[0.14em] mt-2 flex items-center gap-2 flex-wrap"
+            style={{ color: COLORS.inkFaint }}
+          >
+            <span>Stage cutoff: {(prediction.resolution.stageCutoff * 100).toFixed(0)}%</span>
+            <span>·</span>
+            <span>Classifier: {(prediction.resolution.signals.classifier.calibrated * 100).toFixed(1)}%</span>
+            <span>·</span>
+            <span>Quantile: {(prediction.resolution.signals.quantile.pLate * 100).toFixed(1)}%</span>
+          </div>
+        </div>
+      )}
 
       {/* Axis container — two rows (stage on top, total on bottom) */}
       <div className="relative" style={{ height: 180 }}>
@@ -3432,6 +3726,27 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
   const completionETA = prediction.completionETA || prediction.expectedCompletionDate;
   const isOverdue = status.dueInPast;
 
+  // v10.4: prefer the resolver-driven display band (bias-corrected for
+  // agreement/false_alarm, asymmetric for classifier_alert).
+  const displayETAs = prediction.etaBandETAs ? {
+    p10: prediction.etaBandETAs.low,
+    p50: prediction.etaBandETAs.p50,
+    p75: new Date(
+      (prediction.etaBandETAs.p50.getTime() + prediction.etaBandETAs.high.getTime()) / 2
+    ),
+    p90: prediction.etaBandETAs.high,
+  } : prediction.totalETAs;
+  const displayHours = prediction.etaBandHours ? {
+    p10: prediction.etaBandHours.low,
+    p50: prediction.etaBandHours.p50,
+    p75: (prediction.etaBandHours.p50 + prediction.etaBandHours.high) / 2,
+    p90: prediction.etaBandHours.high,
+  } : prediction.totalHours;
+
+  const branch = prediction.branch || status.branch;
+  const showConfidenceHedge = status.confidence === "low";
+  const explainer = status.stateExplanation || prediction.stateExplanation;
+
   // Late probability display — more precision for small values
   const latePctRaw = (status.pLate || 0) * 100;
   const latePctDisplay = (() => {
@@ -3461,9 +3776,17 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
       <div className="pl-5 pr-4 py-3.5">
         <div className="flex items-center gap-4">
 
-          {/* STATUS — one pill (160px) */}
+          {/* STATUS — pill + confidence tag (160px) */}
           <div className="w-[160px] flex-shrink-0">
             <StatusPill status={status} size="sm" />
+            {showConfidenceHedge && (
+              <div
+                className="text-[9px] uppercase tracking-[0.14em] mt-1"
+                style={{ color: COLORS.inkFaint, fontWeight: 500 }}
+              >
+                Low confidence
+              </div>
+            )}
           </div>
 
           {/* CASE — number + type + stage (150px) */}
@@ -3517,16 +3840,32 @@ function CompactCaseRow({ prediction, onOpenAnalytics, onOpenHistory }) {
                 </div>
               )}
             </div>
-            {/* Inline mini RangeBar — widths carry the uncertainty shape */}
-            {prediction.totalETAs && (
+            {/* Inline mini RangeBar — widths carry the uncertainty shape.
+                v10.4: fed from displayETAs (bias-corrected or asymmetric). */}
+            {displayETAs && (
               <RangeBar
-                quantiles={prediction.totalHours}
-                etas={prediction.totalETAs}
+                quantiles={displayHours}
+                etas={displayETAs}
                 dueDate={dueDate}
                 now={now}
                 compact={true}
                 showFooter={false}
               />
+            )}
+            {/* v10.4 branch-specific explainer, shown inline for false_alarm
+                and classifier_alert. Keeps the user honest about what the
+                model is saying without pushing a giant banner into the row. */}
+            {explainer && branch && branch !== "agreement" && (
+              <div
+                className="text-[10px] leading-snug mt-1.5 line-clamp-2"
+                style={{
+                  color: branch === "classifier_alert" ? COLORS.rMedium : COLORS.inkFaint,
+                  fontStyle: "italic",
+                }}
+              >
+                {branch === "classifier_alert" ? "Weak alert — " : "Quantile false alarm — "}
+                {explainer.split(".")[0]}.
+              </div>
             )}
           </div>
 
