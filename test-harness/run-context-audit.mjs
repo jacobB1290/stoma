@@ -144,9 +144,98 @@ const buttonHas = (re) => ({
 });
 
 // ---------------------------------------------------------------------------
+// Direct case-lookup tests using a stub that mimics real Supabase rows.
+// These exercise the case_lookup component without going through the
+// pendingClarification machinery — pure regression coverage for the
+// boolean-vs-timestamp bug we fixed in v4.2.1.
+// ---------------------------------------------------------------------------
+import { DBKnowledge } from "../src/qa/AppQAKernel.js";
+
+const FIXTURES = {
+  // Real-world shape that exposed the bug: completed is a boolean true,
+  // there is no completed_at timestamp, and `completed_at` should be
+  // preferred when present.
+  "1202": {
+    id: "uuid-1202",
+    casenumber: "1202",
+    department: "C&B",
+    completed: true,
+    completed_at: null,
+    created_at: "2025-05-27T12:00:00Z",
+    updated_at: "2025-06-04T16:30:00Z",
+    due: "2025-06-04T00:00:00Z",
+    modifiers: ["completed"],
+  },
+  "9999": {
+    id: "uuid-9999",
+    casenumber: "9999",
+    department: "Digital",
+    completed: false,
+    completed_at: null,
+    created_at: "2025-04-01T08:00:00Z",
+    updated_at: "2025-04-15T11:00:00Z",
+    due: "2025-05-01T00:00:00Z",
+    modifiers: ["stage-production", "rush"],
+  },
+  // No id field — exposes the broken History button bug
+  "noid": {
+    casenumber: "5555",
+    department: "C&B",
+    completed: false,
+    due: "2025-12-31T00:00:00Z",
+    modifiers: ["stage-design"],
+  },
+};
+
+DBKnowledge.caseByNumber = async (cn) => FIXTURES[cn] || null;
+
+// ---------------------------------------------------------------------------
 // Conversation test definitions
 // ---------------------------------------------------------------------------
 const CONVERSATIONS = [
+  // ── DB LOOKUP REGRESSIONS ──────────────────────────────────────────────
+  {
+    tag: "db_lookup",
+    id: "completed_boolean_does_not_break_date",
+    description: "Case where `completed` is boolean true should not render '12/31/1969'",
+    turns: [
+      { q: "tell me about case 1202",
+        expect: [
+          contains("1202"),
+          notContains("12/31/1969"),
+          notContains("1969"),
+          contains("completed"),
+        ] },
+    ],
+  },
+  {
+    tag: "db_lookup",
+    id: "history_button_skipped_when_no_id",
+    description: "When data.id is missing the History button should NOT appear",
+    turns: [
+      { q: "tell me about case 5555",
+        expect: [
+          contains("5555"),
+          notContains("[ACTION:History|]"),
+          notContains("MODAL:HISTORY|undefined"),
+        ] },
+    ],
+  },
+  {
+    tag: "db_lookup",
+    id: "active_case_renders_status",
+    description: "Active (non-completed) case should describe its current state, not call it complete",
+    turns: [
+      { q: "tell me about case 9999",
+        expect: [
+          contains("9999"),
+          notContains("completed"),
+          matches(/due|in production|overdue/i, "active state phrasing"),
+        ] },
+    ],
+  },
+
+
 
   // ── YES / NO follow-through ─────────────────────────────────────────────
   {

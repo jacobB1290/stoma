@@ -25,7 +25,7 @@ import { db } from "../services/caseService";
 // CONFIG
 // ============================================================================
 const CONFIG = {
-  VERSION: "4.2.0",
+  VERSION: "4.2.1",
   CACHE_TTL_MS: 5 * 60 * 1000,
   MAX_CONTEXT_TURNS: 30,
   MAX_BUTTONS: 4,
@@ -2542,15 +2542,25 @@ COMPONENTS.register({
     const now = new Date();
     const mods = data.modifiers || [];
 
+    // `data.completed` is a BOOLEAN flag in the schema; the actual timestamp
+    // lives in `completed_at`. Treating the boolean as a Date input is what
+    // produced the "12/31/1969" rendering. We deliberately do NOT fall back
+    // to `updated_at` for completion — that's just the last-edit time and
+    // would falsely flag every recently-touched active case as completed.
+    const isCompleted = !!data.completed;
+    const completedTs = isCompleted ? (data.completed_at || null) : null;
+    const completedDate = completedTs ? new Date(completedTs) : null;
+
     let status;
-    if (data.completed) {
-      const cd = new Date(data.completed);
-      if (due && cd > due) {
-        const h = (cd - due) / 3600000;
+    if (isCompleted) {
+      if (completedDate && due && completedDate > due) {
+        const h = (completedDate - due) / 3600000;
         const when = h > 24 ? `${Math.round(h / 24)}d` : `${Math.round(h)}h`;
-        status = `completed ${U.relativeTime(data.completed)}, ${when} late`;
+        status = `completed ${U.relativeTime(completedTs)}, ${when} late`;
+      } else if (completedDate) {
+        status = `completed ${U.relativeTime(completedTs)}, on time`;
       } else {
-        status = `completed ${U.relativeTime(data.completed)}, on time`;
+        status = "marked completed (no completion timestamp on record)";
       }
     } else if (data.archived) {
       status = "archived";
@@ -2578,11 +2588,16 @@ COMPONENTS.register({
       due && ["Due", due.toLocaleDateString()],
     ]);
 
-    rb.addButtons([
-      ["History", `[MODAL:HISTORY|${data.id}|${data.casenumber}]`],
-      ["Another case", "Find case"],
-      ["Overview", "How am I doing?"],
-    ]);
+    // Only include the History button if we actually have an ID to attach to
+    // the modal; otherwise the inner [MODAL:HISTORY|undefined|undefined] tag
+    // gets stripped by the UI parser and we render an empty button glyph.
+    const buttons = [];
+    if (data.id && data.casenumber) {
+      buttons.push(["History", `[MODAL:HISTORY|${data.id}|${data.casenumber}]`]);
+    }
+    buttons.push(["Another case", "Find case"]);
+    buttons.push(["Overview", "How am I doing?"]);
+    rb.addButtons(buttons);
     return rb.finalize(ctx.session.turns.length);
   },
 });
