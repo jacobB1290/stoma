@@ -25,7 +25,7 @@ import { db } from "../services/caseService";
 // CONFIG
 // ============================================================================
 const CONFIG = {
-  VERSION: "4.0.0",
+  VERSION: "4.1.0",
   CACHE_TTL_MS: 5 * 60 * 1000,
   MAX_CONTEXT_TURNS: 30,
   MAX_BUTTONS: 4,
@@ -281,7 +281,7 @@ const CONCEPTS = buildConcepts({
   STATUS: ["status", "overview", "update", "doing", "going", "report"],
 
   // Improvement
-  IMPROVE: ["improve", "better", "boost", "raise", "increase", "enhance", "lift", "gain"],
+  IMPROVE: ["improve", "better", "boost", "raise", "increase", "enhance", "lift", "gain", "fix", "solve", "address", "tackle", "resolve"],
   RECOMMEND: ["recommend", "suggest", "advice", "tip", "advise", "should"],
 
   // Problems
@@ -324,6 +324,14 @@ const CONCEPTS = buildConcepts({
   // Help / greeter
   GREET: ["hi", "hello", "hey", "sup", "greetings", "yo", "howdy"],
   HELP: ["help", "assist", "guide", "capability", "capable"],
+
+  // Capability extensions (v4.1)
+  TYPE_COMPARE: ["compare", "comparison", "versus", "vs", "between"],
+  CASE_TYPE: ["bbs", "flex", "general", "type", "kind"],
+  BUFFER: ["buffer", "handoff", "compliance", "transition"],
+  RUSH: ["rush", "priority", "urgent"],
+  QUALITY: ["confidence", "reliable", "reliability", "trust", "trustworthy", "sample"],
+  BREAKDOWN: ["breakdown", "split", "by", "per"],
 });
 
 function matchConcept(n, concept) {
@@ -762,9 +770,13 @@ class KernelContext {
     if (!this.session.turns.length) return Infinity;
     return this.session.turns.length;  // index distance, not time
   }
-  pickVariation(options) {
-    const i = this.session.variationIdx++ % options.length;
-    return options[i];
+  pickVariation(options, bucket = "_global") {
+    if (!this.session.variationBuckets) this.session.variationBuckets = {};
+    const idx = this.session.variationBuckets[bucket] || 0;
+    this.session.variationBuckets[bucket] = idx + 1;
+    // Keep global index advancing too for any callers passing none
+    this.session.variationIdx++;
+    return options[idx % options.length];
   }
 
   init() {
@@ -1122,6 +1134,7 @@ const ALL_DOMAIN_CONCEPTS = [
   "SCORE", "EFFICIENCY", "VELOCITY", "IMPROVE", "PROBLEM", "RISK",
   "LATE", "EARLY", "TREND", "CHANGE", "BOTTLENECK", "WHATIF",
   "CASE", "BRIEF", "SCHEMA", "DEBUG", "EXPLAIN",
+  "TYPE_COMPARE", "CASE_TYPE", "BUFFER", "RUSH", "QUALITY",
 ];
 
 // Words that are clearly domain-relevant even when concept sets don't fire
@@ -1205,17 +1218,21 @@ function buildOutOfScopeRedirect(ctx, question, n) {
 
   // Pivot using whatever injected data we have.
   if (score != null && critCount > 0) {
-    rb.paragraph(
-      `Your score is ${U.formatNumber(score)} and ${critCount} case${critCount === 1 ? "" : "s"} ${critCount === 1 ? "is" : "are"} critical right now — want to look at those?`
-    );
+    rb.paragraph(ctx.pickVariation([
+      `What I can offer: your score's at ${U.formatNumber(score)} and ${critCount} case${critCount === 1 ? "" : "s"} ${critCount === 1 ? "is" : "are"} sitting at critical risk. Want to look at those?`,
+      `For something I can actually answer: you're at ${U.formatNumber(score)} with ${critCount} critical case${critCount === 1 ? "" : "s"} on the board — happy to dig into either.`,
+      `If you want, I can flip to something useful — your score is ${U.formatNumber(score)} and there ${critCount === 1 ? "is" : "are"} ${critCount} critical case${critCount === 1 ? "" : "s"} I'd be looking at first.`,
+    ], "oos_pivot_crit"));
     rb.addButtons([
       ["Show critical cases", "Which cases are critical?"],
       ["Why is my score where it is?", "Explain my score"],
     ]);
   } else if (score != null) {
-    rb.paragraph(
-      `Your score is ${U.formatNumber(score)}. I can break that down, flag risks, or walk through what's slowing things down.`
-    );
+    rb.paragraph(ctx.pickVariation([
+      `Where I can help: your score is ${U.formatNumber(score)}. I can break that down, flag risks, or walk through what's slowing things down.`,
+      `For something useful — you're sitting at ${U.formatNumber(score)}. Want me to explain that, surface what's at risk, or look for bottlenecks?`,
+      `I can pivot to something concrete: ${U.formatNumber(score)} score right now, and I can tell you why, what's risky, or where the slowdowns are.`,
+    ], "oos_pivot_score"));
     rb.addButtons([
       ["Explain my score", "Why is my score there?"],
       ["What needs attention?", "What needs attention?"],
@@ -1248,6 +1265,64 @@ function noDataResponse(ctx, topic = "performance") {
 }
 
 // ============================================================================
+// CONVERSATIONAL HELPERS (v4.1)
+// ----------------------------------------------------------------------------
+// Small phrase bank + helpers so component handlers can produce varied,
+// LLM-sounding prose without each one re-rolling its own variants.
+// pickVariation() on the context cycles deterministically through options.
+// ============================================================================
+const PHRASES = {
+  scoreLead: (s, rating) => [
+    `You're sitting at ${s} right now — ${rating} territory.`,
+    `Score's ${s}, which lands you in ${rating} range.`,
+    `Right now you're at ${s} (${rating}).`,
+    `Currently at ${s} — call that ${rating}.`,
+  ],
+  observation: (s) => [
+    `Looking at this, ${s}`,
+    `From what I can see, ${s}`,
+    `The thing that stands out: ${s}`,
+    `Honestly, ${s}`,
+    `Here's the picture: ${s}`,
+  ],
+  recommendOpener: () => [
+    "If I had to pick one thing to focus on,",
+    "The biggest lever you've got right now is",
+    "Where you'd get the most movement is",
+    "Here's where I'd start:",
+  ],
+  goodNews: () => [
+    "Good news —",
+    "On the upside,",
+    "The encouraging part:",
+  ],
+  badNews: () => [
+    "The catch is,",
+    "Less great:",
+    "Worth flagging:",
+    "On the other side,",
+  ],
+  ackOk: () => [
+    "Looking solid overall.",
+    "Honestly, things are in good shape.",
+    "Nothing alarming — you're holding steady.",
+  ],
+  pivotQuestion: () => [
+    "Want me to dig deeper?",
+    "Want to look at the cases driving this?",
+    "Should we run a what-if to see the impact?",
+    "Want the breakdown?",
+  ],
+};
+
+// Pick a variation via the context's deterministic round-robin. Pass a
+// `bucket` (usually the component id) so that two components asking for
+// "an opener" don't drain each other's rotation.
+function vary(ctx, options, bucket) {
+  return ctx.pickVariation(options, bucket);
+}
+
+// ============================================================================
 // COMPONENTS
 // ============================================================================
 
@@ -1275,15 +1350,28 @@ COMPONENTS.register({
     const q = (question || "").toLowerCase().trim();
     const hour = new Date().getHours();
     const eff = ctx.getEfficiency();
-    const greeting = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
+    const tod = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
 
     if (q === "" || /^(hi|hello|hey|sup|greetings|yo|howdy)\s*[!.?]*$/i.test(q)) {
-      rb.say(`${greeting}.`);
+      const opener = vary(ctx, [
+        `Hey — good ${tod}.`,
+        `Hi there. Good ${tod}.`,
+        `Morning. Well, ${tod} technically.`,
+        `Hey. ${U.titleCase(tod)} check-in?`,
+      ]);
+      rb.say(opener);
       if (eff) {
         const score = eff.score || 0;
-        rb.say(` Score is ${U.formatPercent(score)} (${U.scoreToRating(score)}).`);
+        const rating = U.scoreToRating(score);
+        rb.say(` You're sitting at ${U.formatPercent(score)} right now, which puts you in ${rating} range.`);
+      } else {
+        rb.say(" I don't see any data loaded yet, but I'm ready when you are.");
       }
-      rb.paragraph("What do you want to check?");
+      rb.paragraph(vary(ctx, [
+        "What do you want to dig into?",
+        "Where would you like to start?",
+        "Anything you want me to pull up?",
+      ]));
       rb.addButtons([
         ["How am I doing?", "How am I doing?"],
         ["What needs attention?", "What needs attention?"],
@@ -1294,8 +1382,12 @@ COMPONENTS.register({
     }
 
     if (/help/.test(q) || /what can you/i.test(q)) {
-      rb.say("I can answer questions about your performance, cases, and workflow.");
-      rb.paragraph("Try: score check, at-risk cases, bottlenecks, or a what-if scenario.");
+      rb.say(vary(ctx, [
+        "Honestly, quite a lot — I sit on top of your case data and the efficiency engine, so I can answer most things about how the floor is doing.",
+        "I'm wired into your case and performance data, so anything along those lines is fair game.",
+        "I can see your cases, scoring, risk predictions, and stage stats — ask away.",
+      ]));
+      rb.paragraph("A few examples of things to ask: a score check, what's currently at risk, where the bottlenecks are, or a what-if scenario like \"what happens if 3 cases go late?\". I'll also break down case types, rush load, or buffer compliance if you want.");
       rb.addButtons([
         ["Check score", "What's my score?"],
         ["Problems", "What needs attention?"],
@@ -1305,8 +1397,15 @@ COMPONENTS.register({
       return rb.finalize(ctx.session.turns.length);
     }
 
-    // Fallback for nothing-matched
-    rb.say("Not sure what you're asking. Pick one of these?");
+    // Fallback for nothing-matched — give a useful nudge plus the score so the
+    // user always gets something actionable back, never just buttons.
+    const eff2 = ctx.getEfficiency();
+    const scoreBit = eff2 ? ` For context, you're currently at ${U.formatPercent(eff2.score || 0)} overall.` : "";
+    rb.say(vary(ctx, [
+      `Honestly, I'm not sure how you want me to take that — want to point me at one of these starting points?${scoreBit}`,
+      `Hmm, that one's a bit ambiguous from where I'm sitting. Mind picking an angle so I can dig into the right thing?${scoreBit}`,
+      `I can take that a few different ways. Pick one of these and I'll go deeper.${scoreBit}`,
+    ], "greeter_fallback"));
     rb.addButtons([
       ["Performance", "How am I doing?"],
       ["Problems", "What needs attention?"],
@@ -1360,25 +1459,37 @@ COMPONENTS.register({
     const stageCount = ctx.getStageCount();
 
     const rating = U.scoreToRating(score);
-    const header = `${U.formatPercent(score)} — ${rating}` + (stage ? ` (${U.titleCase(stage)})` : "");
-    rb.say(header);
+    const stageBit = stage ? ` for ${U.titleCase(stage)}` : "";
+    rb.say(vary(ctx, [
+      `Right now${stageBit} you're at ${U.formatPercent(score)} — call that ${rating}.`,
+      `You're sitting at ${U.formatPercent(score)}${stageBit}, which lands in ${rating} range.`,
+      `Currently ${U.formatPercent(score)}${stageBit}. That's ${rating} territory.`,
+      `Score's ${U.formatPercent(score)}${stageBit} — ${rating} overall.`,
+      `So${stageBit ? stageBit + "," : ""} the score's running ${U.formatPercent(score)}, which I'd call ${rating}.`,
+      `Honestly, ${U.formatPercent(score)}${stageBit} puts you in ${rating} shape.`,
+      `From what I can see, you're at ${U.formatPercent(score)}${stageBit} — solidly ${rating}.`,
+      `Looking at this, ${U.formatPercent(score)}${stageBit} is where you sit, and that's ${rating}.`,
+    ], "main_opener"));
 
-    rb.kv([
-      ["On-time", U.formatPercent(onTime)],
-      ["Velocity", U.formatPercent(velocity)],
-      stageCount > 0 && ["Active cases", stageCount],
-      critical > 0 && ["At critical risk", critical],
-    ]);
+    // Inline metric prose instead of a KV dump
+    const onTimeWord = onTime >= 85 ? "solid" : onTime >= 75 ? "a bit below target" : "the weak spot";
+    const velWord = velocity >= 80 ? "good" : velocity >= 65 ? "okay" : "lagging";
+    rb.say(` On-time delivery is ${U.formatPercent(onTime)} (${onTimeWord}) and velocity sits at ${U.formatPercent(velocity)} (${velWord}).`);
+    if (stageCount > 0) {
+      rb.say(` You've got ${stageCount} active cases in the queue${critical > 0 ? `, and ${critical} of them ${critical === 1 ? "is" : "are"} at critical risk.` : "."}`);
+    } else if (critical > 0) {
+      rb.say(` ${critical} case${critical !== 1 ? "s" : ""} ${critical === 1 ? "is" : "are"} at critical risk.`);
+    }
 
-    // One-line diagnosis
+    // Single diagnostic line
     if (critical > 0) {
-      rb.paragraph(`${critical} case${critical !== 1 ? "s" : ""} need attention now.`);
+      rb.paragraph(`The thing I'd jump on first is the critical cases — each one that goes late costs roughly ${CONFIG.SCORING.LATE_PENALTY_PER_CASE} pts.`);
     } else if (onTime < 70) {
-      rb.paragraph("On-time delivery is the main drag.");
+      rb.paragraph("Honestly, on-time delivery is the main drag — that's where the points are leaking.");
     } else if (velocity < 65) {
-      rb.paragraph("Velocity is low — likely a bottleneck somewhere.");
+      rb.paragraph("Velocity's low enough that there's probably a bottleneck somewhere worth tracking down.");
     } else if (score >= 85) {
-      rb.paragraph("Looking solid.");
+      rb.paragraph(vary(ctx, PHRASES.ackOk()));
     }
 
     rb.addButtons([
@@ -1419,32 +1530,39 @@ COMPONENTS.register({
     const critical = eff.predictions?.urgent?.length || 0;
     const late = eff.onTimeDelivery?.caseInsights?.casesWithPenalties || [];
 
-    rb.say(`Current score: ${U.formatPercent(score)}. Biggest levers:`);
+    rb.say(vary(ctx, PHRASES.recommendOpener()));
 
     const recs = [];
     if (critical > 0) {
-      recs.push([1, `Address ${critical} critical-risk case${critical !== 1 ? "s" : ""} (each late = -${CONFIG.SCORING.LATE_PENALTY_PER_CASE} pts)`]);
+      recs.push([1, `keep the ${critical} critical-risk case${critical !== 1 ? "s" : ""} from going late — each one that slips costs about ${CONFIG.SCORING.LATE_PENALTY_PER_CASE} pts`]);
     }
     if (onTime < CONFIG.SCORING.ON_TIME_TARGET) {
       const gap = CONFIG.SCORING.ON_TIME_TARGET - onTime;
       const gain = (gap * CONFIG.SCORING.ON_TIME_WEIGHT).toFixed(1);
-      recs.push([onTime < 70 ? 1 : 2, `Raise on-time from ${U.formatPercent(onTime)} → ${CONFIG.SCORING.ON_TIME_TARGET}% (+${gain} pts)`]);
+      recs.push([onTime < 70 ? 1 : 2, `lift on-time from ${U.formatPercent(onTime)} up toward ${CONFIG.SCORING.ON_TIME_TARGET}% — that's worth roughly +${gain} pts`]);
     }
     if (velocity < CONFIG.SCORING.VELOCITY_TARGET) {
       const gap = CONFIG.SCORING.VELOCITY_TARGET - velocity;
       const gain = (gap * CONFIG.SCORING.VELOCITY_WEIGHT).toFixed(1);
-      recs.push([velocity < 65 ? 2 : 3, `Improve velocity from ${U.formatPercent(velocity)} → ${CONFIG.SCORING.VELOCITY_TARGET}% (+${gain} pts)`]);
+      recs.push([velocity < 65 ? 2 : 3, `pick up velocity from ${U.formatPercent(velocity)} toward ${CONFIG.SCORING.VELOCITY_TARGET}% (+${gain} pts on the table)`]);
     }
     if (score >= 85 && recs.length === 0) {
-      recs.push([3, `Finish cases early for up to +${CONFIG.SCORING.MAX_EARLY_BONUS} pts per case`]);
+      recs.push([3, `finish cases early — the early-completion bonus is worth up to +${CONFIG.SCORING.MAX_EARLY_BONUS} pts per case`]);
     }
 
     recs.sort((a, b) => a[0] - b[0]);
-    rb.kv(recs.map(([p, t]) => [`P${p}`, t]));
+    if (recs.length === 1) {
+      rb.say(` ${recs[0][1]}.`);
+    } else if (recs.length === 2) {
+      rb.say(` ${recs[0][1]}. After that, ${recs[1][1]}.`);
+    } else {
+      rb.say(` ${recs[0][1]}.`);
+      rb.paragraph(`Once that's settled, the next thing I'd look at is ${recs[1][1]}. And further out, ${recs[2][1]}.`);
+    }
 
     if (late.length > 0) {
       const lost = (late.length * CONFIG.SCORING.LATE_PENALTY_PER_CASE).toFixed(1);
-      rb.paragraph(`${late.length} already-late case${late.length !== 1 ? "s have" : " has"} cost ${lost} pts this period. Investigate why.`);
+      rb.paragraph(`Worth flagging: ${late.length} already-late case${late.length !== 1 ? "s have" : " has"} cost you about ${lost} pts this period — looking into the why might prevent the next batch.`);
     }
 
     rb.addButtons([
@@ -1513,7 +1631,11 @@ COMPONENTS.register({
     }
 
     if (problems.length === 0) {
-      rb.say(`Nothing urgent. Score ${U.formatPercent(score)}, on-time ${U.formatPercent(onTime)}, velocity ${U.formatPercent(velocity)}.`);
+      rb.say(vary(ctx, [
+        `Honestly, nothing urgent right now — score's ${U.formatPercent(score)}, on-time at ${U.formatPercent(onTime)}, velocity ${U.formatPercent(velocity)}. You're holding steady.`,
+        `Good news — I don't see anything critical. The numbers are solid: ${U.formatPercent(score)} score, ${U.formatPercent(onTime)} on-time, ${U.formatPercent(velocity)} velocity.`,
+        `Right now there's nothing screaming for attention. Score sits at ${U.formatPercent(score)}, on-time ${U.formatPercent(onTime)}, velocity ${U.formatPercent(velocity)} — all within reasonable range.`,
+      ]));
       rb.addButtons([
         ["Check status", "How am I doing?"],
         ["Improve further", "How can I improve further?"],
@@ -1522,11 +1644,20 @@ COMPONENTS.register({
     }
 
     problems.sort((a, b) => a.sev - b.sev);
-    rb.say(`${problems.length} issue${problems.length !== 1 ? "s" : ""} in order of severity:`);
+    rb.say(vary(ctx, [
+      `So there ${problems.length === 1 ? "is" : "are"} ${problems.length} thing${problems.length === 1 ? "" : "s"} I'd flag right now, ranked from most urgent down.`,
+      `Looking at this, ${problems.length} issue${problems.length === 1 ? " stands" : "s stand"} out — pressing items first.`,
+      `Here's what's currently tugging at the score, severity-ranked from worst to mildest.`,
+    ], "problem_finder_lead"));
     rb.kv(problems.map((p) => [
-      `P${p.sev}`,
-      p.detail ? `${p.text} (${p.detail})` : p.text,
+      p.sev === 1 ? "Most urgent" : p.sev === 2 ? "Watch closely" : "Lower priority",
+      p.detail ? `${p.text} — specifically ${p.detail}` : p.text,
     ]));
+    rb.paragraph(vary(ctx, [
+      "If you want, I can walk through how to chip away at any of these one by one.",
+      "Pick one and I'll dig in further — happy to break down the why or run a what-if.",
+      "Worth noting: the most urgent ones tend to compound, so if you only have time for one, start at the top.",
+    ], "problem_finder_close"));
 
     rb.addButtons([
       critical.length > 0 && ["Critical cases", "Show me critical cases"],
@@ -1571,12 +1702,19 @@ COMPONENTS.register({
       (p.riskLevel === "medium" || (p.lateProbability > 0.3 && p.lateProbability <= 0.5)));
     const low = all.length - crit.length - high.length - med.length;
 
-    rb.say(`${stageName}: ${all.length} active, ${crit.length} critical, ${high.length} high, ${med.length} moderate, ${low} low.`);
+    rb.say(vary(ctx, [
+      `Across ${stageName}, ${all.length} cases are in flight — and the risk picture breaks down to ${crit.length} critical, ${high.length} high, ${med.length} moderate, and ${low} comfortably low.`,
+      `In ${stageName} you've got ${all.length} active cases. Of those, ${crit.length} are critical, ${high.length} high-risk, ${med.length} moderate, and ${low} low.`,
+      `${stageName} is carrying ${all.length} cases right now. Critical: ${crit.length}. High: ${high.length}. Moderate: ${med.length}. Low: ${low}.`,
+    ]));
 
     if (crit.length === 0 && high.length === 0) {
       rb.paragraph(med.length > 0
-        ? `${med.length} to keep an eye on, nothing urgent.`
-        : "All on track.");
+        ? `Honestly, nothing's screaming yet — there are ${med.length} I'd keep half an eye on, but nothing urgent.`
+        : vary(ctx, [
+            "Honestly, everything looks on track right now.",
+            "Right now, all of them look like they'll land on time.",
+          ]));
       rb.addButtons([
         ["Overview", "How am I doing?"],
         ["Scenario", "What if 3 cases go late?"],
@@ -1585,22 +1723,29 @@ COMPONENTS.register({
     }
 
     const list = (crit.length ? crit : high).slice(0, 5);
+    rb.paragraph(vary(ctx, [
+      "Here's where I'd point your attention first:",
+      "These are the ones that need eyes today:",
+      "The cases driving most of the risk:",
+    ]));
     rb.kv(list.map((c) => {
       const prob = (c.lateProbability * 100).toFixed(0);
       const du = c.daysUntilDue;
       let when;
       if (du == null) when = "due date unknown";
-      else if (du < 0) when = `${Math.abs(du).toFixed(1)}d overdue`;
+      else if (du < 0) when = `${Math.abs(du).toFixed(1)}d overdue already`;
       else if (du < 1) when = "due today";
       else if (du < 2) when = "due tomorrow";
-      else when = `due in ${du.toFixed(1)}d`;
-      return [`Case ${c.caseNumber}`, `${prob}% late, ${when}`];
+      else when = `due in about ${du.toFixed(1)}d`;
+      return [`Case ${c.caseNumber}`, `${prob}% chance it goes late, ${when}`];
     }));
 
     list.forEach((c) => ctx.recordMentionedCase(c.caseNumber));
 
     if (crit.length > 5) {
-      rb.paragraph(`+${crit.length - 5} more critical. See full risk report.`);
+      rb.paragraph(`There are also ${crit.length - 5} more critical cases beyond these — the full risk report has the rest.`);
+    } else {
+      rb.paragraph("Want to talk through what's making any of them risky?");
     }
 
     rb.addButtons([
@@ -1645,14 +1790,11 @@ COMPONENTS.register({
     const W = CONFIG.SCORING;
 
     if (!eff) {
-      rb.say("How scoring works, without your data:");
-      rb.kv([
-        ["On-time rate weight", `${W.ON_TIME_WEIGHT * 100}%`],
-        ["Velocity weight", `${W.VELOCITY_WEIGHT * 100}%`],
-        ["Per-late penalty", `-${W.LATE_PENALTY_PER_CASE} pts`],
-        ["Early-completion bonus", `up to +${W.MAX_EARLY_BONUS} pts`],
-      ]);
-      rb.paragraph("Select a stage to see your actual breakdown.");
+      rb.say(vary(ctx, [
+        "Without your data loaded I can only walk through how the math works in general.",
+        "Happy to explain the formula even without numbers in front of me.",
+      ]));
+      rb.paragraph(`The score is roughly ${W.ON_TIME_WEIGHT * 100}% on-time rate plus ${W.VELOCITY_WEIGHT * 100}% velocity, then each late case knocks off ${W.LATE_PENALTY_PER_CASE} pts and finishing early can earn you up to ${W.MAX_EARLY_BONUS} pts. Pick a stage from the dropdown and I'll plug in your actual numbers.`);
       rb.addButtons([["Overview", "How am I doing?"]]);
       return rb.finalize(ctx.session.turns.length);
     }
@@ -1667,20 +1809,20 @@ COMPONENTS.register({
     const velComp = velocity * W.VELOCITY_WEIGHT;
     const penalty = late.length * W.LATE_PENALTY_PER_CASE;
 
-    rb.say(`Score breakdown: ${U.formatPercent(score)}`);
-    rb.kv([
-      [`On-time × ${W.ON_TIME_WEIGHT}`, `${U.formatPercent(onTime)} → +${otComp.toFixed(1)}`],
-      [`Velocity × ${W.VELOCITY_WEIGHT}`, `${U.formatPercent(velocity)} → +${velComp.toFixed(1)}`],
-      late.length > 0 && [`Late penalties (${late.length})`, `-${penalty.toFixed(1)}`],
-      ["Base total", `${(otComp + velComp - penalty).toFixed(1)}`],
-    ]);
+    rb.say(vary(ctx, [
+      `Right now the score works out to ${U.formatPercent(score)}, and here's how it gets there.`,
+      `So ${U.formatPercent(score)} comes out of a few moving parts — let me lay them out.`,
+      `Your ${U.formatPercent(score)} is the sum of a couple of weighted pieces. Here's the math:`,
+    ]));
+    rb.paragraph(`On-time rate is ${U.formatPercent(onTime)}, weighted at ${W.ON_TIME_WEIGHT}, so it contributes about +${otComp.toFixed(1)}. Velocity sits at ${U.formatPercent(velocity)} and at ${W.VELOCITY_WEIGHT} weight pulls in another +${velComp.toFixed(1)}.${late.length > 0 ? ` On the other side, ${late.length} late case${late.length === 1 ? "" : "s"} cost ${penalty.toFixed(1)} pts in penalties.` : ""}`);
 
     if (late.length > 0 && late.length <= 5) {
-      rb.paragraph(`Late cases: ${late.map((c) => c.caseNumber).join(", ")}.`);
+      rb.paragraph(`Specifically the late ones were: ${late.map((c) => c.caseNumber).join(", ")}.`);
     }
     if (prev != null && Math.abs(score - prev) > 0.5) {
       const d = score - prev;
-      rb.paragraph(`${d > 0 ? "↑" : "↓"} ${Math.abs(d).toFixed(1)} pts since last check.`);
+      const dir = d > 0 ? "up" : "down";
+      rb.paragraph(`Worth noting — that's ${dir} ${Math.abs(d).toFixed(1)} pts since last time you checked.`);
     }
 
     rb.addButtons([
@@ -1738,15 +1880,20 @@ COMPONENTS.register({
     );
 
     const sign = proj.scoreDelta >= 0 ? "+" : "";
-    rb.say(`Scenario: ${lateCases ? `${lateCases} late` : ""}${earlyCases ? `${earlyCases} early by ${earlyDays}d` : ""}`);
-    rb.kv([
-      ["Current", U.formatPercent(curr)],
-      ["Projected", U.formatPercent(proj.projectedScore)],
-      ["Delta", `${sign}${proj.scoreDelta.toFixed(1)} pts`],
-      proj.penalties > 0 && ["Penalty", `-${proj.penalties.toFixed(1)}`],
-      proj.bonuses > 0 && ["Bonus", `+${proj.bonuses.toFixed(1)}`],
-      ["New on-time", U.formatPercent(proj.newOnTimeRate)],
-    ]);
+    const scenarioBits = [];
+    if (lateCases) scenarioBits.push(`${lateCases} late case${lateCases === 1 ? "" : "s"}`);
+    if (earlyCases) scenarioBits.push(`${earlyCases} early by ${earlyDays}d`);
+    const dir = proj.scoreDelta >= 0 ? "lift" : "drop";
+    rb.say(vary(ctx, [
+      `So if ${scenarioBits.join(" plus ")} land${(lateCases + earlyCases) === 1 ? "s" : ""}, your score moves from ${U.formatPercent(curr)} to roughly ${U.formatPercent(proj.projectedScore)} — a ${dir} of ${sign}${proj.scoreDelta.toFixed(1)} pts.`,
+      `Walking that scenario through (${scenarioBits.join(" plus ")}): you'd go from ${U.formatPercent(curr)} to about ${U.formatPercent(proj.projectedScore)}, which works out to ${sign}${proj.scoreDelta.toFixed(1)} pts overall.`,
+      `Right now if I plug in ${scenarioBits.join(" plus ")}, the math works out to ${U.formatPercent(proj.projectedScore)} — that's ${sign}${proj.scoreDelta.toFixed(1)} pts off where you are now (${U.formatPercent(curr)}).`,
+    ], "scenario_lead"));
+    const pieces = [];
+    if (proj.penalties > 0) pieces.push(`penalties run ${proj.penalties.toFixed(1)} pts`);
+    if (proj.bonuses > 0) pieces.push(`bonuses pick up ${proj.bonuses.toFixed(1)}`);
+    pieces.push(`new on-time would be about ${U.formatPercent(proj.newOnTimeRate)}`);
+    rb.paragraph(`So under the hood: ${pieces.join(", ")}.`);
 
     rb.addButtons([
       ["5 late", "What if 5 cases go late?"],
@@ -1787,10 +1934,14 @@ COMPONENTS.register({
       weekday: "long", month: "short", day: "numeric",
     });
 
-    rb.say(`Brief — ${dateStr}`);
+    rb.say(vary(ctx, [
+      `Quick brief for ${dateStr}.`,
+      `Here's where things stand on ${dateStr}.`,
+      `Morning rundown for ${dateStr}:`,
+    ]));
 
     if (!eff) {
-      rb.paragraph("No stage selected. Pick one from the dropdown for metrics.");
+      rb.paragraph("I don't have a stage selected, so I can't pull metrics yet — pick one from the dropdown and I'll give you the proper rundown.");
       rb.addButtons([["What can you do?", "What can you help with?"]]);
       return rb.finalize(ctx.session.turns.length);
     }
@@ -1800,17 +1951,14 @@ COMPONENTS.register({
     const crit = preds?.urgent?.length || 0;
     const high = preds?.high?.length || 0;
 
-    rb.kv([
-      ["Score", `${U.formatPercent(score)} (${U.scoreToRating(score)})`],
-      ["On-time", U.formatPercent(onTime)],
-      stage && ["Stage", `${U.titleCase(stage)} (${stageCount} active)`],
-      crit > 0 && ["Critical", crit],
-      !crit && high > 0 && ["High risk", high],
-    ]);
+    rb.paragraph(`You're at ${U.formatPercent(score)} (${U.scoreToRating(score)}) with on-time running ${U.formatPercent(onTime)}.${stage ? ` ${U.titleCase(stage)} stage is carrying ${stageCount} active cases right now.` : ""}${crit > 0 ? ` Of those, ${crit} ${crit === 1 ? "is" : "are"} flagged critical.` : (high > 0 ? ` ${high} ${high === 1 ? "is" : "are"} sitting in the high-risk bucket.` : "")}`);
 
-    if (crit > 0) rb.paragraph(`Top priority: ${crit} critical case${crit !== 1 ? "s" : ""}.`);
-    else if (score < 70) rb.paragraph("Focus on preventing late deliveries today.");
-    else if (score >= 85) rb.paragraph("Solid. Early completions can pick up bonus points.");
+    if (crit > 0) rb.paragraph(vary(ctx, [
+      `Top of your list today: those ${crit} critical case${crit !== 1 ? "s" : ""}. Anything else can wait.`,
+      `If you do one thing today, knock down the ${crit} critical case${crit !== 1 ? "s" : ""}.`,
+    ]));
+    else if (score < 70) rb.paragraph("If I had to pick one thing to focus on today, it would be preventing any more late deliveries.");
+    else if (score >= 85) rb.paragraph("Honestly, you're in good shape — finishing a few cases early today could pick up some bonus points.");
 
     rb.addButtons([
       crit > 0 && ["Critical cases", "Show me critical cases"],
@@ -1958,8 +2106,12 @@ COMPONENTS.register({
         if ((slowData.velocityScore || 100) < 70) {
           found = true;
           const gap = (fastData.velocityScore || 0) - (slowData.velocityScore || 0);
-          rb.say(`${U.titleCase(slow)} cases are the choke point (${U.formatPercent(slowData.velocityScore || 0)} vs ${U.formatPercent(fastData.velocityScore || 0)} for ${U.titleCase(fast)}).`);
-          if (gap > 20) rb.paragraph(`Gap of ${gap.toFixed(0)} pts — worth investigating.`);
+          rb.say(vary(ctx, [
+            `Looking at this, ${U.titleCase(slow)} cases are the choke point — they're running at ${U.formatPercent(slowData.velocityScore || 0)} velocity while ${U.titleCase(fast)} is hitting ${U.formatPercent(fastData.velocityScore || 0)}.`,
+            `The drag is coming from ${U.titleCase(slow)} cases. They're at ${U.formatPercent(slowData.velocityScore || 0)} compared to ${U.titleCase(fast)} at ${U.formatPercent(fastData.velocityScore || 0)}.`,
+            `So ${U.titleCase(slow)} jobs are where things are slowing down — ${U.formatPercent(slowData.velocityScore || 0)} velocity vs ${U.formatPercent(fastData.velocityScore || 0)} for ${U.titleCase(fast)}.`,
+          ]));
+          if (gap > 20) rb.paragraph(`A ${gap.toFixed(0)}-point gap is big enough that it's worth digging into the why.`);
         }
       }
     }
@@ -1973,7 +2125,7 @@ COMPONENTS.register({
         const avg = U.formatDuration(s.mean || 0);
         if (s.mean > (stageStats.averageTime || 0) * 1.3) {
           found = true;
-          rb.say(`${U.titleCase(type)} cases take ${avg} (vs ${U.formatDuration(stageStats.averageTime || 0)} avg).`);
+          rb.say(`${U.titleCase(type)} cases are taking the longest right now — averaging ${avg} versus the overall stage average of ${U.formatDuration(stageStats.averageTime || 0)}.`);
         }
       }
     }
@@ -1981,10 +2133,13 @@ COMPONENTS.register({
     const velocity = eff?.throughput?.overall || 0;
     if (velocity < 70 && !found) {
       found = true;
-      rb.say(`Overall velocity ${U.formatPercent(velocity)} — looks systemic, not one case type. Check for handoff delays.`);
+      rb.say(`Overall velocity is sitting at ${U.formatPercent(velocity)}, and the slowdown looks systemic rather than tied to one case type — I'd check for handoff delays between stages.`);
     }
 
-    if (!found) rb.say("No obvious bottleneck. Case types are moving at similar rates.");
+    if (!found) rb.say(vary(ctx, [
+      "Honestly, I don't see an obvious bottleneck — case types are moving at fairly similar rates right now.",
+      "Right now, nothing stands out as a clear choke point. The case types are pacing within a normal spread.",
+    ]));
 
     rb.addButtons([
       ["Overview", "How am I doing?"],
@@ -2025,21 +2180,29 @@ COMPONENTS.register({
 
     if (prev != null && Math.abs(score - prev) > 0.5) {
       const d = score - prev;
-      rb.say(`${d > 0 ? "↑" : "↓"} ${Math.abs(d).toFixed(1)} pts since last check.`);
+      const dir = d > 0 ? "up" : "down";
+      rb.say(vary(ctx, [
+        `So you're ${dir} ${Math.abs(d).toFixed(1)} pts since last check — ${d > 0 ? "things are moving in the right direction" : "the slide is something to watch"}.`,
+        `Right now you're ${dir} about ${Math.abs(d).toFixed(1)} pts compared to the last time we looked.`,
+      ]));
     } else {
-      rb.say("Score stable. Need more data points to see a real trend.");
+      rb.say(vary(ctx, [
+        "Score is basically holding steady — I'd want a few more data points before calling it a real trend.",
+        "Honestly, things are stable enough that I can't yet say which way it's heading.",
+        "The score isn't really moving — I'll need more readings to spot a true direction.",
+      ]));
     }
 
     // Cross-metric pattern
     if (onTime < 80 && velocity >= 75) {
-      rb.paragraph("Velocity solid, on-time lagging → cases sit too long before pickup, or due dates are too tight.");
+      rb.paragraph("Looking at the pattern: velocity is solid but on-time is lagging, which usually means cases are sitting too long before pickup, or due dates are too tight.");
     } else if (velocity < 70 && onTime >= 80) {
-      rb.paragraph("Meeting deadlines but slow → probably buffer in the dates. Safe but not ideal.");
+      rb.paragraph("Worth noting — you're meeting deadlines but the throughput is slow. Probably means there's buffer baked into the due dates. Safe, but not ideal.");
     } else if (onTime < 75 && velocity < 70) {
-      rb.paragraph("Both below target — systemic, not isolated.");
+      rb.paragraph("Both metrics are under target right now, which says the issue is systemic rather than isolated to one type of work.");
     }
 
-    rb.paragraph("Open the dashboard for period-over-period charts.");
+    rb.paragraph("If you want period-over-period charts, the dashboard has those laid out properly.");
     rb.addButtons([
       ["Overview", "How am I doing?"],
       ["Find issues", "What needs attention?"],
@@ -2103,11 +2266,339 @@ COMPONENTS.register({
     const rb = new ResponseBuilder();
     const schema = await DBKnowledge.schemaOverview();
     const tables = Object.keys(schema.tables || {});
-    rb.say(`${tables.length} main tables: ${tables.join(", ")}.`);
-    rb.paragraph("`cases` holds work items, `case_history` is the audit trail, `active_devices` tracks sessions.");
+    rb.say(vary(ctx, [
+      `Right now there are ${tables.length} main tables in play: ${tables.join(", ")}.`,
+      `The database has ${tables.length} core tables — ${tables.join(", ")}.`,
+      `So at the schema level you've got ${tables.length} tables: ${tables.join(", ")}.`,
+    ]));
+    rb.paragraph("Quick map: `cases` holds the work items themselves, `case_history` is the audit trail of every change, and `active_devices` tracks who's currently online.");
     rb.addButtons([
       ["Overview", "How am I doing?"],
       ["What can you do?", "What can you help with?"],
+    ]);
+    return rb.finalize(ctx.session.turns.length);
+  },
+});
+
+// ----------------------------------------------------------------------------
+// CASE TYPE COMPARATOR (v4.1)
+// ----------------------------------------------------------------------------
+COMPONENTS.register({
+  id: "case_type_comparator",
+  priority: 76,
+  category: "ANALYTICS",
+  requires: ["CASE_TYPE", "TYPE_COMPARE", "VELOCITY", "EFFICIENCY"],
+  boosters: [
+    { concept: "CASE_TYPE", weight: 0.6 },
+    { concept: "TYPE_COMPARE", weight: 0.5 },
+    { concept: "BREAKDOWN", weight: 0.3 },
+    { concept: "VELOCITY", weight: 0.2 },
+  ],
+  phrases: [
+    "compare bbs", "compare flex", "by case type", "case type breakdown",
+    "bbs vs flex", "flex vs bbs", "which type", "case type comparison",
+    "throughput by type", "velocity by type", "general vs bbs", "bbs vs general",
+  ],
+  clarifyLabel: "Case-type comparison",
+  clarifyPrompt: "Compare BBS vs Flex throughput",
+
+  async handle(ctx) {
+    const eff = ctx.getEfficiency();
+    if (!eff?.throughput?.byType) return noDataResponse(ctx, "case-type");
+
+    const rb = new ResponseBuilder();
+    const types = Object.entries(eff.throughput.byType)
+      .filter(([, d]) => d.count > 0)
+      .map(([t, d]) => ({
+        type: t,
+        count: d.count,
+        velocity: d.velocityScore || 0,
+        meanH: (d.mean || 0) / 3600000,
+      }));
+
+    if (types.length < 2) {
+      rb.say("Honestly, there isn't enough data across types to do a meaningful comparison right now — you've got just one type with material volume.");
+      rb.addButtons([["Overview", "How am I doing?"]]);
+      return rb.finalize(ctx.session.turns.length);
+    }
+
+    types.sort((a, b) => b.velocity - a.velocity);
+    const fast = types[0];
+    const slow = types[types.length - 1];
+
+    rb.say(vary(ctx, [
+      `Looking across case types, ${U.titleCase(fast.type).toUpperCase()} is your strongest at ${U.formatPercent(fast.velocity)} velocity, while ${U.titleCase(slow.type).toUpperCase()} is the slowest at ${U.formatPercent(slow.velocity)}.`,
+      `Right now ${U.titleCase(fast.type).toUpperCase()} cases lead the pack (${U.formatPercent(fast.velocity)} velocity) and ${U.titleCase(slow.type).toUpperCase()} are bringing up the rear at ${U.formatPercent(slow.velocity)}.`,
+      `Comparing the case types: ${U.titleCase(fast.type).toUpperCase()} runs fastest at ${U.formatPercent(fast.velocity)}, ${U.titleCase(slow.type).toUpperCase()} is slowest at ${U.formatPercent(slow.velocity)}.`,
+    ]));
+
+    rb.paragraph(`Volume-wise, you've got ${types.map((t) => `${t.count} ${U.titleCase(t.type).toUpperCase()}`).join(", ")} cases active. Average completion times run from ${slow.meanH.toFixed(1)}h on the slow end to ${fast.meanH.toFixed(1)}h on the fast end.`);
+
+    const gap = fast.velocity - slow.velocity;
+    if (gap > 20) {
+      rb.paragraph(`A ${gap.toFixed(0)}-point velocity gap between case types is large enough to be worth investigating — usually that means a workflow or staffing pattern specific to ${U.titleCase(slow.type).toUpperCase()}.`);
+    } else if (gap < 8) {
+      rb.paragraph("Honestly, the spread between types is tight enough that I wouldn't call it out as a problem — case mix isn't really hurting you.");
+    }
+
+    rb.addButtons([
+      ["Bottlenecks", "Where are the bottlenecks?"],
+      ["Overview", "How am I doing?"],
+      ["Improve", "How can I improve?"],
+    ]);
+    return rb.finalize(ctx.session.turns.length);
+  },
+});
+
+// ----------------------------------------------------------------------------
+// BUFFER COMPLIANCE (v4.1)
+// ----------------------------------------------------------------------------
+COMPONENTS.register({
+  id: "buffer_compliance",
+  priority: 74,
+  category: "ANALYTICS",
+  requires: ["BUFFER"],
+  boosters: [
+    { concept: "BUFFER", weight: 0.8 },
+    { concept: "PROBLEM", weight: 0.2 },
+  ],
+  phrases: ["buffer compliance", "design buffer", "production buffer", "handoff buffer",
+    "buffer rule", "buffer violation", "meeting buffer", "buffer timing", "transition timing"],
+  clarifyLabel: "Buffer compliance",
+  clarifyPrompt: "What's our buffer compliance looking like?",
+
+  async handle(ctx) {
+    const eff = ctx.getEfficiency();
+    const bc = eff?.onTimeDelivery?.overall?.bufferCompliance;
+    const sba = eff?.onTimeDelivery?.stageBufferAnalysis;
+    if (!bc && !sba) return noDataResponse(ctx, "buffer compliance");
+
+    const rb = new ResponseBuilder();
+    const pct = (x) => U.formatPercent((x || 0) * 100);
+
+    if (bc) {
+      const overall = bc.current ?? bc.production ?? bc.design ?? 0;
+      const overallTone = overall >= 0.85 ? "in good shape"
+        : overall >= 0.7 ? "mostly hitting target with some slippage"
+        : "well below where we'd want it";
+      rb.say(vary(ctx, [
+        `Right now your overall buffer compliance is ${pct(overall)}, which is ${overallTone}.`,
+        `Looking at this, you're hitting ${pct(overall)} of your stage handoff buffers — ${overallTone}.`,
+        `Buffer compliance sits at ${pct(overall)} overall. That's ${overallTone}.`,
+      ]));
+      rb.paragraph(`Stage by stage: design is at ${pct(bc.design)}, production at ${pct(bc.production)}, finishing at ${pct(bc.finishing)}.`);
+    }
+
+    if (sba) {
+      const totalViol = (sba.designViolations || 0) + (sba.productionViolations || 0) + (sba.finishingViolations || 0);
+      if (totalViol > 0) {
+        const worst = ["design", "production", "finishing"]
+          .map((s) => ({ s, n: sba[`${s}Violations`] || 0 }))
+          .sort((a, b) => b.n - a.n)[0];
+        rb.paragraph(`So far this period there have been ${totalViol} buffer violation${totalViol === 1 ? "" : "s"} across all stages, and the heaviest concentration is in ${worst.s} (${worst.n} of them).${sba.commonPatterns?.length ? ` The pattern I see most often is: ${sba.commonPatterns[0]}.` : ""}`);
+      } else {
+        rb.paragraph("Good news — no buffer violations recorded this period.");
+      }
+    }
+
+    rb.addButtons([
+      ["Bottlenecks", "Where are the bottlenecks?"],
+      ["Find issues", "What needs attention?"],
+      ["Overview", "How am I doing?"],
+    ]);
+    return rb.finalize(ctx.session.turns.length);
+  },
+});
+
+// ----------------------------------------------------------------------------
+// RUSH HANDLER (v4.1)
+// ----------------------------------------------------------------------------
+COMPONENTS.register({
+  id: "rush_handler",
+  priority: 73,
+  category: "ANALYTICS",
+  requires: ["RUSH"],
+  boosters: [
+    { concept: "RUSH", weight: 0.8 },
+    { concept: "PROBLEM", weight: 0.2 },
+    { concept: "IMPACT", weight: 0.2 },
+  ],
+  phrases: ["rush case", "rush job", "rush load", "rush count", "rush impact",
+    "priority case", "high priority case", "rush reduction"],
+  clarifyLabel: "Rush analysis",
+  clarifyPrompt: "How many rush cases are open?",
+
+  async handle(ctx) {
+    const eff = ctx.getEfficiency();
+    const o = eff?.onTimeDelivery?.overall;
+    if (!o) return noDataResponse(ctx, "rush");
+
+    const rb = new ResponseBuilder();
+    const rushCount = o.rushPriorityCount || 0;
+    const reduction = o.rushReductionFactor || 0;
+
+    if (rushCount === 0) {
+      rb.say(vary(ctx, [
+        "Honestly, there are no rush cases on the board right now — that's actually a healthy place to be.",
+        "Right now you've got zero rush cases active. Nothing to compensate for.",
+      ]));
+      rb.addButtons([["Overview", "How am I doing?"]]);
+      return rb.finalize(ctx.session.turns.length);
+    }
+
+    const tone = rushCount >= 10 ? "heavy load"
+      : rushCount >= 5 ? "moderate load"
+      : "manageable handful";
+    rb.say(vary(ctx, [
+      `So you're carrying ${rushCount} rush case${rushCount === 1 ? "" : "s"} on the board — that's a ${tone} for the floor.`,
+      `Honestly, ${rushCount} rush case${rushCount === 1 ? "" : "s"} ${rushCount === 1 ? "is" : "are"} a ${tone} — that's where you currently stand.`,
+      `From what I can see, ${rushCount} rush case${rushCount === 1 ? "" : "s"} ${rushCount === 1 ? "is" : "are"} active, which lands at a ${tone}.`,
+      `The rush picture: ${rushCount} active right now, which I'd describe as a ${tone}.`,
+    ], "rush_lead"));
+
+    if (reduction > 0) {
+      const pct = (reduction * 100).toFixed(0);
+      const impact = reduction >= 0.2 ? "noticeably dragging" : reduction >= 0.1 ? "modestly hurting" : "barely touching";
+      rb.paragraph(`The rush reduction factor sits at ${pct}%, meaning the volume of rush work is ${impact} your effective throughput. Each rush case shrinks your normal-priority capacity, so a high count compounds quickly.`);
+    }
+
+    if (rushCount >= 5) {
+      rb.paragraph("Worth flagging to whoever's accepting rush jobs — sustained rush volume above five tends to leak into late penalties on the regular work.");
+    }
+
+    rb.addButtons([
+      ["At-risk cases", "Show critical cases"],
+      ["Overview", "How am I doing?"],
+      ["Improve", "How can I improve?"],
+    ]);
+    return rb.finalize(ctx.session.turns.length);
+  },
+});
+
+// ----------------------------------------------------------------------------
+// LATE-CASE DETAIL (v4.1)
+// ----------------------------------------------------------------------------
+COMPONENTS.register({
+  id: "late_case_detail",
+  priority: 72,
+  category: "ANALYTICS",
+  requires: ["LATE"],
+  boosters: [
+    { concept: "LATE", weight: 0.8 },
+    { concept: "LOOKUP", weight: 0.3 },
+    { concept: "PROBLEM", weight: 0.2 },
+  ],
+  phrases: ["late cases", "completed late", "list late", "every late case",
+    "late case detail", "late pattern", "which cases are late", "late this period"],
+  clarifyLabel: "Late cases",
+  clarifyPrompt: "List every case that completed late",
+
+  async handle(ctx) {
+    const eff = ctx.getEfficiency();
+    const list = eff?.caseInsights?.lateCases
+              || eff?.onTimeDelivery?.caseInsights?.casesWithPenalties
+              || [];
+
+    if (!list.length) {
+      const rb = new ResponseBuilder();
+      rb.say(vary(ctx, [
+        "Right now there's nothing to show — no cases have completed late this period.",
+        "Honestly, you don't have any late completions on record for this period. That's a clean slate.",
+      ]));
+      rb.addButtons([["Overview", "How am I doing?"]]);
+      return rb.finalize(ctx.session.turns.length);
+    }
+
+    const rb = new ResponseBuilder();
+    const total = list.length;
+    const pen = (total * CONFIG.SCORING.LATE_PENALTY_PER_CASE).toFixed(1);
+
+    rb.say(vary(ctx, [
+      `So ${total} case${total === 1 ? " has" : "s have"} completed late this period — that's roughly ${pen} pts off the score in penalties.`,
+      `Honestly, ${total} late completion${total === 1 ? "" : "s"} ${total === 1 ? "has" : "have"} hit the books this period, costing about ${pen} pts.`,
+      `Looking at this, ${total} case${total === 1 ? "" : "s"} ran past due, eating roughly ${pen} pts off the score.`,
+      `The late tally for this period: ${total} case${total === 1 ? "" : "s"}, accounting for around ${pen} pts in penalties.`,
+    ], "late_lead"));
+
+    const sample = list.slice(0, 6);
+    if (sample.some((c) => c.hoursLate != null)) {
+      rb.paragraph("Here's the sample by lateness:");
+      rb.kv(sample.map((c) => {
+        const h = c.hoursLate != null
+          ? (c.hoursLate < 24 ? `${c.hoursLate.toFixed(1)}h late` : `${(c.hoursLate / 24).toFixed(1)}d late`)
+          : "late";
+        const t = c.type ? ` (${String(c.type).toUpperCase()})` : "";
+        return [`Case ${c.caseNumber}`, `${h}${t}`];
+      }));
+      const types = [...new Set(sample.map((c) => c.type).filter(Boolean))];
+      if (types.length === 1) {
+        rb.paragraph(`Worth noting they're all ${String(types[0]).toUpperCase()} cases — that's a strong hint about where to dig.`);
+      } else if (types.length > 1) {
+        rb.paragraph(`The mix spans ${types.map((t) => String(t).toUpperCase()).join(" and ")}, so it doesn't look like one case type is solely to blame.`);
+      } else {
+        rb.paragraph("Looking across these, the spread of severity is what I'd dig into first.");
+      }
+    } else {
+      rb.paragraph(`Cases involved: ${sample.map((c) => c.caseNumber).join(", ")}${total > sample.length ? `, plus ${total - sample.length} more` : ""}.`);
+    }
+
+    if (total >= 3) {
+      rb.paragraph("If there's a common case type or stage across these, that's usually the most productive place to start a root cause.");
+    }
+
+    rb.addButtons([
+      ["By case type", "Compare by case type"],
+      ["Bottlenecks", "Where are the bottlenecks?"],
+      ["Overview", "How am I doing?"],
+    ]);
+    return rb.finalize(ctx.session.turns.length);
+  },
+});
+
+// ----------------------------------------------------------------------------
+// DATA QUALITY INSPECTOR (v4.1)
+// ----------------------------------------------------------------------------
+COMPONENTS.register({
+  id: "data_quality",
+  priority: 65,
+  category: "ANALYTICS",
+  requires: ["QUALITY"],
+  boosters: [{ concept: "QUALITY", weight: 0.8 }],
+  phrases: ["how confident", "how reliable", "trust these numbers", "sample size",
+    "data quality", "are these numbers", "is this reliable", "trustworthy"],
+  clarifyLabel: "Data confidence",
+  clarifyPrompt: "How reliable is the score given our sample size?",
+
+  async handle(ctx) {
+    const eff = ctx.getEfficiency();
+    const stageStats = ctx.getStageStats();
+    const rb = new ResponseBuilder();
+
+    const sample = eff?.sampleSize ?? stageStats?.sampleSize ?? 0;
+    const conf = eff?.confidence || (sample >= 80 ? "high" : sample >= 30 ? "moderate" : "low");
+    const dq = stageStats?.dataQuality;
+
+    rb.say(vary(ctx, [
+      `Honestly, with ${sample} cases in the sample, I'd put my confidence at ${conf}.`,
+      `Right now you've got ${sample} cases of data feeding the math — that puts the confidence in ${conf} territory.`,
+      `Looking at this, ${sample} sample cases means the numbers are at ${conf} confidence.`,
+    ]));
+
+    if (sample < 30) {
+      rb.paragraph("With a sample this small, individual cases swing the average a lot — treat the score directionally, not as a precise reading.");
+    } else if (sample < 80) {
+      rb.paragraph("That's a workable sample for trend-spotting, but the smaller it is the more sensitive the score is to a few outliers.");
+    } else {
+      rb.paragraph("That's a healthy sample — the score should be stable enough to base decisions on.");
+    }
+
+    if (dq?.issues?.length) {
+      rb.paragraph(`Worth flagging on the data side: ${dq.issues[0]}.`);
+    }
+
+    rb.addButtons([
+      ["Score breakdown", "Why is my score what it is?"],
+      ["Overview", "How am I doing?"],
     ]);
     return rb.finalize(ctx.session.turns.length);
   },
