@@ -1073,7 +1073,7 @@ export default function AllHistoryModal({ onClose }) {
       <AnimatePresence>
         {!isClosing && (
           <motion.div
-            className="fixed inset-0 z-[150] pointer-events-none"
+            className="fixed inset-0 z-[10050] pointer-events-none"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -1364,7 +1364,7 @@ export default function AllHistoryModal({ onClose }) {
 
       {/* Case History Modal */}
       {selectedCase && (
-        <Suspense fallback={<div className="fixed inset-0 z-[301] pointer-events-none flex items-center justify-center"><div className="pointer-events-auto rounded-xl bg-white/75 backdrop-blur-xl px-6 py-5 shadow-lg"><LoadingSpinner label="Opening case history…" /></div></div>}>
+        <Suspense fallback={<div className="fixed inset-0 z-[10101] pointer-events-none flex items-center justify-center"><div className="pointer-events-auto rounded-xl bg-white/75 backdrop-blur-xl px-6 py-5 shadow-lg"><LoadingSpinner label="Opening case history…" /></div></div>}>
           <CaseHistory
             id={selectedCase.id}
             caseNumber={selectedCase.caseNumber}

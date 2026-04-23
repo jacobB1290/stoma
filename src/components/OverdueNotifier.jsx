@@ -29,7 +29,9 @@ import CaseHistory from "./CaseHistory";
  * - Mobile-responsive positioning with simple adjustments
  */
 
-const Z_NOTIFIER = 260; // between editor (≤100/60) and CaseHistory (300)
+const Z_NOTIFIER = 260; // sits above editor/add-case (≤100/60) and the
+// efficiency modal (100); below AllHistoryModal (10050), CaseRiskModal
+// (10001), and CaseHistory (10100) so drill-ins stack cleanly on top.
 
 // POSITIONING ADJUSTMENTS - Change these values to adjust position
 const MOBILE_TOP = 140; // Adjust up/down for mobile
@@ -1016,7 +1018,7 @@ export default function OverdueNotifier({
         </motion.div>
       </div>
 
-      {/* Case History modal (portal inside component, z-[300]) */}
+      {/* Case History modal (portal inside component, z-[10100]) */}
       {historyCase && (
         <CaseHistory
           id={historyCase.id}

@@ -1,16 +1,20 @@
-# Release Notes: QA Kernel v4.2.3 — Timezone-Safe Due Dates
+# Release Notes: Modal Z-Index Consistency Fix
 
 ## What Got Fixed 🐛
-- **Due dates no longer display the wrong calendar day for users in negative-offset timezones.** When the `cases.due` column holds a plain date string like `"2026-04-23"`, JavaScript's `new Date("2026-04-23")` parses it as midnight UTC. A user in MST (UTC-7) or anywhere else west of UTC would then see `.toLocaleDateString()` render as "4/22/2026" — a full calendar day earlier than what was entered. The kernel now detects plain-date values, pulls the YYYY-MM-DD parts directly, and renders the calendar day without any timezone shift.
-- **The false "overdue" flag is gone.** Because midnight-UTC was being treated as the deadline, a case due Apr 23 would look overdue to anyone in a western timezone for 7+ hours after the real end-of-day. The kernel now treats plain-date due values as end-of-day-local, so a case stays "due today" until local midnight and only flips to "overdue" after that.
-- Full ISO timestamp due values (e.g. `"2026-05-10T16:00:00Z"`) continue to render in the viewer's local timezone — that's correct for timestamped deadlines, where the author actually intended a specific wall-clock moment.
+- **The Efficiency Analysis modal (Digital/Metal/C&B) now layers cleanly above page chrome.** It had been pinned at `z-50`, which is the same tier Tailwind uses for sticky nav elements, so dropdowns and page overlays could bleed over the modal edges. Bumped to `z-[100]`.
+- **The case-history drill-in now sits above the Case Risk view.** Opening a case's history from inside the risk modal used to send the history modal *behind* the risk modal (risk was at `z-[10001]`, history at `z-[300]`), which made it effectively invisible. CaseHistory is now at `z-[10100]` so it floats above any risk/analytics modal stack.
+- **AllHistoryModal's backdrop + suspense loader moved to the same top tier.** Previously `z-[150]` / `z-[301]`, now `z-[10050]` / `z-[10101]` so it always sits above the risk view when triggered from it.
 
 ## For Developers 👨‍💻
-- New `U.parseDueDate(value)` returns `{ calendarDay, deadlineTs, isPlainDate }`. All due-date logic in the case lookup now goes through it — both the display line and the overdue/due-today math.
-- New `U.formatDueDate(value)` convenience wrapper returns just the display string.
-- Three new regression tests in the context audit under `db_lookup`:
-  - Plain date `"2026-04-23"` renders as `4/23/2026`, never `4/22/2026`
-  - A case due today-local is NOT marked overdue in the afternoon
-  - Full ISO timestamps render a plausible local-TZ date (May 9–11 range acceptable, accounting for UTC-12 to UTC+14 extremes)
-- Test harness now runs clean under America/Denver, America/Los_Angeles, America/New_York, UTC, Europe/London, Asia/Tokyo, and Pacific/Auckland. Run via `TZ=<zone> node --import ./test-harness/register.mjs ./test-harness/run-context-audit.mjs`.
-- Audit totals: **1132/1132** flow audit, **171/171** context audit (across 7 timezones).
+- New layering scheme (from bottom to top):
+  - Page content / editor / add-case: ≤ 60
+  - Base modals (efficiency, archive): 100–300
+  - OverdueNotifier: 260 (above editor, below top-tier drill-ins)
+  - AllHistoryModal: 10050
+  - CaseRiskModal: 10001
+  - CaseRiskAnalyticsModal: 10002
+  - CaseHistory: 10100 (always the topmost drill-in)
+  - AllHistoryModal suspense loader: 10101
+- Comment and number in `src/components/OverdueNotifier.jsx` updated to reflect new layering.
+- No changes to `ArchiveModal` (its `z-[300]` is correct — it's a standalone top-level modal, never opened from inside another).
+- Both audits remain at 100%: 1132/1132 flow, 171/171 context.
