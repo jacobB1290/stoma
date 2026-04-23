@@ -25,7 +25,7 @@ import { db } from "../services/caseService";
 // CONFIG
 // ============================================================================
 const CONFIG = {
-  VERSION: "4.1.0",
+  VERSION: "4.2.0",
   CACHE_TTL_MS: 5 * 60 * 1000,
   MAX_CONTEXT_TURNS: 30,
   MAX_BUTTONS: 4,
@@ -724,8 +724,108 @@ class KernelContext {
       mentionedCases: [],
       lastEntities: null,
       variationIdx: 0,
+      // Pending offer the assistant just made — when the user replies
+      // "yes"/"sure"/"do it", we re-route to this command. Cleared on use
+      // or after a few turns of staleness.
+      pendingOffer: null,        // { command, prompt, turnSet }
+      // Pending clarification — when the assistant asks a question with a
+      // specific shape ("which stage?"), we stash an interpreter so the
+      // next user reply gets handled as the answer.
+      pendingClarification: null, // { kind, askingFor, command, turnSet }
+      // Conversation context — a richer model than just lastIntent. Tracks
+      // topic, entities under discussion, and what the assistant just said
+      // so follow-ups can resolve pronouns and implicit subjects.
+      conversation: {
+        topic: null,                // current high-level subject ("score", "risk", etc)
+        topicSetAtTurn: -1,
+        topicHistory: [],           // [{ topic, turn }]
+        subjectEntities: {          // who/what we're currently talking about
+          caseType: null,           // "bbs" | "flex" | "general"
+          stage: null,              // "design" | "production" | "qc" | "finishing"
+          caseNumber: null,
+          metric: null,             // "score" | "ontime" | "velocity"
+        },
+        // Recent things to allow short references like "the first one", "those"
+        recentList: null,           // last enumerable list shown (cases/types/stages)
+        recentListKind: null,       // "case" | "case_type" | "stage" | "problem"
+      },
     };
     this.injectedData = null;
+  }
+
+  // --- Conversation accessors --------------------------------------------
+  getConversation() { return this.session.conversation; }
+  setTopic(topic) {
+    if (!topic) return;
+    const c = this.session.conversation;
+    if (c.topic && c.topic !== topic) {
+      c.topicHistory.push({ topic: c.topic, turn: c.topicSetAtTurn });
+      if (c.topicHistory.length > 8) c.topicHistory.shift();
+    }
+    c.topic = topic;
+    c.topicSetAtTurn = this.session.turns.length;
+  }
+  getTopic() {
+    const c = this.session.conversation;
+    if (!c.topic) return null;
+    // Topics expire after 5 turns of silence on them
+    if (this.session.turns.length - c.topicSetAtTurn > 5) {
+      c.topic = null;
+      return null;
+    }
+    return c.topic;
+  }
+  setSubjectEntity(key, value) {
+    if (!key || !value) return;
+    this.session.conversation.subjectEntities[key] = value;
+  }
+  getSubjectEntity(key) {
+    return this.session.conversation.subjectEntities[key] || null;
+  }
+  setRecentList(kind, items) {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const c = this.session.conversation;
+    c.recentList = items.slice(0, 10);
+    c.recentListKind = kind;
+  }
+  getRecentList() {
+    const c = this.session.conversation;
+    return c.recentList ? { kind: c.recentListKind, items: c.recentList } : null;
+  }
+
+  setPendingOffer(command, prompt = "") {
+    if (!command) return;
+    this.session.pendingOffer = {
+      command,
+      prompt,
+      turnSet: this.session.turns.length,
+    };
+  }
+  clearPendingOffer() { this.session.pendingOffer = null; }
+  getPendingOffer() {
+    const p = this.session.pendingOffer;
+    if (!p) return null;
+    // expire after 2 turns of staleness
+    if (this.session.turns.length - p.turnSet > 2) {
+      this.session.pendingOffer = null;
+      return null;
+    }
+    return p;
+  }
+
+  setPendingClarification(spec) {
+    if (!spec) return;
+    this.session.pendingClarification = { ...spec, turnSet: this.session.turns.length };
+  }
+  clearPendingClarification() { this.session.pendingClarification = null; }
+  getPendingClarification() {
+    const p = this.session.pendingClarification;
+    if (!p) return null;
+    if (this.session.turns.length - p.turnSet > 1) {
+      this.session.pendingClarification = null;
+      return null;
+    }
+    return p;
   }
 
   setInjectedData(data) {
@@ -813,6 +913,273 @@ const FOLLOWUP_PATTERNS = [
   /^why (is|did|does|would|was)\b/i,
   /^(this|that|it)\s/i,   // pronoun-initial short follow-ups
 ];
+
+// Pure affirmation — user agreeing to a pending offer the assistant made.
+// Kept tight on purpose: longer responses with content are routed normally.
+const AFFIRM_PATTERNS = [
+  /^(yes|yeah|yep|yup|y)\b/i,
+  /^sure\b/i,
+  /^ok\b/i,
+  /^okay\b/i,
+  /^please\b/i,
+  /^do it\b/i,
+  /^go( ahead)?\b/i,
+  /^sounds good\b/i,
+  /^alright\b/i,
+  /^let'?s do (it|that)\b/i,
+  /^why not\b/i,
+];
+const DENY_PATTERNS = [
+  /^no\b/i,
+  /^nope\b/i,
+  /^nah\b/i,
+  /^not (now|really|today|right now)\b/i,
+  /^never mind\b/i,
+  /^skip\b/i,
+];
+
+function isAffirmation(text) {
+  const t = String(text || "").trim().toLowerCase();
+  if (t.length === 0 || t.length > 30) return false;
+  return AFFIRM_PATTERNS.some((re) => re.test(t));
+}
+function isDenial(text) {
+  const t = String(text || "").trim().toLowerCase();
+  if (t.length === 0 || t.length > 30) return false;
+  return DENY_PATTERNS.some((re) => re.test(t));
+}
+
+// Map component id → conversational topic. Used to track what we're talking
+// about so follow-ups like "and how do I fix that?" know the antecedent.
+const COMPONENT_TOPICS = {
+  greeter: null,
+  main: "performance",
+  improvement_advisor: "improvement",
+  problem_finder: "problems",
+  risk_analyzer: "risk",
+  score_explainer: "score",
+  scenario_simulator: "scenario",
+  daily_brief: "brief",
+  bottleneck_finder: "bottleneck",
+  trend_analyzer: "trend",
+  case_lookup: "case",
+  schema_explorer: "schema",
+  case_type_comparator: "case_type",
+  buffer_compliance: "buffer",
+  rush_handler: "rush",
+  late_case_detail: "late_cases",
+  data_quality: "data_quality",
+};
+
+// What command best continues a topic? Used for things like "fix it"/"improve
+// that" where we know the user wants the improvement advisor focused on the
+// last topic. Keep this small and conservative.
+const TOPIC_CONTINUATIONS = {
+  performance:   { improve: "How can I improve?", explain: "Why is my score what it is?", details: "What needs attention?" },
+  problems:      { improve: "How can I improve?", explain: "Why is my score what it is?" },
+  score:         { improve: "How can I improve?", details: "What needs attention?" },
+  risk:          { improve: "How can I improve?", explain: "Why is my score what it is?" },
+  bottleneck:    { improve: "How can I improve?", details: "Compare by case type" },
+  case_type:     { details: "Where are the bottlenecks?" },
+  buffer:        { details: "What needs attention?", improve: "How can I improve?" },
+  rush:          { details: "What needs attention?", improve: "How can I improve?" },
+  late_cases:    { details: "Compare by case type", improve: "How can I improve?" },
+  data_quality:  { explain: "Why is my score what it is?" },
+  brief:         { details: "What needs attention?" },
+  scenario:      { explain: "Why is my score what it is?" },
+};
+
+// Words that typically signal an "act on the previous topic" intent when the
+// question is short. e.g. "fix it", "improve that", "more on this".
+const ACT_ON_TOPIC_PATTERNS = [
+  { match: /\b(fix|address|solve|tackle|resolve|improve|better)\b/i, key: "improve" },
+  { match: /\b(why|explain|breakdown|how.*calculated|reason)\b/i, key: "explain" },
+  { match: /\b(more|details|deeper|drill|dig|specifics)\b/i, key: "details" },
+];
+
+const PRONOUN_PATTERNS = /\b(it|this|that|those|these|them|they)\b/i;
+
+// Re-write a short user message using whatever the conversation knows about,
+// so generic follow-ups (e.g. "fix it", "and design specifically?", "the
+// first one?") become concrete commands the router can hit.
+function enrichWithContext(question, ctx) {
+  const t = String(question || "").trim();
+  if (!t) return question;
+  const conv = ctx.session.conversation;
+  const tokens = t.toLowerCase().split(/\s+/).filter(Boolean).length;
+
+  // Pattern 1: short imperative referring to the active topic
+  // "fix it" / "improve that" / "how do I solve this?" → topic-specific command
+  if (tokens <= 6 && PRONOUN_PATTERNS.test(t)) {
+    const topic = ctx.getTopic();
+    if (topic) {
+      for (const p of ACT_ON_TOPIC_PATTERNS) {
+        if (p.match.test(t)) {
+          const cont = TOPIC_CONTINUATIONS[topic]?.[p.key];
+          if (cont) return cont;
+        }
+      }
+    }
+  }
+
+  // Pattern 2: refinement that drops the subject
+  // "design specifically?" / "and design?" while topic=buffer → drill into it
+  if (tokens <= 6) {
+    const topic = ctx.getTopic();
+    if (topic === "buffer") {
+      for (const stage of ["design", "production", "qc", "finishing"]) {
+        if (t.toLowerCase().includes(stage)) {
+          ctx.setSubjectEntity("stage", stage);
+          // The buffer component already shows per-stage stats; keep the
+          // user's question through to it but tag the stage entity.
+          return t;
+        }
+      }
+    }
+    if (topic === "case_type") {
+      for (const ty of ["bbs", "flex", "general"]) {
+        if (t.toLowerCase().includes(ty)) {
+          ctx.setSubjectEntity("caseType", ty);
+          return `Compare by case type ${ty}`;
+        }
+      }
+    }
+  }
+
+  // Pattern 3: indexed reference to a recent list. Require the question to be
+  // short AND to use indexing language ("the first one", "tell me about #2",
+  // "show me the worst") so we don't false-trigger on prose like "what should
+  // I focus on first?". Allows common typos for "first".
+  if (tokens <= 8) {
+    const list = ctx.getRecentList();
+    if (list && list.kind === "case" && list.items.length) {
+      // "first" with common typos: frist, fisrt, firts
+      const firstWord = /\b(?:first|frist|fisrt|firts|fist)\b/i;
+      if (
+        (firstWord.test(t) && /\b(one|case|item)\b/i.test(t))
+        || /^\s*(the )?(first|frist|fisrt|firts|fist)\??$/i.test(t)
+        || /\b(?:show|tell|about) (?:me )?#?1\b/i.test(t)
+        || /\b(the )?worst( one| case)?\b/i.test(t)
+        || /\b(top|number) (one|1)\b/i.test(t)
+      ) {
+        return `Tell me about case ${list.items[0]}`;
+      }
+      const idxMatch = t.match(/\b(?:the )?(second|third|fourth|fifth) (?:one|case|item)?\b/i);
+      const hashMatch = t.match(/#(\d)\b/);
+      const map = { second: 2, third: 3, fourth: 4, fifth: 5 };
+      let idx = null;
+      if (idxMatch?.[1]) idx = map[idxMatch[1].toLowerCase()];
+      else if (hashMatch) idx = Number(hashMatch[1]);
+      if (idx && list.items[idx - 1]) {
+        return `Tell me about case ${list.items[idx - 1]}`;
+      }
+    }
+  }
+
+  // Pattern 4: "is that bad/good/normal?" — interpretive follow-up. Re-route
+  // back to the same component for a fresh, contextually flavored answer.
+  if (/^(is that|is this) (bad|good|normal|ok|okay|a lot|too many|enough)/i.test(t)) {
+    const topic = ctx.getTopic();
+    if (topic) {
+      const last = ctx.session.lastIntent;
+      if (last) {
+        // Re-issue the canonical phrase for that topic so the same handler
+        // re-runs and the user gets fresh prose.
+        return TOPIC_CONTINUATIONS[topic]?.details
+            || TOPIC_CONTINUATIONS[topic]?.improve
+            || t;
+      }
+    }
+  }
+
+  // Pattern 5: "should I be worried/concerned?" — domain-relevant emotional
+  // probe. Map to a problems sweep so the user gets a real risk/issues read.
+  if (/should i be (worried|concerned|nervous|scared|alarmed)/i.test(t)) {
+    return "What needs attention?";
+  }
+  // Pattern 6: "anything (urgent|critical) (today|now)?" — same idea.
+  if (/^anything (urgent|critical|risky|broken|wrong|hot)\b/i.test(t)) {
+    return "What needs attention?";
+  }
+
+  return question;
+}
+
+// Resolve a short user reply against an outstanding clarification request.
+// Returns the actual command to dispatch, or null if the reply doesn't
+// match the expected shape (in which case routing falls through to normal).
+function applyClarification(rawText, clar) {
+  const t = String(rawText || "").trim().toLowerCase();
+  if (!t) return null;
+  if (clar.kind === "stage") {
+    const stages = ["design", "production", "qc", "finishing"];
+    for (const s of stages) {
+      if (t.includes(s)) return clar.command.replace("{stage}", s);
+    }
+    return null;
+  }
+  if (clar.kind === "case_type") {
+    for (const ty of ["bbs", "flex", "general"]) {
+      if (t.includes(ty)) return clar.command.replace("{type}", ty);
+    }
+    return null;
+  }
+  if (clar.kind === "case_number") {
+    const m = t.match(/\d{3,}/);
+    if (m) return clar.command.replace("{case}", m[0]);
+    return null;
+  }
+  if (clar.kind === "scenario_count") {
+    const m = t.match(/\d+/);
+    if (m) return clar.command.replace("{n}", m[0]);
+    return null;
+  }
+  if (clar.kind === "choice" && Array.isArray(clar.choices)) {
+    for (const c of clar.choices) {
+      if (t.includes(c.match.toLowerCase())) return c.command;
+    }
+    return null;
+  }
+  return null;
+}
+
+// Pull the first [ACTION:label|command] out of a finalized response, since
+// that's the implied "if you say yes" follow-up. Returns null if there isn't
+// one (e.g., the response is buttonless).
+function parseFirstActionButton(text) {
+  if (!text) return null;
+  const m = String(text).match(/\[ACTION:([^\|]+)\|([^\]]+)\]/);
+  if (!m) return null;
+  return { label: m[1].trim(), command: m[2].trim() };
+}
+
+// After a component finalizes, sniff its text + buttons to auto-set
+// `pendingOffer` if the response ended with an offer-style question.
+// Components that want explicit control can call ctx.setPendingOffer()
+// themselves; this auto-capture is a fallback that only fires if the
+// component didn't set one. Components that DO set one always win.
+function autoCapturePendingOffer(ctx, text, primaryButton) {
+  if (!text || !primaryButton) return;
+  // If the component already stashed an explicit offer this turn, leave it.
+  // Note: the turn isn't pushed yet at the point the component called
+  // setPendingOffer, so its turnSet equals (current length) - 1 by now.
+  const existing = ctx.session.pendingOffer;
+  const justSet = existing && existing.turnSet >= ctx.session.turns.length - 1;
+  if (justSet) return;
+  // Strip metadata + button glyphs to look at the actual prose
+  const body = String(text).replace(/\[ACTION:[^\]]*\]/g, "")
+    .replace(/\[MODAL:[^\]]*\]/g, "")
+    .replace(/\[COMPONENTS:[^\]]*\]/g, "")
+    .replace(/\[INTENT:[^\]]*\]/g, "")
+    .replace(/\[FOLLOWUPS:[^\]]*\]/g, "")
+    .trim();
+  // Last sentence
+  const tail = body.split(/[\n]/).filter(Boolean).pop() || "";
+  // Heuristic: the response ends with a question and there's a CTA button.
+  if (/\?\s*$/.test(tail)) {
+    ctx.setPendingOffer(primaryButton.command, tail);
+  }
+}
 
 // Domain concepts — if any match, the question has its own semantic content
 // and should be routed freshly, not treated as a follow-up to last component.
@@ -1070,6 +1437,66 @@ class AppQAKernel {
       return "Hi there! How can I help?";
     }
 
+    // ── Pending clarification: assistant just asked the user a question
+    // that expects a specific shape of answer (e.g. "which stage?"). Try
+    // to interpret the input through that lens before doing fresh routing.
+    const clar = this.ctx.getPendingClarification();
+    if (clar && clar.command) {
+      const interpreted = applyClarification(q, clar);
+      if (interpreted) {
+        this.ctx.clearPendingClarification();
+        // Recurse with the resolved command, keeping the user's raw question
+        // on record as the actual turn.
+        const text = await this.ask(interpreted, injectedContext);
+        // Replace the recorded question with the user's literal so the trail
+        // shows what they actually typed.
+        const last = this.ctx.session.turns[this.ctx.session.turns.length - 1];
+        if (last) last.q = q;
+        return text;
+      }
+    }
+
+    // ── Yes / no follow-through on a pending offer.
+    const pending = this.ctx.getPendingOffer();
+    if (pending) {
+      if (isAffirmation(q)) {
+        this.ctx.clearPendingOffer();
+        const text = await this.ask(pending.command, injectedContext);
+        const last = this.ctx.session.turns[this.ctx.session.turns.length - 1];
+        if (last) last.q = q;
+        return text;
+      }
+      if (isDenial(q)) {
+        this.ctx.clearPendingOffer();
+        const rb = new ResponseBuilder();
+        rb.say(this.ctx.pickVariation([
+          "No worries — what would you rather look at?",
+          "All good. Want to point me somewhere else?",
+          "Got it, skipping that one. Anything else on your mind?",
+        ], "deny_ack"));
+        rb.addButtons([
+          ["Performance", "How am I doing?"],
+          ["Problems", "What needs attention?"],
+          ["Help", "What can you help with?"],
+        ]);
+        const out = rb.finalize(this.ctx.session.turns.length);
+        this.ctx.session.turns.push({ t: Date.now(), q, componentId: "deny_ack", entities: {} });
+        return out;
+      }
+    }
+
+    // ── Enrich the question with conversation context (pronoun resolution,
+    // topic continuation, list-index references). If enrichment rewrites the
+    // input to a concrete command, recurse so the new command takes the full
+    // routing path with its own context updates.
+    const enriched = enrichWithContext(q, this.ctx);
+    if (enriched && enriched !== q) {
+      const text = await this.ask(enriched, injectedContext);
+      const last = this.ctx.session.turns[this.ctx.session.turns.length - 1];
+      if (last) last.q = q;  // keep the user's literal in the trail
+      return text;
+    }
+
     const n = normalize(q);
     const entities = extractEntities(q, n);
 
@@ -1082,6 +1509,19 @@ class AppQAKernel {
       if (!entities.stages.length && prev.stages?.length) {
         entities.stages = prev.stages.slice();
       }
+    }
+
+    // Carry subject entities from conversation context if the current question
+    // didn't bring its own. This is what makes "and finishing times?" after a
+    // case-type comparison still know we're talking about that type.
+    const conv = this.ctx.session.conversation;
+    if (!entities.caseTypes?.length && conv.subjectEntities.caseType) {
+      entities.caseTypes = entities.caseTypes || [];
+      entities.caseTypes.push(conv.subjectEntities.caseType);
+    }
+    if (!entities.stages?.length && conv.subjectEntities.stage) {
+      entities.stages = entities.stages || [];
+      entities.stages.push(conv.subjectEntities.stage);
     }
 
     const routing = await router.route(this.ctx, q, n, entities);
@@ -1108,6 +1548,23 @@ class AppQAKernel {
     }
     this.ctx.session.lastIntent = componentId;
     this.ctx.session.lastEntities = entities;
+
+    // Update conversation topic from the component that ran
+    if (componentId && componentId in COMPONENT_TOPICS) {
+      const topic = COMPONENT_TOPICS[componentId];
+      if (topic) this.ctx.setTopic(topic);
+    }
+
+    // Carry the user-provided entities into the conversation subject
+    if (entities.caseTypes?.[0]) this.ctx.setSubjectEntity("caseType", entities.caseTypes[0]);
+    if (entities.stages?.[0])   this.ctx.setSubjectEntity("stage", entities.stages[0]);
+    if (entities.caseNumbers?.[0]) this.ctx.setSubjectEntity("caseNumber", entities.caseNumbers[0]);
+
+    // Auto-capture: if the response ends with a question and there's at
+    // least one button, treat the first button's command as the implied
+    // offer for "yes/sure/please" follow-ups.
+    const firstBtn = parseFirstActionButton(text);
+    if (firstBtn) autoCapturePendingOffer(this.ctx, text, firstBtn);
 
     const eff = this.ctx.getEfficiency();
     if (eff?.score != null) this.ctx.session.previousScore = eff.score;
@@ -1483,11 +1940,15 @@ COMPONENTS.register({
 
     // Single diagnostic line
     if (critical > 0) {
-      rb.paragraph(`The thing I'd jump on first is the critical cases — each one that goes late costs roughly ${CONFIG.SCORING.LATE_PENALTY_PER_CASE} pts.`);
+      rb.paragraph(`The thing I'd jump on first is the critical cases — each one that goes late costs roughly ${CONFIG.SCORING.LATE_PENALTY_PER_CASE} pts. Want me to pull them up?`);
+      // Auto-capture handles "yes" → "Show me critical cases"
+      ctx.setPendingOffer("Show me critical cases", "pull up critical cases");
     } else if (onTime < 70) {
-      rb.paragraph("Honestly, on-time delivery is the main drag — that's where the points are leaking.");
+      rb.paragraph("Honestly, on-time delivery is the main drag — that's where the points are leaking. Want to talk through how to lift it?");
+      ctx.setPendingOffer("How can I improve?", "talk through how to lift on-time");
     } else if (velocity < 65) {
-      rb.paragraph("Velocity's low enough that there's probably a bottleneck somewhere worth tracking down.");
+      rb.paragraph("Velocity's low enough that there's probably a bottleneck somewhere worth tracking down. Want me to surface where?");
+      ctx.setPendingOffer("Where are the bottlenecks?", "surface the bottleneck");
     } else if (score >= 85) {
       rb.paragraph(vary(ctx, PHRASES.ackOk()));
     }
@@ -1644,6 +2105,11 @@ COMPONENTS.register({
     }
 
     problems.sort((a, b) => a.sev - b.sev);
+    // Seed recent case list with the critical cases so "the worst one" or
+    // "the first one" follow-ups can resolve to a concrete case.
+    if (critical.length) {
+      ctx.setRecentList("case", critical.slice(0, 5).map((c) => c.caseNumber));
+    }
     rb.say(vary(ctx, [
       `So there ${problems.length === 1 ? "is" : "are"} ${problems.length} thing${problems.length === 1 ? "" : "s"} I'd flag right now, ranked from most urgent down.`,
       `Looking at this, ${problems.length} issue${problems.length === 1 ? " stands" : "s stand"} out — pressing items first.`,
@@ -1741,12 +2207,20 @@ COMPONENTS.register({
     }));
 
     list.forEach((c) => ctx.recordMentionedCase(c.caseNumber));
+    // Record the list so "the first one" / "tell me about #2" can resolve later
+    ctx.setRecentList("case", list.map((c) => c.caseNumber));
 
     if (crit.length > 5) {
-      rb.paragraph(`There are also ${crit.length - 5} more critical cases beyond these — the full risk report has the rest.`);
+      rb.paragraph(`There are also ${crit.length - 5} more critical cases beyond these — the full risk report has the rest. Want to dig into one in particular?`);
     } else {
-      rb.paragraph("Want to talk through what's making any of them risky?");
+      rb.paragraph("Want to dig into one of these in particular? You can also say things like \"the first one\" or \"the worst one\" and I'll pull it up.");
     }
+    // Stash a clarification: if the user replies with a number or "first",
+    // route into case_lookup with that case.
+    ctx.setPendingClarification({
+      kind: "case_number",
+      command: "Tell me about case {case}",
+    });
 
     rb.addButtons([
       ["Improve", "How can I improve?"],
@@ -2007,9 +2481,52 @@ COMPONENTS.register({
     }
 
     const data = await DBKnowledge.caseByNumber(cn);
-    if (!data) {
-      rb.say(`No case matches "${cn}".`);
-      rb.paragraph("Could be archived or in another department. Check the number.");
+
+    // Fallback: if the DB had nothing (or returned an empty husk), check the
+    // already-injected predictions for this case. That way a follow-up like
+    // "tell me about the first one" after a critical-cases listing still
+    // gives the user a meaningful answer using the data we already showed.
+    if (!data || !data.casenumber) {
+      const preds = ctx.getPredictions();
+      const allPreds = preds?.predictions || [];
+      const lateList = ctx.getEfficiency()?.caseInsights?.lateCases || [];
+      const late = lateList.find((c) => String(c.caseNumber) === String(cn));
+      const pred = allPreds.find((p) => String(p.caseNumber) === String(cn));
+      if (pred) {
+        ctx.recordMentionedCase(pred.caseNumber);
+        const prob = (pred.lateProbability * 100).toFixed(0);
+        const du = pred.daysUntilDue;
+        let when;
+        if (du == null) when = "no firm due date on record";
+        else if (du < 0) when = `already ${Math.abs(du).toFixed(1)}d overdue`;
+        else if (du < 1) when = "due today";
+        else if (du < 2) when = "due tomorrow";
+        else when = `due in about ${du.toFixed(1)}d`;
+        rb.say(vary(ctx, [
+          `Case ${pred.caseNumber} is the one I had flagged at ${pred.riskLevel} risk — ${prob}% chance of going late, ${when}.`,
+          `Looking at this, case ${pred.caseNumber} carries a ${prob}% late probability and is ${when}. That's why it landed at ${pred.riskLevel} risk.`,
+          `Right now case ${pred.caseNumber} is sitting at ${pred.riskLevel} risk: ${prob}% likely to be late, and ${when}.`,
+        ], "case_lookup_pred"));
+        rb.paragraph("If you want, I can run a what-if to see what happens if it slips, or pull up the others in the same risk tier.");
+        ctx.setPendingOffer("Show me critical cases", "show others at the same risk");
+        rb.addButtons([
+          ["Same risk tier", "Show me critical cases"],
+          ["Run what-if", "What if 1 case goes late?"],
+          ["Overview", "How am I doing?"],
+        ]);
+        return rb.finalize(ctx.session.turns.length);
+      }
+      if (late) {
+        rb.say(`Case ${late.caseNumber} completed ${late.hoursLate?.toFixed(1) || "?"}h late this period — that's the one I had on the late list.`);
+        rb.paragraph(`It's ${late.type ? `a ${String(late.type).toUpperCase()} case` : "logged with no specific type"}, which gives you a sense of where the slip happened.`);
+        rb.addButtons([
+          ["By case type", "Compare by case type"],
+          ["Overview", "How am I doing?"],
+        ]);
+        return rb.finalize(ctx.session.turns.length);
+      }
+      rb.say(`No case matches "${cn}" in the data I have loaded right now.`);
+      rb.paragraph("It could be archived, in another department, or just not in the active set. Want me to search by department or pull a fresh overview?");
       rb.addButtons([
         ["Try again", "Find case"],
         ["Overview", "How am I doing?"],
@@ -2336,10 +2853,18 @@ COMPONENTS.register({
 
     const gap = fast.velocity - slow.velocity;
     if (gap > 20) {
-      rb.paragraph(`A ${gap.toFixed(0)}-point velocity gap between case types is large enough to be worth investigating — usually that means a workflow or staffing pattern specific to ${U.titleCase(slow.type).toUpperCase()}.`);
+      rb.paragraph(`A ${gap.toFixed(0)}-point velocity gap between case types is large enough to be worth investigating — usually that means a workflow or staffing pattern specific to ${U.titleCase(slow.type).toUpperCase()}. Want to drill into one type — BBS, Flex, or General?`);
     } else if (gap < 8) {
       rb.paragraph("Honestly, the spread between types is tight enough that I wouldn't call it out as a problem — case mix isn't really hurting you.");
+    } else {
+      rb.paragraph("Want to drill into one type — BBS, Flex, or General?");
     }
+    // Allow the user to answer with a bare type name
+    ctx.setPendingClarification({
+      kind: "case_type",
+      command: "Compare by case type {type}",
+    });
+    ctx.setRecentList("case_type", types.map((t) => t.type));
 
     rb.addButtons([
       ["Bottlenecks", "Where are the bottlenecks?"],
@@ -2399,6 +2924,27 @@ COMPONENTS.register({
       } else {
         rb.paragraph("Good news — no buffer violations recorded this period.");
       }
+    }
+
+    // If the user has set a stage in conversation context (e.g. "design
+    // specifically?" after the overview), zoom into that stage.
+    const stageEntity = ctx.getSubjectEntity("stage");
+    if (stageEntity && bc) {
+      const v = bc[stageEntity];
+      if (v != null) {
+        rb.paragraph(`Zooming into ${stageEntity} specifically: compliance there is ${pct(v)}, with ${(sba?.[`${stageEntity}Violations`] || 0)} violation${(sba?.[`${stageEntity}Violations`] || 0) === 1 ? "" : "s"} on the books.`);
+      }
+    } else {
+      rb.paragraph("Want to zoom into one stage — design, production, or finishing?");
+      ctx.setPendingClarification({
+        kind: "choice",
+        choices: [
+          { match: "design", command: "Design buffer compliance" },
+          { match: "production", command: "Production buffer compliance" },
+          { match: "finishing", command: "Finishing buffer compliance" },
+        ],
+        command: "buffer drilldown",
+      });
     }
 
     rb.addButtons([
@@ -2521,6 +3067,7 @@ COMPONENTS.register({
     ], "late_lead"));
 
     const sample = list.slice(0, 6);
+    ctx.setRecentList("case", sample.map((c) => c.caseNumber));
     if (sample.some((c) => c.hoursLate != null)) {
       rb.paragraph("Here's the sample by lateness:");
       rb.kv(sample.map((c) => {

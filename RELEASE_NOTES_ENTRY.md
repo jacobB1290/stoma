@@ -1,30 +1,33 @@
-# Release Notes: QA Kernel v4.1 — Conversational Flow + Capability Expansion
+# Release Notes: QA Kernel v4.2 — Conversational Context System
 
 ## What's New ✨
-- The in-app Q&A engine now sounds substantially more like a colleague and less like a bullet-point machine — replies use varied openers, natural connective tissue ("looking at this", "the thing I'd jump on first", "honestly"), and prose context around the numbers instead of stiff KV tables
-- Five new capability areas the kernel previously couldn't answer:
-  - **Case-type comparison** — "compare BBS vs Flex throughput", "which case type takes longest?"
-  - **Buffer compliance** — "are we meeting our design and production buffers?", "buffer violations?"
-  - **Rush analysis** — "how many rush cases are open and is it hurting our score?"
-  - **Late-case detail** — "list every case that completed late", "is there a pattern in the late cases?"
-  - **Data-quality / confidence** — "how reliable is the score given our sample size?"
-- Per-component variation rotation so the same opener never repeats across responses, even when the same component handles multiple questions in a session
-- Routing fix: "fix", "solve", "address", "tackle", "resolve" now route to the improvement advisor instead of being treated as out-of-scope
+- **Yes/no follow-through**: When the assistant offers something ("Want me to pull the critical cases?"), replying "yes", "sure", "yeah", "ok", "go ahead" now actually triggers the offer instead of being treated as a fresh question. "No" / "not really" / "skip" gets a brief acknowledgement and a pivot to other options.
+- **Topic memory across turns**: After asking about your score, "fix it" routes to the improvement advisor with the score in mind. After comparing case types, "and General?" continues the comparison. After listing critical cases, "the first one" or "the worst one" pulls up that specific case.
+- **The assistant asks follow-up questions**: The case-type comparator asks which type to drill into. The buffer compliance check asks which stage. After a status overview, it offers "want me to pull them up?" and listens for a yes.
+- **Reference resolution**: "the first one", "the worst one", "the second one", "#2" — all resolve to items in the most recent list the assistant showed (cases, types, etc.). Common typos for "first" ("frist", "fisrt") still work.
+- **Interpretive probes**: "is that bad?", "is that a lot?", "should I be worried?", "anything critical today?" map to the right component based on the active topic.
 
 ## What Got Fixed 🐛
-- Out-of-scope deflections now offer varied pivots ("What I can offer:", "If you want, I can flip to something useful:") instead of repeating one canned line
-- Bullet-heavy responses now close with a prose sentence so they read as complete thoughts rather than trailing lists
-- Score breakdowns explain the math in sentences rather than dumping a labeled column
+- Pending offers now expire correctly after a few turns of staleness so a stale "yes" doesn't accidentally trigger something the user has long forgotten about
+- Auto-captured offers no longer override explicit ones set by component handlers
+- Indexed-reference detection ("first", "worst") tightened so it doesn't false-fire on prose like "what should I focus on first?"
+- Topic switching: a fresh fully-formed question correctly resets the active topic so unrelated answers don't bleed across turns
+- Out-of-scope deflections no longer kill the topic — saying "tell me a joke" mid-conversation still leaves the prior topic intact for the next valid follow-up
 
 ## For Users 👤
-- Asking the same kind of question twice in a session produces freshly worded answers
-- Domain-specific questions (BBS, Flex, buffers, rush, sample size) get domain-specific answers — not generic deflections
-- Multi-turn conversations preserve context: ask "what's wrong?" then "how do I fix it?" and the second question is treated as a follow-up to the first
+- Conversations feel like talking to someone who remembers the last thing you discussed
+- Short follow-ups work the way you'd expect them to: "yes", "no", "fix it", "the worst one", "and design specifically?"
+- The assistant takes initiative — it asks for clarification when there's a sensible drill-down, instead of dumping everything at once
 
 ## For Developers 👨‍💻
-- New `vary(ctx, options, bucket)` helper for deterministic per-component variation rotation
-- New components: `case_type_comparator`, `buffer_compliance`, `rush_handler`, `late_case_detail`, `data_quality`
-- New concepts in the routing map: `TYPE_COMPARE`, `CASE_TYPE`, `BUFFER`, `RUSH`, `QUALITY`, `BREAKDOWN`
-- Test harness lives at `test-harness/` — run with `node --import ./test-harness/register.mjs ./test-harness/run-audit.mjs` (no installed deps required, uses local stubs for `@supabase/supabase-js` and `uuid`)
-- Audit battery covers 77 prompts across NORMAL / HARD / GAP / OUT / FOLLOWUP categories, scored on word count, prose vs bullets, connective tissue, opener variation, sentence completeness, and domain relevance
-- Final audit score: **1132/1132 (100%)** across all categories, up from 76.2% baseline
+- New session state on `KernelContext`:
+  - `pendingOffer` — `{ command, prompt, turnSet }` for yes/no follow-through
+  - `pendingClarification` — `{ kind, command|choices }` for shaped clarification answers (case_type, stage, case_number, choice)
+  - `conversation.topic` + `topicHistory` — current and prior topics with auto-expiry
+  - `conversation.subjectEntities` — caseType / stage / caseNumber / metric carried across turns
+  - `conversation.recentList` — last enumerable list shown, kind-tagged so "the first one" knows what it indexes
+- New helpers: `setPendingOffer`, `setPendingClarification`, `setRecentList`, `setSubjectEntity`, `setTopic`
+- New routing helpers: `enrichWithContext`, `applyClarification`, `parseFirstActionButton`, `autoCapturePendingOffer`
+- Component-to-topic mapping in `COMPONENT_TOPICS`, topic-continuation routes in `TOPIC_CONTINUATIONS`
+- New audit harness: `test-harness/run-context-audit.mjs` — 39 multi-turn conversations, 146 assertions, organized by tag (yes_no, topic_continuation, reference, clarification, entity_carry, interpretive, multistep, topic_switch, robustness, adversarial)
+- Both audits at 100%: conversational flow (1132/1132) + context (146/146)
