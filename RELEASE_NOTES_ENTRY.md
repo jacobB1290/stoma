@@ -1,16 +1,16 @@
-# Release Notes: QA Kernel v4.2.2 — Case Lookup Pipeline Fix
+# Release Notes: QA Kernel v4.2.3 — Timezone-Safe Due Dates
 
 ## What Got Fixed 🐛
-- **Case lookup now returns the correct row when a casenumber has been reused.** The `cases` table can have multiple rows with the same `casenumber` (e.g. an archived historical case from 2025 and a currently-active one from 2026). The old query used `.single()` with no tie-breaker, so it returned a stale archived row for questions about the active case. The lookup now pulls up to ten candidates and ranks them — active rows before completed, non-archived before archived, most-recent activity wins ties — so "look up case 1202" finds the live one.
-- **The broken `[ACTION:History|]` literal no longer leaks into the chat bubble.** The History modal was being emitted as `[ACTION:History|[MODAL:HISTORY|...|...]]`. The UI's modal regex strips the inner `[MODAL:...]` first, which left an empty-command `[ACTION:History|]` that got rendered as raw text. The kernel now emits the history modal as a flat `[MODAL:HISTORY|id|casenumber]` tag appended after the response body, with the regular buttons kept separate.
-- **Completed cases with no `completed_at` timestamp no longer punt with "no timestamp on record."** If the case is marked complete but has no completion timestamp, the response now infers lateness from the due date where possible and surfaces archive state ("marked completed and archived, was due 2 months ago") instead of dead-ending.
-- **Active cases with a missing `data.id` don't emit the History modal tag at all**, which prevented the `undefined`-in-MODAL edge case from surfacing in the chat.
+- **Due dates no longer display the wrong calendar day for users in negative-offset timezones.** When the `cases.due` column holds a plain date string like `"2026-04-23"`, JavaScript's `new Date("2026-04-23")` parses it as midnight UTC. A user in MST (UTC-7) or anywhere else west of UTC would then see `.toLocaleDateString()` render as "4/22/2026" — a full calendar day earlier than what was entered. The kernel now detects plain-date values, pulls the YYYY-MM-DD parts directly, and renders the calendar day without any timezone shift.
+- **The false "overdue" flag is gone.** Because midnight-UTC was being treated as the deadline, a case due Apr 23 would look overdue to anyone in a western timezone for 7+ hours after the real end-of-day. The kernel now treats plain-date due values as end-of-day-local, so a case stays "due today" until local midnight and only flips to "overdue" after that.
+- Full ISO timestamp due values (e.g. `"2026-05-10T16:00:00Z"`) continue to render in the viewer's local timezone — that's correct for timestamped deadlines, where the author actually intended a specific wall-clock moment.
 
 ## For Developers 👨‍💻
-- `DBKnowledge.caseByNumber` now returns up to 10 candidate rows and calls a new `DBKnowledge._rankCandidates(rows)` static to pick the best one. `_rankCandidates` is exported-on-the-class (not a module-level export) so tests can monkey-patch `caseByNumber` and delegate ranking to the real implementation.
-- Three new regression conversations under `db_lookup` in the context audit:
-  - Active-vs-archived duplicate dedup
-  - No nested `[ACTION:[MODAL:]]` leakage
-  - Flat `[MODAL:HISTORY|…]` emission only when we actually have an id
-- New `matchesRaw(re, label)` audit helper that checks against the raw response text (including `[MODAL:…]`/`[ACTION:…]` tags) instead of the stripped body.
-- Audit totals: **1132/1132** flow audit, **163/163** context audit.
+- New `U.parseDueDate(value)` returns `{ calendarDay, deadlineTs, isPlainDate }`. All due-date logic in the case lookup now goes through it — both the display line and the overdue/due-today math.
+- New `U.formatDueDate(value)` convenience wrapper returns just the display string.
+- Three new regression tests in the context audit under `db_lookup`:
+  - Plain date `"2026-04-23"` renders as `4/23/2026`, never `4/22/2026`
+  - A case due today-local is NOT marked overdue in the afternoon
+  - Full ISO timestamps render a plausible local-TZ date (May 9–11 range acceptable, accounting for UTC-12 to UTC+14 extremes)
+- Test harness now runs clean under America/Denver, America/Los_Angeles, America/New_York, UTC, Europe/London, Asia/Tokyo, and Pacific/Auckland. Run via `TZ=<zone> node --import ./test-harness/register.mjs ./test-harness/run-context-audit.mjs`.
+- Audit totals: **1132/1132** flow audit, **171/171** context audit (across 7 timezones).

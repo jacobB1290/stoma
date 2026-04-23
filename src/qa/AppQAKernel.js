@@ -25,7 +25,7 @@ import { db } from "../services/caseService";
 // CONFIG
 // ============================================================================
 const CONFIG = {
-  VERSION: "4.2.2",
+  VERSION: "4.2.3",
   CACHE_TTL_MS: 5 * 60 * 1000,
   MAX_CONTEXT_TURNS: 30,
   MAX_BUTTONS: 4,
@@ -130,6 +130,47 @@ const U = {
     const d = Math.round(h / 24);
     if (d < 7) return `${d} day${d !== 1 ? "s" : ""} ago`;
     return then.toLocaleDateString();
+  },
+
+  // Parse a due-date value into a normalized shape:
+  //   { calendarDay: "M/D/YYYY", deadlineTs: <ms>, isPlainDate: bool }
+  // The DB stores `due` sometimes as a plain date string ("2026-04-23") and
+  // sometimes as a full timestamp. A plain date parsed via `new Date(...)`
+  // becomes midnight UTC, which in a negative-offset timezone (e.g. MST) is
+  // the PREVIOUS calendar day — that's why "due 4/23" was rendering as
+  // "4/22" and triggering a false overdue. Parsing the YYYY-MM-DD parts by
+  // hand avoids the timezone flip. For plain dates we treat end-of-day in
+  // the local timezone as the implicit deadline.
+  parseDueDate(value) {
+    if (!value) return null;
+    const s = String(value);
+    const plainDateMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s]00:00(?::00(?:\.000)?)?(?:Z|\+00:?00)?)?$/);
+    if (plainDateMatch) {
+      const [, y, m, d] = plainDateMatch;
+      const month = Number(m);
+      const day = Number(d);
+      const year = Number(y);
+      const deadline = new Date(year, month - 1, day, 23, 59, 59, 999);
+      return {
+        calendarDay: `${month}/${day}/${year}`,
+        deadlineTs: deadline.getTime(),
+        isPlainDate: true,
+      };
+    }
+    const asDate = new Date(s);
+    if (isNaN(asDate.getTime())) return null;
+    return {
+      calendarDay: asDate.toLocaleDateString("en-US"),
+      deadlineTs: asDate.getTime(),
+      isPlainDate: false,
+    };
+  },
+
+  // Render a due-date value as "M/D/YYYY" without any TZ shift for plain
+  // dates. Null-safe.
+  formatDueDate(value) {
+    const parsed = U.parseDueDate(value);
+    return parsed ? parsed.calendarDay : "unknown";
   },
 
   async safeDb(q) {
@@ -2573,7 +2614,11 @@ COMPONENTS.register({
 
     const stage = U.stageFromCase(data);
     const type = U.caseTypeFromModifiers(data.modifiers);
-    const due = data.due ? new Date(data.due) : null;
+    // Normalize the due value once. `parsedDue.deadlineTs` is the correct ms
+    // to compare `now` against for overdue/early checks; `parsedDue.calendarDay`
+    // is the correct "M/D/YYYY" to show in the response.
+    const parsedDue = U.parseDueDate(data.due);
+    const dueDeadline = parsedDue ? parsedDue.deadlineTs : null;
     const now = new Date();
     const mods = data.modifiers || [];
 
@@ -2588,17 +2633,17 @@ COMPONENTS.register({
 
     let status;
     if (isCompleted) {
-      if (completedDate && due && completedDate > due) {
-        const h = (completedDate - due) / 3600000;
+      if (completedDate && dueDeadline && completedDate.getTime() > dueDeadline) {
+        const h = (completedDate.getTime() - dueDeadline) / 3600000;
         const when = h > 24 ? `${Math.round(h / 24)}d` : `${Math.round(h)}h`;
         status = `completed ${U.relativeTime(completedTs)}, ${when} late`;
       } else if (completedDate) {
         status = `completed ${U.relativeTime(completedTs)}, on time`;
-      } else if (due && now > due) {
+      } else if (dueDeadline && now.getTime() > dueDeadline) {
         // Completed flag is set but no completion timestamp — infer lateness
         // from the due date so the response is still useful instead of
         // punting with "no timestamp on record".
-        const h = (now - due) / 3600000;
+        const h = (now.getTime() - dueDeadline) / 3600000;
         const when = h > 24 ? `${Math.round(h / 24)}d` : `${Math.round(h)}h`;
         status = `marked completed${data.archived ? " and archived" : ""}, was due ${when} ago`;
       } else {
@@ -2606,12 +2651,12 @@ COMPONENTS.register({
       }
     } else if (data.archived) {
       status = "archived (not marked completed)";
-    } else if (due && now > due) {
-      const h = (now - due) / 3600000;
+    } else if (dueDeadline && now.getTime() > dueDeadline) {
+      const h = (now.getTime() - dueDeadline) / 3600000;
       const amt = h > 24 ? `${Math.round(h / 24)}d` : `${Math.round(h)}h`;
       status = `overdue by ${amt}, in ${stage}`;
-    } else if (due) {
-      const h = (due - now) / 3600000;
+    } else if (dueDeadline) {
+      const h = (dueDeadline - now.getTime()) / 3600000;
       if (h < 24) status = `due today, in ${stage}`;
       else if (h < 48) status = `due tomorrow, in ${stage}`;
       else status = `due in ${Math.round(h / 24)}d, in ${stage}`;
@@ -2627,7 +2672,7 @@ COMPONENTS.register({
       mods.includes("rush") && ["Flag", "rush"],
       mods.includes("hold") && ["Flag", "on hold"],
       data.created_at && ["Created", U.relativeTime(data.created_at)],
-      due && ["Due", due.toLocaleDateString()],
+      parsedDue && ["Due", parsedDue.calendarDay],
     ]);
 
     // Emit the History modal as a STANDALONE tag appended after the body

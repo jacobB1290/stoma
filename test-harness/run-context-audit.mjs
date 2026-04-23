@@ -214,6 +214,55 @@ const FIXTURES = {
       modifiers: ["stage-design"],
     },
   ],
+  // Timezone edge: plain date in DB that should render as the intended
+  // calendar day, not flip to the previous day in negative-offset TZs.
+  "8820": [
+    {
+      id: "uuid-8820",
+      casenumber: "8820",
+      department: "Digital",
+      completed: false,
+      archived: false,
+      created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+      updated_at: new Date(Date.now() - 86400000).toISOString(),
+      due: "2026-04-23",  // plain date, no time component
+      modifiers: ["stage-design"],
+    },
+  ],
+  // Plain date that is "today" — should not be considered overdue yet.
+  "8830": [
+    (() => {
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = String(today.getMonth() + 1).padStart(2, "0");
+      const d = String(today.getDate()).padStart(2, "0");
+      return {
+        id: "uuid-8830",
+        casenumber: "8830",
+        department: "Digital",
+        completed: false,
+        archived: false,
+        created_at: new Date(Date.now() - 86400000).toISOString(),
+        updated_at: new Date().toISOString(),
+        due: `${y}-${m}-${d}`,
+        modifiers: ["stage-design"],
+      };
+    })(),
+  ],
+  // Full timestamp — should render the correct calendar day regardless.
+  "8840": [
+    {
+      id: "uuid-8840",
+      casenumber: "8840",
+      department: "Digital",
+      completed: false,
+      archived: false,
+      created_at: "2026-05-01T14:00:00Z",
+      updated_at: "2026-05-03T10:00:00Z",
+      due: "2026-05-10T16:00:00Z",
+      modifiers: ["stage-production"],
+    },
+  ],
 };
 
 // Exercise the real _rankCandidates ranking logic by going through the
@@ -255,6 +304,49 @@ const CONVERSATIONS = [
           notContains("MODAL:HISTORY|undefined"),
           notContains("[ACTION:History|[MODAL:"),
           matchesRaw(/\[MODAL:HISTORY\|[^|]+\|1202\]/, "flat MODAL tag for the case"),
+        ] },
+    ],
+  },
+  {
+    tag: "db_lookup",
+    id: "plain_date_due_does_not_flip_to_prev_day",
+    description: "Plain-date `due` values must not render as the previous calendar day in negative-offset timezones",
+    turns: [
+      { q: "tell me about case 8820",
+        expect: [
+          contains("8820"),
+          // Source due is "2026-04-23" (plain date) — must render as 4/23, not 4/22
+          contains("4/23/2026"),
+          notContains("4/22/2026"),
+        ] },
+    ],
+  },
+  {
+    tag: "db_lookup",
+    id: "plain_date_due_overdue_uses_end_of_day",
+    description: "When only a plain date is stored, overdue logic must treat end-of-day as the deadline, not midnight",
+    turns: [
+      { q: "tell me about case 8830",
+        expect: [
+          contains("8830"),
+          // now is Apr 23 afternoon, due is "2026-04-23" — must NOT be overdue
+          notContains("overdue"),
+          matches(/due today|due in/i, "not-yet-due phrasing"),
+        ] },
+    ],
+  },
+  {
+    tag: "db_lookup",
+    id: "full_timestamp_due_renders_correctly",
+    description: "Full ISO timestamps should render a sensible local calendar day — not crash or flip arbitrarily",
+    turns: [
+      { q: "tell me about case 8840",
+        expect: [
+          contains("8840"),
+          // Source is 2026-05-10T16:00:00Z. In any TZ it's May 9, 10, or 11
+          // (UTC-12 edge to UTC+14 edge). The key is we render SOMETHING
+          // reasonable, not "Invalid Date" or garbage.
+          matches(/5\/(9|10|11)\/2026/, "plausible May 9–11 rendering"),
         ] },
     ],
   },
