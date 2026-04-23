@@ -25,7 +25,7 @@ import { db } from "../services/caseService";
 // CONFIG
 // ============================================================================
 const CONFIG = {
-  VERSION: "4.2.1",
+  VERSION: "4.2.2",
   CACHE_TTL_MS: 5 * 60 * 1000,
   MAX_CONTEXT_TURNS: 30,
   MAX_BUTTONS: 4,
@@ -619,18 +619,53 @@ class DBKnowledge {
     return data || [];
   }
 
+  // Fetch a case by casenumber. Two gotchas this handles:
+  //   1. Casenumbers aren't unique across time — the same number can exist as
+  //      a historical archived row AND a currently-active row. We want the
+  //      active one by default.
+  //   2. `.single()` on Supabase errors out when multiple rows match. Using
+  //      plain order-and-limit is more forgiving with real-world data.
+  // Preference order: non-archived + non-completed, then non-archived, then
+  // most-recent by created_at.
   static async caseByNumber(cn) {
     const exact = await U.safeDb(
-      db.from("cases").select("*").eq("casenumber", cn).limit(1).single()
+      db.from("cases").select("*")
+        .eq("casenumber", cn)
+        .order("created_at", { ascending: false })
+        .limit(10)
     );
-    if (exact?.data) return exact.data;
+    const rows = Array.isArray(exact?.data) ? exact.data : [];
+    if (rows.length) {
+      const pick = DBKnowledge._rankCandidates(rows);
+      if (pick) return pick;
+    }
+
+    // Fallback: substring match (for users typing partial numbers).
     const like = await U.safeDb(
       db.from("cases").select("*")
         .ilike("casenumber", `%${cn}%`)
-        .order("created_at", { ascending: false }).limit(5)
+        .order("created_at", { ascending: false })
+        .limit(10)
     );
-    if (like?.data?.length) return like.data[0];
+    const fuzzy = Array.isArray(like?.data) ? like.data : [];
+    if (fuzzy.length) {
+      const pick = DBKnowledge._rankCandidates(fuzzy);
+      if (pick) return pick;
+    }
     return null;
+  }
+
+  static _rankCandidates(rows) {
+    if (!rows?.length) return null;
+    const score = (r) => {
+      let s = 0;
+      if (!r.archived) s += 100;
+      if (!r.completed) s += 50;
+      const t = r.updated_at || r.created_at;
+      if (t) s += Math.min(30, (Date.now() - new Date(t).getTime()) / (-86400000));
+      return s;
+    };
+    return rows.slice().sort((a, b) => score(b) - score(a))[0];
   }
 
   static async historyForCase(caseId, limit = 50) {
@@ -2559,11 +2594,18 @@ COMPONENTS.register({
         status = `completed ${U.relativeTime(completedTs)}, ${when} late`;
       } else if (completedDate) {
         status = `completed ${U.relativeTime(completedTs)}, on time`;
+      } else if (due && now > due) {
+        // Completed flag is set but no completion timestamp — infer lateness
+        // from the due date so the response is still useful instead of
+        // punting with "no timestamp on record".
+        const h = (now - due) / 3600000;
+        const when = h > 24 ? `${Math.round(h / 24)}d` : `${Math.round(h)}h`;
+        status = `marked completed${data.archived ? " and archived" : ""}, was due ${when} ago`;
       } else {
-        status = "marked completed (no completion timestamp on record)";
+        status = `marked completed${data.archived ? " and archived" : ""}`;
       }
     } else if (data.archived) {
-      status = "archived";
+      status = "archived (not marked completed)";
     } else if (due && now > due) {
       const h = (now - due) / 3600000;
       const amt = h > 24 ? `${Math.round(h / 24)}d` : `${Math.round(h)}h`;
@@ -2588,17 +2630,21 @@ COMPONENTS.register({
       due && ["Due", due.toLocaleDateString()],
     ]);
 
-    // Only include the History button if we actually have an ID to attach to
-    // the modal; otherwise the inner [MODAL:HISTORY|undefined|undefined] tag
-    // gets stripped by the UI parser and we render an empty button glyph.
-    const buttons = [];
-    if (data.id && data.casenumber) {
-      buttons.push(["History", `[MODAL:HISTORY|${data.id}|${data.casenumber}]`]);
-    }
-    buttons.push(["Another case", "Find case"]);
-    buttons.push(["Overview", "How am I doing?"]);
+    // Emit the History modal as a STANDALONE tag appended after the body
+    // instead of nesting [MODAL:...] inside an [ACTION:...] command. The
+    // UI's modal regex strips the nested tag from the cleanText pass, which
+    // used to leave behind an empty `[ACTION:History|]` literal in the
+    // chat bubble. Keeping the tags flat avoids that collision entirely.
+    const buttons = [
+      ["Another case", "Find case"],
+      ["Overview", "How am I doing?"],
+    ];
     rb.addButtons(buttons);
-    return rb.finalize(ctx.session.turns.length);
+    const finalized = rb.finalize(ctx.session.turns.length);
+    if (data.id && data.casenumber) {
+      return `${finalized}\n[MODAL:HISTORY|${data.id}|${data.casenumber}]`;
+    }
+    return finalized;
   },
 });
 

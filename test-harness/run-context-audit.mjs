@@ -110,6 +110,13 @@ const matches = (re, label) => ({
   desc: `matches ${label || re}`,
   test: (t) => re.test(stripMeta(t)),
 });
+// Same as matches() but checks against the raw response, including
+// [ACTION:...]/[MODAL:...] meta tags. Use this when the assertion is
+// specifically about whether a meta tag was emitted.
+const matchesRaw = (re, label) => ({
+  desc: `raw-matches ${label || re}`,
+  test: (t) => re.test(String(t || "")),
+});
 const notContains = (substr) => ({
   desc: `does NOT contain "${substr}"`,
   test: (t) => !stripMeta(t).toLowerCase().includes(substr.toLowerCase()),
@@ -151,43 +158,70 @@ const buttonHas = (re) => ({
 // ---------------------------------------------------------------------------
 import { DBKnowledge } from "../src/qa/AppQAKernel.js";
 
+// Each casenumber can map to multiple historical rows (reuse of the
+// number over time), which is how the production bug surfaced. The
+// keys here are the casenumber strings; the values are arrays of rows.
 const FIXTURES = {
-  // Real-world shape that exposed the bug: completed is a boolean true,
-  // there is no completed_at timestamp, and `completed_at` should be
-  // preferred when present.
-  "1202": {
-    id: "uuid-1202",
-    casenumber: "1202",
-    department: "C&B",
-    completed: true,
-    completed_at: null,
-    created_at: "2025-05-27T12:00:00Z",
-    updated_at: "2025-06-04T16:30:00Z",
-    due: "2025-06-04T00:00:00Z",
-    modifiers: ["completed"],
-  },
-  "9999": {
-    id: "uuid-9999",
-    casenumber: "9999",
-    department: "Digital",
-    completed: false,
-    completed_at: null,
-    created_at: "2025-04-01T08:00:00Z",
-    updated_at: "2025-04-15T11:00:00Z",
-    due: "2025-05-01T00:00:00Z",
-    modifiers: ["stage-production", "rush"],
-  },
-  // No id field — exposes the broken History button bug
-  "noid": {
-    casenumber: "5555",
-    department: "C&B",
-    completed: false,
-    due: "2025-12-31T00:00:00Z",
-    modifiers: ["stage-design"],
-  },
+  // Case 1202 has TWO rows: an old archived/completed one from 2025, and
+  // the currently-active one from 2026. The picker should prefer the
+  // active row.
+  "1202": [
+    {
+      id: "uuid-1202-archived",
+      casenumber: "1202",
+      department: "C&B",
+      completed: true,
+      completed_at: null,
+      archived: true,
+      created_at: "2025-05-27T12:00:00Z",
+      updated_at: "2025-07-30T17:17:00Z",
+      due: "2025-06-05T23:00:00Z",
+      modifiers: ["completed", "archived"],
+    },
+    {
+      id: "uuid-1202-active",
+      casenumber: "1202",
+      department: "Digital",
+      completed: false,
+      archived: false,
+      created_at: "2026-04-21T19:45:00Z",
+      updated_at: "2026-04-23T18:00:00Z",
+      due: "2026-04-23T19:00:00Z",
+      modifiers: ["stage-design"],
+      priority: true,
+    },
+  ],
+  "9999": [
+    {
+      id: "uuid-9999",
+      casenumber: "9999",
+      department: "Digital",
+      completed: false,
+      completed_at: null,
+      created_at: "2025-04-01T08:00:00Z",
+      updated_at: "2025-04-15T11:00:00Z",
+      due: "2025-05-01T00:00:00Z",
+      modifiers: ["stage-production", "rush"],
+    },
+  ],
+  "5555": [
+    {
+      // No id field — exposes the broken History button bug
+      casenumber: "5555",
+      department: "C&B",
+      completed: false,
+      due: "2025-12-31T00:00:00Z",
+      modifiers: ["stage-design"],
+    },
+  ],
 };
 
-DBKnowledge.caseByNumber = async (cn) => FIXTURES[cn] || null;
+// Exercise the real _rankCandidates ranking logic by going through the
+// method the kernel calls, not by hard-returning the first row.
+DBKnowledge.caseByNumber = async (cn) => {
+  const rows = FIXTURES[cn] || [];
+  return DBKnowledge._rankCandidates(rows);
+};
 
 // ---------------------------------------------------------------------------
 // Conversation test definitions
@@ -196,28 +230,45 @@ const CONVERSATIONS = [
   // ── DB LOOKUP REGRESSIONS ──────────────────────────────────────────────
   {
     tag: "db_lookup",
-    id: "completed_boolean_does_not_break_date",
-    description: "Case where `completed` is boolean true should not render '12/31/1969'",
+    id: "prefers_active_over_archived_duplicate",
+    description: "When the same casenumber exists as active AND archived rows, the picker should return the active one",
     turns: [
-      { q: "tell me about case 1202",
+      { q: "look up case 1202",
         expect: [
           contains("1202"),
+          matches(/in design|due|active/i, "active-state language"),
+          notContains("archived"),
+          notContains("marked completed"),
           notContains("12/31/1969"),
           notContains("1969"),
-          contains("completed"),
+        ] },
+    ],
+  },
+  {
+    tag: "db_lookup",
+    id: "no_nested_action_modal_tag_leak",
+    description: "History modal should be emitted as a flat tag so no broken [ACTION:History|] literal appears",
+    turns: [
+      { q: "look up case 1202",
+        expect: [
+          notContains("[ACTION:History|]"),
+          notContains("MODAL:HISTORY|undefined"),
+          notContains("[ACTION:History|[MODAL:"),
+          matchesRaw(/\[MODAL:HISTORY\|[^|]+\|1202\]/, "flat MODAL tag for the case"),
         ] },
     ],
   },
   {
     tag: "db_lookup",
     id: "history_button_skipped_when_no_id",
-    description: "When data.id is missing the History button should NOT appear",
+    description: "When data.id is missing the History MODAL tag should NOT be emitted",
     turns: [
       { q: "tell me about case 5555",
         expect: [
           contains("5555"),
           notContains("[ACTION:History|]"),
           notContains("MODAL:HISTORY|undefined"),
+          notContains("[MODAL:HISTORY|"),
         ] },
     ],
   },

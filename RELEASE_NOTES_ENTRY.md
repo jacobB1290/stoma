@@ -1,10 +1,16 @@
-# Release Notes: QA Kernel v4.2.1 — Case Lookup Fix
+# Release Notes: QA Kernel v4.2.2 — Case Lookup Pipeline Fix
 
 ## What Got Fixed 🐛
-- **Case status no longer reads "completed 12/31/1969"** for completed cases. The `cases.completed` column is a boolean flag, but the kernel was passing it to `new Date()` as if it were a timestamp — `new Date(true)` produces 12/31/1969. The kernel now uses `completed_at` for the actual completion timestamp and falls back gracefully when it's missing ("marked completed (no completion timestamp on record)").
-- **Active cases no longer mistakenly show as completed**. A short-lived earlier fix used `updated_at` as a fallback, which was wrong — `updated_at` is just last-edit time. Active cases now correctly show their due-date status (overdue, due today, in production, etc.).
-- **The History button no longer renders as an empty `[ACTION:History|]` glyph** when the case row is missing an `id`. The button is now skipped entirely in that situation rather than emitting an invalid `[MODAL:HISTORY|undefined|undefined]` that the UI parser strips, leaving an empty action.
+- **Case lookup now returns the correct row when a casenumber has been reused.** The `cases` table can have multiple rows with the same `casenumber` (e.g. an archived historical case from 2025 and a currently-active one from 2026). The old query used `.single()` with no tie-breaker, so it returned a stale archived row for questions about the active case. The lookup now pulls up to ten candidates and ranks them — active rows before completed, non-archived before archived, most-recent activity wins ties — so "look up case 1202" finds the live one.
+- **The broken `[ACTION:History|]` literal no longer leaks into the chat bubble.** The History modal was being emitted as `[ACTION:History|[MODAL:HISTORY|...|...]]`. The UI's modal regex strips the inner `[MODAL:...]` first, which left an empty-command `[ACTION:History|]` that got rendered as raw text. The kernel now emits the history modal as a flat `[MODAL:HISTORY|id|casenumber]` tag appended after the response body, with the regular buttons kept separate.
+- **Completed cases with no `completed_at` timestamp no longer punt with "no timestamp on record."** If the case is marked complete but has no completion timestamp, the response now infers lateness from the due date where possible and surfaces archive state ("marked completed and archived, was due 2 months ago") instead of dead-ending.
+- **Active cases with a missing `data.id` don't emit the History modal tag at all**, which prevented the `undefined`-in-MODAL edge case from surfacing in the chat.
 
 ## For Developers 👨‍💻
-- Three new regression tests in `test-harness/run-context-audit.mjs` under the `db_lookup` tag covering: completed case with boolean flag, missing-id History button, and active case status rendering. The harness monkey-patches `DBKnowledge.caseByNumber` with realistic Supabase row shapes so these tests run without hitting the network.
-- Final audit scores: **1132/1132** conversational flow, **156/156** context (now including DB lookup regressions).
+- `DBKnowledge.caseByNumber` now returns up to 10 candidate rows and calls a new `DBKnowledge._rankCandidates(rows)` static to pick the best one. `_rankCandidates` is exported-on-the-class (not a module-level export) so tests can monkey-patch `caseByNumber` and delegate ranking to the real implementation.
+- Three new regression conversations under `db_lookup` in the context audit:
+  - Active-vs-archived duplicate dedup
+  - No nested `[ACTION:[MODAL:]]` leakage
+  - Flat `[MODAL:HISTORY|…]` emission only when we actually have an id
+- New `matchesRaw(re, label)` audit helper that checks against the raw response text (including `[MODAL:…]`/`[ACTION:…]` tags) instead of the stripped body.
+- Audit totals: **1132/1132** flow audit, **163/163** context audit.
