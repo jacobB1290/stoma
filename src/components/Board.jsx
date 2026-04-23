@@ -21,7 +21,7 @@ import {
 import { calculateDepartmentEfficiency } from "../utils/efficiencyCalculations";
 import EfficiencyModal from "../components/EfficiencyModalUI";
 import { CaseManagementModal } from "./CaseManagementModal";
-import askSystem from "../qa/QAEngine";
+import askSystem from "../qa/AppQAKernel";
 
 /* ---------------- Error Boundary ---------------- */
 class ErrorBoundary extends React.Component {
