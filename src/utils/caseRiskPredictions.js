@@ -210,8 +210,10 @@ function advanceToNextWorkMoment(c) {
       continue;
     }
     const w = dayWindows(c);
-    if (c < w[0].start) return w[0].start;
-    for (const win of w) if (win.start <= c && c < win.end) return c;
+    for (const win of w) {
+      if (c < win.start) return win.start;  // between windows — advance to next window, not next day
+      if (win.start <= c && c < win.end) return c;
+    }
     c = new Date(c.getFullYear(), c.getMonth(), c.getDate() + 1, 8, 0, 0, 0);
   }
   return c;
