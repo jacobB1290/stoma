@@ -2991,10 +2991,15 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
         style={{ backgroundColor: COLORS.cream }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ============ HEADER ============ */}
+        {/* ============ SCROLL REGION ============
+            Wraps hero + sticky tabs + body. The hero scrolls away naturally
+            so the tab content gets the full viewport once you start digging
+            in; the tab strip stays pinned to the top of the scroll region.  */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+        {/* ============ HERO (scrolls) ============ */}
         <div
-          className="relative px-10 pt-10 pb-8 flex-shrink-0"
-          style={{ backgroundColor: COLORS.paper, borderBottom: `1px solid ${COLORS.divider}` }}
+          className="relative px-10 pt-10 pb-8"
+          style={{ backgroundColor: COLORS.paper }}
         >
           <button
             onClick={onClose}
@@ -3069,8 +3074,20 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
             </div>
           )}
 
-          {/* Tabs */}
-          <div className="flex items-center gap-8 mt-8" style={{ borderBottom: "none" }}>
+        </div>
+
+        {/* ============ TAB STRIP (sticky inside scroll region) ============
+            Same paper bg as the hero so it reads as part of the header
+            when scrolled to the top, then floats above the cream body
+            with a 1px divider once the hero scrolls away. */}
+        <div
+          className="sticky top-0 z-10 px-10"
+          style={{
+            backgroundColor: COLORS.paper,
+            borderBottom: `1px solid ${COLORS.divider}`,
+          }}
+        >
+          <div className="flex items-center gap-8 pt-3">
             {[
               { k: "overview",  label: "Overview",    icon: Target },
               { k: "timeline",  label: "Timeline",    icon: Clock },
@@ -3095,13 +3112,14 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
           </div>
         </div>
 
-        {/* ============ BODY ============ */}
-        <div className="flex-1 overflow-y-auto px-10 py-8 min-h-0">
+        {/* ============ BODY (scrolls under sticky tabs) ============ */}
+        <div className="px-10 py-8">
           {tab === "overview" && <OverviewTab prediction={prediction} />}
           {tab === "timeline" && <TimelineTab prediction={prediction} />}
           {tab === "signals"  && <SignalsTab  prediction={prediction} />}
           {tab === "features" && <FeaturesTab prediction={prediction} />}
         </div>
+        </div>{/* /scroll region */}
 
         {/* ============ FOOTER ============ */}
         <div
