@@ -308,7 +308,7 @@ function getPillAccent(pct) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
-function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase }) {
+function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLeave, onOpenCase }) {
   const { pct, staffCount, totalCount, deptBreakdown, missedCases, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const [showCompleted, setShowCompleted] = useState(false);
 
@@ -513,6 +513,10 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase 
           : "0 12px 40px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.25)",
         background: surfaceBg,
         border: `1px solid ${surfaceBorder}`,
+        // While exiting, let the cursor pass through. Without this the
+        // fade-out is interactable and the pointer can hover ghost edges
+        // that no longer feel "live."
+        pointerEvents: isOpen ? "auto" : "none",
       }}
     >
       {/* Header band — turns red when >10% */}
@@ -922,13 +926,24 @@ export default function FrontOfficePill() {
     boxShadow: "0 0 12px rgba(220,38,38,0.25), 0 0 4px rgba(220,38,38,0.15)",
   } : {};
 
-  const handleMouseEnter = () => {
-    clearTimeout(hoverTimerRef.current);
-    setHovered(true);
-  };
-  const handleMouseLeave = () => {
+  // Hover model:
+  //   - Only the pill opens the tooltip.
+  //   - The tooltip can keep an already-open tooltip alive (cancel a pending
+  //     close), but cannot re-open it once it's closing/closed. This prevents
+  //     the fade-out from being reversed when the cursor brushes the still-
+  //     mounted tooltip during its exit animation.
+  const cancelClose = () => clearTimeout(hoverTimerRef.current);
+  const scheduleClose = () => {
+    cancelClose();
     hoverTimerRef.current = setTimeout(() => setHovered(false), 120);
   };
+  const handlePillEnter = () => {
+    cancelClose();
+    setHovered(true);
+  };
+  const handlePillLeave = () => scheduleClose();
+  const handleTooltipEnter = () => cancelClose();
+  const handleTooltipLeave = () => scheduleClose();
 
   const hasToday = todayMissed.length > 0;
   const labelColor = accent.level === "amber" ? accent.dot
@@ -939,8 +954,8 @@ export default function FrontOfficePill() {
     <div
       ref={pillRef}
       className="relative flex items-center"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={handlePillEnter}
+      onMouseLeave={handlePillLeave}
     >
       <motion.div
         layout
@@ -1067,8 +1082,9 @@ export default function FrontOfficePill() {
           <PillTooltip
             stats={stats}
             anchorRef={pillRef}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+            isOpen={hovered}
+            onMouseEnter={handleTooltipEnter}
+            onMouseLeave={handleTooltipLeave}
             onOpenCase={(c) => setHistoryCase({ id: c.id, caseNumber: c.caseNumber })}
           />
         )}
