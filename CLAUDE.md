@@ -27,6 +27,21 @@ There is no standalone lint script. ESLint runs automatically through `react-scr
 
 > **Note:** `package.json` uses `"CI=false"` in the build script — this is intentional for Vercel deployments to prevent ESLint warnings from failing the build.
 
+### Pre-push validation — run what Vercel runs
+
+Vercel's deploy step runs `npm run build`, which invokes `react-scripts build`. That step **errors on ESLint rule violations** even when `CI=false` (e.g. `react-hooks/rules-of-hooks`, `no-undef`). A syntax-only check (Babel/AST parser) will *not* catch these — the hooks-rules plugin is what catches conditional `useMemo`/`useEffect` calls.
+
+**Before every push, AI assistants must run the same validation Vercel will run.** Choose one:
+
+| Scope | Command | Time |
+|---|---|---|
+| Quick — only the file(s) you changed | `npx eslint --resolve-plugins-relative-to ./node_modules/react-scripts <changed paths>` | seconds |
+| Full — exactly what Vercel runs | `npm run build` | ~30s |
+
+If `node_modules` is missing (web sessions), the SessionStart hook in `.claude/hooks/session-start.sh` runs `npm install` automatically. If you ever need to bootstrap manually: `npm install --no-audit --no-fund`.
+
+**Never push without running one of these checks.** A syntax parse is not a substitute.
+
 ---
 
 ## Environment Variables
