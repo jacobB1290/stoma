@@ -2991,14 +2991,12 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
         style={{ backgroundColor: COLORS.cream }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ============ SCROLL REGION ============
-            Wraps hero + sticky tabs + body. The hero scrolls away naturally
-            so the tab content gets the full viewport once you start digging
-            in; the tab strip stays pinned to the top of the scroll region.  */}
-        <div className="flex-1 overflow-y-auto min-h-0">
-        {/* ============ HERO (scrolls) ============ */}
+        {/* ============ HERO (always visible) ============
+            Identity: case number, stage meta, status, recommendation. Pinned
+            so the user always knows which case they're looking at and what
+            the headline answer is, regardless of how deep they scroll. */}
         <div
-          className="relative px-10 pt-10 pb-8"
+          className="relative px-10 pt-10 pb-8 flex-shrink-0"
           style={{ backgroundColor: COLORS.paper }}
         >
           <button
@@ -3076,12 +3074,11 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
         </div>
 
-        {/* ============ TAB STRIP (sticky inside scroll region) ============
-            Same paper bg as the hero so it reads as part of the header
-            when scrolled to the top, then floats above the cream body
-            with a 1px divider once the hero scrolls away. */}
+        {/* ============ TAB STRIP (always visible) ============
+            Pinned navigation. Same paper bg as the hero so it reads as a
+            single connected header.  */}
         <div
-          className="sticky top-0 z-10 px-10"
+          className="px-10 flex-shrink-0"
           style={{
             backgroundColor: COLORS.paper,
             borderBottom: `1px solid ${COLORS.divider}`,
@@ -3112,14 +3109,17 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
           </div>
         </div>
 
-        {/* ============ BODY (scrolls under sticky tabs) ============ */}
-        <div className="px-10 py-8">
+        {/* ============ BODY (the only thing that scrolls) ============
+            Hero, tabs and footer stay pinned; scroll happens here when the
+            tab content exceeds the available height. Long enumeration lists
+            inside (e.g. FeatureTable) keep their own bounded scroll boxes
+            so they don't push the rest of the tab content out of view. */}
+        <div className="flex-1 overflow-y-auto min-h-0 px-10 py-8">
           {tab === "overview" && <OverviewTab prediction={prediction} />}
           {tab === "timeline" && <TimelineTab prediction={prediction} />}
           {tab === "signals"  && <SignalsTab  prediction={prediction} />}
           {tab === "features" && <FeaturesTab prediction={prediction} />}
         </div>
-        </div>{/* /scroll region */}
 
         {/* ============ FOOTER ============ */}
         <div
