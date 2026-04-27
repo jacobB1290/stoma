@@ -3320,79 +3320,183 @@ function OverviewTab({ prediction }) {
 
 function TimelineTab({ prediction }) {
   const { stageHours, totalHours, stageETAs, totalETAs } = prediction;
-  const now = getCurrentTime();
 
-  const rows = [
-    { label: "Stage entered", value: formatDate(prediction.stageEnteredAt), muted: true },
-    { label: "Time in stage", value: formatDuration(prediction.timeInStageMs), muted: true },
-    { label: "Elapsed work", value: formatHours(prediction.elapsedWorkHours), muted: true },
-    { divider: true },
-    { label: "Stage exit · p10 (optimistic)",   value: formatDate(stageETAs.p10), sub: formatHours(stageHours.p10) },
-    { label: "Stage exit · p50 (best estimate)", value: formatDate(stageETAs.p50), sub: formatHours(stageHours.p50), bold: true },
-    { label: "Stage exit · p75 (conservative)", value: formatDate(stageETAs.p75), sub: formatHours(stageHours.p75) },
-    { label: "Stage exit · p90 (pessimistic)",  value: formatDate(stageETAs.p90), sub: formatHours(stageHours.p90) },
-    { divider: true },
-    { label: "Completion · p10 (optimistic)",   value: formatDate(totalETAs.p10), sub: formatHours(totalHours.p10) },
-    { label: "Completion · p50 (best estimate)", value: formatDate(totalETAs.p50), sub: formatHours(totalHours.p50), bold: true },
-    { label: "Completion · p75 (conservative)", value: formatDate(totalETAs.p75), sub: formatHours(totalHours.p75) },
-    { label: "Completion · p90 (pessimistic)",  value: formatDate(totalETAs.p90), sub: formatHours(totalHours.p90) },
-    { divider: true },
-    { label: "Due date", value: formatDate(prediction.dueDateCalc, false), highlight: true },
+  const stageLabel = (prediction.currentStage || "").replace(/^./, (c) => c.toUpperCase());
+
+  const history = [
+    { label: "Stage entered",  value: formatDate(prediction.stageEnteredAt) },
+    { label: "Time in stage",  value: formatDuration(prediction.timeInStageMs) },
+    { label: "Elapsed work",   value: formatHours(prediction.elapsedWorkHours) },
   ];
 
-  return (
-    <div className="space-y-8">
-      <TimelineHero prediction={prediction} />
+  const stageExit = [
+    { tier: "P10", desc: "Optimistic",     eta: stageETAs.p10, hours: stageHours.p10 },
+    { tier: "P50", desc: "Best estimate",  eta: stageETAs.p50, hours: stageHours.p50, primary: true },
+    { tier: "P75", desc: "Conservative",   eta: stageETAs.p75, hours: stageHours.p75 },
+    { tier: "P90", desc: "Pessimistic",    eta: stageETAs.p90, hours: stageHours.p90 },
+  ];
 
+  const completion = [
+    { tier: "P10", desc: "Optimistic",     eta: totalETAs.p10, hours: totalHours.p10 },
+    { tier: "P50", desc: "Best estimate",  eta: totalETAs.p50, hours: totalHours.p50, primary: true },
+    { tier: "P75", desc: "Conservative",   eta: totalETAs.p75, hours: totalHours.p75 },
+    { tier: "P90", desc: "Pessimistic",    eta: totalETAs.p90, hours: totalHours.p90 },
+  ];
+
+  const sectionShell = {
+    backgroundColor: COLORS.paper,
+    border: `1px solid ${COLORS.borderSoft}`,
+  };
+
+  const SectionHeader = ({ title, sub }) => (
+    <div
+      className="px-5 py-3 flex items-baseline justify-between"
+      style={{ borderBottom: `1px solid ${COLORS.divider}` }}
+    >
+      <div className="text-[10px] uppercase tracking-[0.2em] font-medium" style={{ color: COLORS.cognac }}>
+        {title}
+      </div>
+      <div className="text-[10px]" style={{ color: COLORS.inkFaint }}>
+        {sub}
+      </div>
+    </div>
+  );
+
+  const PercentileRow = ({ row, isFirst }) => (
+    <div
+      className="px-5 py-2.5 grid grid-cols-12 items-center gap-3"
+      style={{
+        borderTop: isFirst ? "none" : `1px solid ${COLORS.divider}`,
+        backgroundColor: row.primary ? COLORS.cognacGlow : "transparent",
+      }}
+    >
+      <div className="col-span-2">
+        <span
+          className="text-[10px] tracking-[0.12em] tabular-nums"
+          style={{
+            color: row.primary ? COLORS.cognac : COLORS.inkFaint,
+            fontWeight: 600,
+            fontFamily: "monospace",
+          }}
+        >
+          {row.tier}
+        </span>
+      </div>
       <div
-        className="rounded-xl overflow-hidden"
-        style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.borderSoft}` }}
+        className="col-span-5 text-sm"
+        style={{
+          color: row.primary ? COLORS.cognac : COLORS.ink,
+          fontWeight: row.primary ? 500 : 400,
+        }}
       >
-        {rows.map((row, i) => {
-          if (row.divider) {
-            return <div key={i} style={{ height: 1, backgroundColor: COLORS.divider }} />;
-          }
-          return (
+        {row.desc}
+      </div>
+      <div
+        className="col-span-2 text-xs tabular-nums text-right"
+        style={{ color: COLORS.inkFaint, fontFamily: "monospace" }}
+      >
+        {formatHours(row.hours)}
+      </div>
+      <div
+        className="col-span-3 text-sm tabular-nums text-right"
+        style={{
+          color: row.primary ? COLORS.cognac : COLORS.ink,
+          fontFamily: "monospace",
+          fontWeight: row.primary ? 500 : 400,
+        }}
+      >
+        {formatDate(row.eta)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full gap-6">
+      {/* Pinned graph — doesn't scroll */}
+      <div className="flex-shrink-0">
+        <TimelineHero prediction={prediction} />
+      </div>
+
+      {/* Scrolling section list, grouped by type */}
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4">
+        {/* ── HISTORY ── */}
+        <div className="rounded-xl" style={sectionShell}>
+          <SectionHeader title="History" sub="What's happened so far" />
+          {history.map((r, i) => (
             <div
               key={i}
-              className="flex items-center justify-between px-6 py-3.5"
-              style={{
-                borderTop: i === 0 ? "none" : `1px solid ${COLORS.divider}`,
-                backgroundColor: row.highlight ? COLORS.cognacGlow : "transparent",
-              }}
+              className="px-5 py-3 flex items-center justify-between"
+              style={{ borderTop: i === 0 ? "none" : `1px solid ${COLORS.divider}` }}
             >
-              <div
-                className="text-sm"
-                style={{
-                  color: row.muted ? COLORS.inkSoft : row.highlight ? COLORS.cognac : COLORS.ink,
-                  fontWeight: row.bold ? 500 : 400,
-                }}
+              <span className="text-sm" style={{ color: COLORS.inkSoft }}>{r.label}</span>
+              <span
+                className="text-sm tabular-nums"
+                style={{ color: COLORS.ink, fontFamily: "monospace" }}
               >
-                {row.label}
-              </div>
-              <div className="flex items-center gap-4">
-                {row.sub && (
-                  <div
-                    className="text-xs tabular-nums"
-                    style={{ color: COLORS.inkFaint, fontFamily: "monospace" }}
-                  >
-                    {row.sub}
-                  </div>
-                )}
-                <div
-                  className="text-sm tabular-nums"
-                  style={{
-                    color: row.highlight ? COLORS.cognac : COLORS.ink,
-                    fontFamily: "monospace",
-                    fontWeight: row.bold || row.highlight ? 500 : 400,
-                  }}
-                >
-                  {row.value}
-                </div>
-              </div>
+                {r.value}
+              </span>
             </div>
-          );
-        })}
+          ))}
+        </div>
+
+        {/* ── STAGE EXIT PREDICTION ── */}
+        <div className="rounded-xl" style={sectionShell}>
+          <SectionHeader
+            title={`Stage exit · ${stageLabel}`}
+            sub="When this stage finishes"
+          />
+          {/* column legend */}
+          <div
+            className="px-5 py-2 grid grid-cols-12 gap-3 items-center"
+            style={{ borderBottom: `1px solid ${COLORS.divider}`, backgroundColor: COLORS.cream }}
+          >
+            <div className="col-span-2 text-[9px] uppercase tracking-[0.15em]" style={{ color: COLORS.inkFaint }}>Tier</div>
+            <div className="col-span-5 text-[9px] uppercase tracking-[0.15em]" style={{ color: COLORS.inkFaint }}>Scenario</div>
+            <div className="col-span-2 text-[9px] uppercase tracking-[0.15em] text-right" style={{ color: COLORS.inkFaint }}>Hours left</div>
+            <div className="col-span-3 text-[9px] uppercase tracking-[0.15em] text-right" style={{ color: COLORS.inkFaint }}>Finishes</div>
+          </div>
+          {stageExit.map((r, i) => (
+            <PercentileRow key={r.tier} row={r} isFirst={i === 0} />
+          ))}
+        </div>
+
+        {/* ── CASE COMPLETE PREDICTION ── */}
+        <div className="rounded-xl" style={sectionShell}>
+          <SectionHeader title="Case complete" sub="When the whole case finishes" />
+          <div
+            className="px-5 py-2 grid grid-cols-12 gap-3 items-center"
+            style={{ borderBottom: `1px solid ${COLORS.divider}`, backgroundColor: COLORS.cream }}
+          >
+            <div className="col-span-2 text-[9px] uppercase tracking-[0.15em]" style={{ color: COLORS.inkFaint }}>Tier</div>
+            <div className="col-span-5 text-[9px] uppercase tracking-[0.15em]" style={{ color: COLORS.inkFaint }}>Scenario</div>
+            <div className="col-span-2 text-[9px] uppercase tracking-[0.15em] text-right" style={{ color: COLORS.inkFaint }}>Hours left</div>
+            <div className="col-span-3 text-[9px] uppercase tracking-[0.15em] text-right" style={{ color: COLORS.inkFaint }}>Finishes</div>
+          </div>
+          {completion.map((r, i) => (
+            <PercentileRow key={r.tier} row={r} isFirst={i === 0} />
+          ))}
+        </div>
+
+        {/* ── DUE DATE ── */}
+        <div
+          className="rounded-xl px-5 py-4 flex items-baseline justify-between"
+          style={{ ...sectionShell, backgroundColor: COLORS.cognacGlow, border: `1px solid ${COLORS.cognac}33` }}
+        >
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] font-medium" style={{ color: COLORS.cognac }}>
+              Due date
+            </div>
+            <div className="text-[10px] mt-0.5" style={{ color: COLORS.inkFaint }}>
+              Hard deadline
+            </div>
+          </div>
+          <span
+            className="text-base tabular-nums"
+            style={{ color: COLORS.cognac, fontFamily: "monospace", fontWeight: 600 }}
+          >
+            {formatDate(prediction.dueDateCalc, false)}
+          </span>
+        </div>
       </div>
     </div>
   );
