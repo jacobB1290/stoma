@@ -1470,6 +1470,211 @@ export function resolveCaseState(inputs) {
 }
 
 /** ========================================================================
+ *  RISK SIGNAL REGISTRY
+ *
+ *  Each entry binds one (or more) features from the V8 feature dictionary to
+ *  a clean, user-facing explanation grounded in the actual numeric value.
+ *
+ *  Contract:
+ *    activate(f, p):   boolean — does this signal fire for this case?
+ *    intensity(f, p):  number 0..1 — how strong the signal is (drives ordering)
+ *    format(f, p):     { label, detail } — short label + sentence backed by data
+ *
+ *  All thresholds and string templates live here (single source of truth) so
+ *  signals can be tuned without touching the prediction pipeline or the modal.
+ *  ======================================================================== */
+
+const RISK_SIGNAL_REGISTRY = [
+  {
+    key: "rush_added_late",
+    activate: (f) => f.rush_added_late === 1,
+    intensity: (f) => clamp01((f.hours_to_rush || 4) / 24),
+    format: (f) => {
+      const hrs = Math.round(f.hours_to_rush || 0);
+      return {
+        label: "Rush added after the case was created",
+        detail: hrs >= 1
+          ? `Marked rush ${hrs}h after creation, so the original lead time was set without rush in mind.`
+          : "Rush flag was added after creation, after planning had already begun.",
+      };
+    },
+  },
+  {
+    key: "backward_moves",
+    activate: (f) => (f.backward_count || 0) >= 1,
+    intensity: (f) => clamp01((f.backward_count || 0) / 3),
+    format: (f) => {
+      const n = f.backward_count;
+      return {
+        label: n > 1 ? `Sent backward ${n} times` : "Sent backward in workflow",
+        detail: n > 1
+          ? `Returned to an earlier stage ${n} times — each loop replays prior work.`
+          : "Returned to an earlier stage at least once — replays prior work.",
+      };
+    },
+  },
+  {
+    key: "qc_loops",
+    activate: (_f, p) => (p.qcLoops || 0) > 0,
+    intensity: (_f, p) => clamp01((p.qcLoops || 0) / 3),
+    format: (_f, p) => {
+      const n = p.qcLoops;
+      return {
+        label: n > 1 ? `${n} QC loops` : "Bounced back to QC",
+        detail: n > 1
+          ? `Returned through quality control ${n} times — each loop adds review and rework.`
+          : "Returned through quality control at least once, adding review and rework.",
+      };
+    },
+  },
+  {
+    key: "due_pulled_in",
+    activate: (f) => (f.due_changes_closer || 0) >= 1,
+    intensity: (f) => clamp01((f.due_changes_closer || 0) / 2),
+    format: (f) => {
+      const n = f.due_changes_closer;
+      return {
+        label: n > 1 ? `Due date pulled in ${n} times` : "Due date pulled in",
+        detail: n > 1
+          ? `Due date was moved closer ${n} times — less buffer than originally planned.`
+          : "Due date was moved closer — less buffer than originally planned.",
+      };
+    },
+  },
+  {
+    key: "overrun",
+    activate: (f) => f.is_overrun === 1,
+    intensity: (f) => clamp01(((f.frac_budget || 1) - 1)),
+    format: (f) => {
+      const pct = Math.round((f.frac_budget || 0) * 100);
+      return {
+        label: "Past the allowed time for this stage",
+        detail: `Already used ${pct}% of the working-hours budget allocated to this stage.`,
+      };
+    },
+  },
+  {
+    key: "thin_budget",
+    activate: (f) => f.is_overrun !== 1 && f.thin_rem_6h === 1,
+    activatePriority: 5,
+    intensity: (f) => clamp01((6 - Math.max(0, f.remaining_budget || 0)) / 6),
+    format: (f) => {
+      const hrs = Math.max(0, f.remaining_budget || 0);
+      return {
+        label: "Tight remaining budget",
+        detail: `Only ${hrs.toFixed(1)}h of working time left before this stage's budget runs out.`,
+      };
+    },
+  },
+  {
+    key: "hold_cycles",
+    activate: (f) => (f.hold_cycles || 0) >= 2,
+    intensity: (f) => clamp01((f.hold_cycles || 0) / 4),
+    format: (f) => ({
+      label: `${f.hold_cycles} hold cycles`,
+      detail: `Case was placed on hold and resumed ${f.hold_cycles} times in this stage.`,
+    }),
+  },
+  {
+    key: "long_hold",
+    activate: (f, p) => p.onHold && (f.hold_during || 0) >= 4 && (f.hold_cycles || 0) < 2,
+    intensity: (f) => clamp01((f.hold_during || 0) / 16),
+    format: (f) => {
+      const hrs = Math.round(f.hold_during || 0);
+      return {
+        label: "Long hold time",
+        detail: `On hold for ${hrs}h within this stage.`,
+      };
+    },
+  },
+  {
+    key: "concurrent_load",
+    activate: (f) => (f.concurrent_in_stage || 0) >= 8,
+    intensity: (f) => clamp01(((f.concurrent_in_stage || 0) - 6) / 12),
+    format: (f) => {
+      const n = Math.round(f.concurrent_in_stage);
+      return {
+        label: `${n} concurrent cases in this stage`,
+        detail: `Competing for capacity with ${n} other active cases at the same stage right now.`,
+      };
+    },
+  },
+  {
+    key: "idle",
+    activate: (f) => (f.hours_idle || 0) >= 18,
+    intensity: (f) => clamp01(((f.hours_idle || 0) - 12) / 24),
+    format: (f) => {
+      const hrs = Math.round(f.hours_idle);
+      return {
+        label: `Inactive for ${hrs}h`,
+        detail: `No activity recorded on the case in the last ${hrs}h.`,
+      };
+    },
+  },
+  {
+    key: "tight_batch",
+    activate: (f) => (f.batch_siblings || 0) >= 3 && (f.lead_days_raw || 0) <= 2,
+    intensity: (f) => clamp01((f.batch_siblings || 0) / 8) * 0.85,
+    format: (f) => {
+      const sib = f.batch_siblings;
+      const lead = (f.lead_days_raw || 0).toFixed(1);
+      return {
+        label: "Tight batch intake",
+        detail: `${sib} sibling cases came in together with only ${lead}d of lead time before due.`,
+      };
+    },
+  },
+  {
+    key: "flex_pipeline",
+    activate: (f) => f.is_flex === 1 && (f.stages_remaining || 0) >= 2,
+    intensity: (f) => clamp01((f.stages_remaining || 0) / 3) * 0.6,
+    format: (f) => ({
+      label: "Flex case with stages still ahead",
+      detail: `Flex priority with ${f.stages_remaining} stages still to clear before completion.`,
+    }),
+  },
+];
+
+function clamp01(x) {
+  if (!Number.isFinite(x)) return 0;
+  if (x < 0) return 0;
+  if (x > 1) return 1;
+  return x;
+}
+
+/**
+ * Activate every signal in the registry against this case's feature dict and
+ * return the top N ordered by intensity. Each signal carries the underlying
+ * value so the UI can show the data behind the explanation.
+ */
+function buildRiskSignals(prediction, maxSignals = 5) {
+  const f = prediction.featureDict || {};
+  const fired = [];
+  for (const sig of RISK_SIGNAL_REGISTRY) {
+    let active = false;
+    try { active = !!sig.activate(f, prediction); } catch { active = false; }
+    if (!active) continue;
+
+    let intensity = 0;
+    try { intensity = sig.intensity(f, prediction); } catch { intensity = 0; }
+    intensity = clamp01(intensity);
+
+    let body = null;
+    try { body = sig.format(f, prediction); } catch { body = null; }
+    if (!body || !body.label) continue;
+
+    fired.push({
+      key: sig.key,
+      label: body.label,
+      detail: body.detail || "",
+      intensity,
+    });
+  }
+  fired.sort((a, b) => b.intensity - a.intensity);
+  return fired.slice(0, maxSignals);
+}
+
+/** ========================================================================
  *  MAIN GENERATOR — produces prediction objects for all active cases
  *  ======================================================================== */
 
@@ -1683,6 +1888,7 @@ export function generateCaseRiskPredictions(
 
       // Diagnostics / modal data
       riskReasons: [],
+      riskSignals: [],
       recommendation: "",
       modelUsed: ml.modelUsed,
       featureArray: ml.featureArray,
@@ -1709,34 +1915,22 @@ export function generateCaseRiskPredictions(
     });
   }
 
-  // Build risk reasons from the feature dict (data-driven, not hand-rules)
+  // Activate the risk-signal registry for each case. Signals are derived from
+  // the V8 feature dictionary itself (activation + intensity), so explanations
+  // are always grounded in the case's real values and stay in sync with the
+  // model's input features.
   for (const p of predictions) {
-    const reasons = [];
-    const f = p.featureDict;
+    const signals = buildRiskSignals(p, 5);
+    p.riskSignals = signals;
+    // Backwards-compatible flat list consumed by other surfaces (board chips).
+    p.riskReasons = signals.map((s) => s.label);
 
-    // Order matters: list most relevant first
-    if (f.rush_added_late) reasons.push("rush added after creation");
-    if (f.backward_count >= 1) reasons.push(`${f.backward_count} backward move${f.backward_count > 1 ? "s" : ""}`);
-    if (f.due_changes_closer >= 1) reasons.push("due date pushed closer");
-    if (f.hold_cycles >= 2) reasons.push(`${f.hold_cycles} hold cycles`);
-    else if (p.onHold && f.hold_during >= 4) reasons.push("long hold time");
-    if (f.concurrent_in_stage >= 8) reasons.push(`${Math.round(f.concurrent_in_stage)} concurrent cases`);
-    if (f.hours_idle >= 18) reasons.push("inactive 18h+");
-    if (f.is_overrun) reasons.push("past allowed time");
-    if (f.batch_siblings >= 3 && f.lead_days_raw <= 2) reasons.push("tight batch intake");
-    if (f.is_flex && f.stages_remaining >= 2) reasons.push("flex case with pipeline ahead");
-    if (p.qcLoops > 0) reasons.push(`${p.qcLoops} QC loop${p.qcLoops > 1 ? "s" : ""}`);
-
-    // Recommendations keyed on risk level
-    const rec = {
+    p.recommendation = {
       critical: "Immediate escalation required",
       high: "Actively monitor and prioritize",
       medium: "Check progress today",
       low: "On track — no action needed",
     }[p.riskLevel];
-
-    p.riskReasons = reasons.slice(0, 5);
-    p.recommendation = rec;
   }
 
   const summary = {
@@ -2784,12 +2978,19 @@ const QuantileBar = RangeBar;
  * signals detected" one.
  */
 function RiskFactors({ prediction, status }) {
-  const { riskReasons } = prediction;
+  const { riskSignals, riskReasons } = prediction;
   const s = status || unifiedStatus(prediction);
   const tone = RISK_STYLE[s.tone] || RISK_STYLE.low;
   const isElevated = s.tone !== "low";
 
-  if (!riskReasons || riskReasons.length === 0) {
+  // Prefer the structured signal list (label + detail + intensity) when
+  // available. Fall back to the flat reason strings for any caller that hasn't
+  // been re-run through the new pipeline yet.
+  const signals = (riskSignals && riskSignals.length > 0)
+    ? riskSignals
+    : (riskReasons || []).map((label) => ({ key: label, label, detail: "", intensity: 0 }));
+
+  if (signals.length === 0) {
     // Truly "on track" — green reassurance
     if (!isElevated) {
       return (
@@ -2831,24 +3032,65 @@ function RiskFactors({ prediction, status }) {
 
   return (
     <div className="space-y-3">
-      {riskReasons.map((reason, i) => (
-        <div
-          key={i}
-          className="flex items-start gap-3 p-4 rounded-xl"
-          style={{
-            backgroundColor: COLORS.paper,
-            border: `1px solid ${COLORS.borderSoft}`,
-          }}
-        >
+      {signals.map((sig) => {
+        const intensityPct = Math.round((sig.intensity || 0) * 100);
+        return (
           <div
-            className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0"
-            style={{ backgroundColor: tone.fg }}
-          />
-          <div className="text-sm leading-relaxed" style={{ color: COLORS.ink }}>
-            {reason}
+            key={sig.key}
+            className="p-4 rounded-xl"
+            style={{
+              backgroundColor: COLORS.paper,
+              border: `1px solid ${COLORS.borderSoft}`,
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{ backgroundColor: tone.fg }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="text-sm font-medium leading-snug" style={{ color: COLORS.ink }}>
+                    {sig.label}
+                  </div>
+                  {sig.intensity > 0 && (
+                    <div
+                      className="text-[10px] uppercase tracking-[0.16em] tabular-nums flex-shrink-0"
+                      style={{ color: COLORS.inkFaint, fontFamily: "monospace" }}
+                      title="How strongly this signal fired, based on the underlying value"
+                    >
+                      {intensityPct}%
+                    </div>
+                  )}
+                </div>
+                {sig.detail && (
+                  <div
+                    className="text-xs mt-1.5 leading-relaxed"
+                    style={{ color: COLORS.inkSoft }}
+                  >
+                    {sig.detail}
+                  </div>
+                )}
+                {sig.intensity > 0 && (
+                  <div
+                    className="mt-2 h-1 rounded-full overflow-hidden"
+                    style={{ backgroundColor: `${tone.fg}1a` }}
+                  >
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.max(6, intensityPct)}%`,
+                        backgroundColor: tone.fg,
+                        transition: "width 220ms ease",
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
