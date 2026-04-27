@@ -1,20 +1,15 @@
-# Release Notes: Modal Z-Index Consistency Fix
+# Release Notes: Morning Dropdown on Front-Office Pill
 
-## What Got Fixed 🐛
-- **The Efficiency Analysis modal (Digital/Metal/C&B) now layers cleanly above page chrome.** It had been pinned at `z-50`, which is the same tier Tailwind uses for sticky nav elements, so dropdowns and page overlays could bleed over the modal edges. Bumped to `z-[100]`.
-- **The case-history drill-in now sits above the Case Risk view.** Opening a case's history from inside the risk modal used to send the history modal *behind* the risk modal (risk was at `z-[10001]`, history at `z-[300]`), which made it effectively invisible. CaseHistory is now at `z-[10100]` so it floats above any risk/analytics modal stack.
-- **AllHistoryModal's backdrop + suspense loader moved to the same top tier.** Previously `z-[150]` / `z-[301]`, now `z-[10050]` / `z-[10101]` so it always sits above the risk view when triggered from it.
+## What's New ✨
+- The "% missed" pill in the header now morphs into a small daily dropdown when clicked, showing the case numbers entered today by non–front-office staff.
+- The dropdown is visually unified with the pill — clicking flattens the pill's bottom corners and extrudes a connected panel below.
+- Daily reset: each morning the list shows only what was added that day. If nothing's been missed today, you'll see "Nothing missed today."
+
+## For Users 👤
+- **Hover** the pill → full monthly detail tooltip (unchanged).
+- **Click** the pill → quick "Today" list of cases that production/staff logged instead of front office.
+- Click any case in the list to jump to its case history.
+- Click outside or click the pill again to collapse it.
 
 ## For Developers 👨‍💻
-- New layering scheme (from bottom to top):
-  - Page content / editor / add-case: ≤ 60
-  - Base modals (efficiency, archive): 100–300
-  - OverdueNotifier: 260 (above editor, below top-tier drill-ins)
-  - AllHistoryModal: 10050
-  - CaseRiskModal: 10001
-  - CaseRiskAnalyticsModal: 10002
-  - CaseHistory: 10100 (always the topmost drill-in)
-  - AllHistoryModal suspense loader: 10101
-- Comment and number in `src/components/OverdueNotifier.jsx` updated to reflect new layering.
-- No changes to `ArchiveModal` (its `z-[300]` is correct — it's a standalone top-level modal, never opened from inside another).
-- Both audits remain at 100%: 1132/1132 flow, 171/171 context.
+- `src/components/FrontOfficeBubble.jsx`: replaced the click-to-pin-tooltip behavior with a `morphed` state that animates the pill's bottom corners square and renders a connected `<motion.div>` panel below. Today's misses are derived in a `useMemo` filtered against a local-time `00:00` boundary off `stats.missedCases`. The detailed hover tooltip is suppressed while morphed.
