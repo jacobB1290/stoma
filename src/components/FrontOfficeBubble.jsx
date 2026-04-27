@@ -895,6 +895,15 @@ export default function FrontOfficePill() {
     };
   }, []);
 
+  // ── Today's missed cases — local-time day boundary, daily reset
+  // Hook must run before early returns to keep call order stable.
+  const todayMissed = useMemo(() => {
+    if (!stats?.missedCases) return [];
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return stats.missedCases.filter(c => new Date(c.createdAt) >= start);
+  }, [stats?.missedCases]);
+
   const foList = getFrontOfficeList();
   if (foList.length === 0) return null;
   if (disabled) return null;
@@ -938,14 +947,6 @@ export default function FrontOfficePill() {
     setMorphed(m => !m);
     setHovered(false);
   };
-
-  // ── Today's missed cases — local-time day boundary, daily reset
-  const todayMissed = useMemo(() => {
-    if (!stats?.missedCases) return [];
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return stats.missedCases.filter(c => new Date(c.createdAt) >= start);
-  }, [stats?.missedCases]);
 
   // Theme tokens for the morph panel (match the existing tooltip palette)
   const light = theme !== "dark";
