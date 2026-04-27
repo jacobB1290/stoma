@@ -1,15 +1,13 @@
-# Release Notes: Morning Dropdown on Front-Office Pill
+# Release Notes: Today's Missed Cases Inline on Front-Office Pill
 
 ## What's New ✨
-- The "% missed" pill in the header now morphs into a small daily dropdown when clicked, showing the case numbers entered today by non–front-office staff.
-- The dropdown is visually unified with the pill — clicking flattens the pill's bottom corners and extrudes a connected panel below.
-- Daily reset: each morning the list shows only what was added that day. If nothing's been missed today, you'll see "Nothing missed today."
+- The "% missed" pill in the header now **expands itself** to show today's missed case numbers inline whenever there are any. No click required, no separate panel — the pill is one continuous shape.
+- Each morning the inline list resets. If nothing's been missed today, the pill stays in its compact form.
 
 ## For Users 👤
+- The pill grows wider when production/staff logged a case instead of front office today, e.g. `▏▎▍ 5% missed │ 1120 · 1140`.
 - **Hover** the pill → full monthly detail tooltip (unchanged).
-- **Click** the pill → quick "Today" list of cases that production/staff logged instead of front office.
-- Click any case in the list to jump to its case history.
-- Click outside or click the pill again to collapse it.
+- Click does not trigger any popover — it's reserved for navigation.
 
 ## For Developers 👨‍💻
-- `src/components/FrontOfficeBubble.jsx`: replaced the click-to-pin-tooltip behavior with a `morphed` state that animates the pill's bottom corners square and renders a connected `<motion.div>` panel below. Today's misses are derived in a `useMemo` filtered against a local-time `00:00` boundary off `stats.missedCases`. The detailed hover tooltip is suppressed while morphed.
+- `src/components/FrontOfficeBubble.jsx`: removed the click-to-morph dropdown panel entirely. Today's case numbers now render as inline children of the pill's `<motion.div>`, gated by `todayMissed.length > 0`, with a Framer `layout` spring animating the pill's width as items enter/exit.

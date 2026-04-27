@@ -860,20 +860,7 @@ export default function FrontOfficePill() {
   const [theme, setTheme] = useState(getThemeKey);
   const pillRef = useRef(null);
   const hoverTimerRef = useRef(null);
-  const [morphed, setMorphed] = useState(false);
   const [historyCase, setHistoryCase] = useState(null); // { id, caseNumber }
-
-  // Close morph on click outside
-  useEffect(() => {
-    if (!morphed) return;
-    const handleOutside = (e) => {
-      if (pillRef.current && !pillRef.current.contains(e.target)) {
-        setMorphed(false);
-      }
-    };
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [morphed]);
 
   // React to theme changes
   useEffect(() => {
@@ -942,27 +929,11 @@ export default function FrontOfficePill() {
   const handleMouseLeave = () => {
     hoverTimerRef.current = setTimeout(() => setHovered(false), 120);
   };
-  const handleClick = (e) => {
-    e.stopPropagation();
-    setMorphed(m => !m);
-    setHovered(false);
-  };
 
-  // Theme tokens for the morph panel (match the existing tooltip palette)
-  const light = theme !== "dark";
-  const panelBg = theme === "pink"  ? "#fdf8fa" :
-                  theme === "dark"  ? "#1a2e33" :
-                                      "#ffffff";
-  const panelBorder = light ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.12)";
-  const panelText = light ? "#111827" : "#f1f5f9";
-  const panelMuted = light ? "#6b7280" : "#94a3b8";
-  const rowBg = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)";
-
-  const todayLabel = new Date().toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
+  const hasToday = todayMissed.length > 0;
+  const labelColor = accent.level === "amber" ? accent.dot
+                  : accent.level === "red"   ? accent.dot
+                  : textColor;
 
   return (
     <div
@@ -970,9 +941,9 @@ export default function FrontOfficePill() {
       className="relative flex items-center"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onClick={handleClick}
     >
       <motion.div
+        layout
         initial={{ opacity: 0, scale: 0.9 }}
         animate={
           accent.level === "red"
@@ -989,27 +960,32 @@ export default function FrontOfficePill() {
               ] }
             : { opacity: 1, scale: 1 }
         }
-        transition={
-          accent.level === "red"
+        transition={{
+          layout: { type: "spring", stiffness: 380, damping: 34 },
+          ...(accent.level === "red"
             ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
                 boxShadow: { duration: 2, repeat: Infinity, ease: "easeInOut" } }
             : accent.level === "amber"
             ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
                 boxShadow: { duration: 3, repeat: Infinity, ease: "easeInOut" } }
-            : { type: "spring", stiffness: 400, damping: 26, delay: 0.15 }
-        }
-        className="flex items-center gap-2 px-3 backdrop-blur shadow-sm cursor-pointer select-none"
+            : { default: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 } }
+          )
+        }}
+        className="flex items-center backdrop-blur shadow-sm select-none"
         style={{
           ...pillSt,
           ...amberPillOverrides,
           ...redPillOverrides,
           height: PILL_H,
-          borderRadius: morphed ? "18px 18px 0 0" : "9999px",
-          transition: "border-radius 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
+          paddingLeft: "12px",
+          paddingRight: hasToday ? "10px" : "12px",
+          gap: "8px",
+          borderRadius: "9999px",
         }}
       >
-        {/* Bar-chart icon — same 18px as ⚙️ in SettingsPill */}
-        <svg
+        {/* Bar-chart icon */}
+        <motion.svg
+          layout="position"
           className="flex-shrink-0"
           width="18"
           height="18"
@@ -1020,20 +996,74 @@ export default function FrontOfficePill() {
           <rect x="1" y="9" width="3" height="6" rx="0.75" />
           <rect x="6" y="5" width="3" height="10" rx="0.75" />
           <rect x="11" y="2" width="3" height="13" rx="0.75" />
-        </svg>
-        {/* Label */}
-        <span
+        </motion.svg>
+
+        {/* % missed label */}
+        <motion.span
+          layout="position"
           className="text-xs font-medium"
-          style={{ color: accent.level === "amber" ? accent.dot
-                        : accent.level === "red"   ? accent.dot
-                        : textColor }}
+          style={{ color: labelColor }}
         >
           {Math.round(pct)}% missed
-        </span>
+        </motion.span>
+
+        {/* Inline today's case numbers — appears inside the same pill, no separate panel */}
+        <AnimatePresence initial={false}>
+          {hasToday && (
+            <motion.div
+              key="today-inline"
+              layout
+              initial={{ opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: "auto" }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{
+                width: { type: "spring", stiffness: 360, damping: 32 },
+                opacity: { duration: 0.18 },
+              }}
+              className="flex items-center overflow-hidden"
+              style={{ gap: "6px" }}
+            >
+              {/* Subtle separator from the % label */}
+              <span
+                aria-hidden
+                style={{
+                  width: 1,
+                  height: 14,
+                  background: labelColor,
+                  opacity: 0.25,
+                  flexShrink: 0,
+                }}
+              />
+              {todayMissed.map((c, i) => (
+                <React.Fragment key={c.id}>
+                  {i > 0 && (
+                    <span
+                      aria-hidden
+                      style={{
+                        color: labelColor,
+                        opacity: 0.35,
+                        fontSize: "11px",
+                        lineHeight: 1,
+                      }}
+                    >
+                      ·
+                    </span>
+                  )}
+                  <span
+                    className="text-[11px] font-semibold tabular-nums"
+                    style={{ color: labelColor, opacity: 0.92, whiteSpace: "nowrap" }}
+                  >
+                    {c.caseNumber}
+                  </span>
+                </React.Fragment>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
 
       <AnimatePresence>
-        {hovered && !morphed && (
+        {hovered && (
           <PillTooltip
             stats={stats}
             anchorRef={pillRef}
@@ -1041,104 +1071,6 @@ export default function FrontOfficePill() {
             onMouseLeave={handleMouseLeave}
             onOpenCase={(c) => setHistoryCase({ id: c.id, caseNumber: c.caseNumber })}
           />
-        )}
-      </AnimatePresence>
-
-      {/* ── Morning dropdown — extrudes from the pill, daily list of misses ── */}
-      <AnimatePresence>
-        {morphed && (
-          <motion.div
-            initial={{ opacity: 0, scaleY: 0 }}
-            animate={{ opacity: 1, scaleY: 1 }}
-            exit={{ opacity: 0, scaleY: 0 }}
-            transition={{ type: "spring", stiffness: 420, damping: 32 }}
-            className="absolute right-0 overflow-hidden"
-            style={{
-              top: "100%",
-              marginTop: "-1px", // overlap pill border so it reads as one piece
-              transformOrigin: "top",
-              width: "240px",
-              background: panelBg,
-              border: `1px solid ${panelBorder}`,
-              borderTopLeftRadius: 0,
-              borderTopRightRadius: 0,
-              borderBottomLeftRadius: 16,
-              borderBottomRightRadius: 16,
-              boxShadow: light
-                ? "0 10px 28px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06)"
-                : "0 10px 28px rgba(0,0,0,0.40), 0 2px 6px rgba(0,0,0,0.25)",
-              zIndex: 50,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-3 pt-2.5 pb-3">
-              <div className="flex items-baseline justify-between mb-1.5">
-                <p
-                  className="text-[9px] font-semibold uppercase"
-                  style={{ color: panelMuted, letterSpacing: "0.12em" }}
-                >
-                  Today
-                </p>
-                <span className="text-[10px]" style={{ color: panelMuted }}>
-                  {todayLabel}
-                </span>
-              </div>
-
-              {todayMissed.length === 0 ? (
-                <p
-                  className="text-[12px] py-1"
-                  style={{ color: panelMuted, fontStyle: "italic" }}
-                >
-                  Nothing missed today.
-                </p>
-              ) : (
-                <ul className="space-y-1 max-h-[200px] overflow-y-auto pr-0.5" style={{ scrollbarWidth: "thin" }}>
-                  {todayMissed.map((c) => {
-                    const displayDept = c.dept === "General" ? "Digital" : c.dept;
-                    return (
-                      <li key={c.id}>
-                        <button
-                          onClick={() => setHistoryCase({ id: c.id, caseNumber: c.caseNumber })}
-                          className="w-full flex items-center justify-between rounded-md px-2 py-1 cursor-pointer text-left"
-                          style={{
-                            background: rowBg,
-                            border: "none",
-                            transition: "background 0.15s",
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.10)"}
-                          onMouseLeave={(e) => e.currentTarget.style.background = rowBg}
-                        >
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span
-                              className="text-[12px] font-medium truncate"
-                              style={{ color: panelText }}
-                            >
-                              {c.caseNumber}
-                            </span>
-                            <span
-                              className="text-[9px] px-1 py-0.5 rounded flex-shrink-0"
-                              style={{
-                                color: panelMuted,
-                                background: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)",
-                              }}
-                            >
-                              {displayDept}
-                            </span>
-                          </div>
-                          <span
-                            className="text-[10px] ml-2 truncate"
-                            style={{ color: panelMuted, maxWidth: "90px" }}
-                          >
-                            {c.enteredBy}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </motion.div>
         )}
       </AnimatePresence>
 
