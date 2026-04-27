@@ -2983,17 +2983,17 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10002] overflow-y-auto flex items-start justify-center p-6 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-5xl my-8 glass-nb rounded-2xl overflow-hidden shadow-2xl"
+        className="w-full max-w-5xl max-h-[90vh] glass-nb rounded-2xl overflow-hidden shadow-2xl flex flex-col"
         style={{ backgroundColor: COLORS.cream }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* ============ HEADER ============ */}
         <div
-          className="relative px-10 pt-10 pb-8"
+          className="relative px-10 pt-10 pb-8 flex-shrink-0"
           style={{ backgroundColor: COLORS.paper, borderBottom: `1px solid ${COLORS.divider}` }}
         >
           <button
@@ -3096,7 +3096,7 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
         </div>
 
         {/* ============ BODY ============ */}
-        <div className="px-10 py-8">
+        <div className="flex-1 overflow-y-auto px-10 py-8 min-h-0">
           {tab === "overview" && <OverviewTab prediction={prediction} />}
           {tab === "timeline" && <TimelineTab prediction={prediction} />}
           {tab === "signals"  && <SignalsTab  prediction={prediction} />}
@@ -3105,7 +3105,7 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
         {/* ============ FOOTER ============ */}
         <div
-          className="px-10 py-5 flex items-center justify-between"
+          className="px-10 py-5 flex items-center justify-between flex-shrink-0"
           style={{ backgroundColor: COLORS.paper, borderTop: `1px solid ${COLORS.divider}` }}
         >
           <div className="text-[10px] uppercase tracking-[0.18em]" style={{ color: COLORS.inkFaint }}>
