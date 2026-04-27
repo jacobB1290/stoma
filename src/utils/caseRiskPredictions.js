@@ -3156,11 +3156,26 @@ function OverviewTab({ prediction }) {
   const tone = RISK_STYLE[status.tone] || RISK_STYLE.low;
 
   const slackH = status.slackH;
+  // Card framing is derived from the unified status key, not raw arithmetic.
+  // The status pill reflects the calibrated classifier/resolver judgment;
+  // a naive (due − p50) check disagrees with it whenever the model says
+  // "ontime" despite a p50 that lands a few hours past the due timestamp.
+  // Letting the card scream "Projected overrun 16h" while the pill says
+  // "On track" is the bug we're fixing.
   const slackLabel = (() => {
-    if (slackH === null) return { title: "Buffer", sub: "No due date set", sign: 0 };
+    if (slackH === null)  return { title: "Buffer",      sub: "No due date set", sign: 0 };
     if (status.dueInPast) return { title: "Past due by", sub: "Already overdue", sign: -1 };
-    if (slackH < 0)       return { title: "Projected overrun", sub: "Best estimate slips past due", sign: -1 };
-    return { title: "Buffer", sub: "Slack before due date", sign: 1 };
+
+    const modelSaysLate = status.key === "miss" || status.key === "tight";
+    if (modelSaysLate) {
+      return slackH < 0
+        ? { title: "Projected overrun", sub: "Best estimate slips past due", sign: -1 }
+        : { title: "Tight buffer",      sub: "Close to the due date",       sign: 1 };
+    }
+    // Model says we'll make it (ontime / cautious). Don't contradict it.
+    return slackH < 0
+      ? { title: "Cutting it close", sub: "Tight, but expected on time",  sign: 0 }
+      : { title: "Buffer",           sub: "Slack before due date",        sign: 1 };
   })();
 
   return (
