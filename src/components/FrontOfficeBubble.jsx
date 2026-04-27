@@ -24,7 +24,7 @@
  * they weren't online when an admin changed it.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { db } from "../services/caseService";
@@ -308,7 +308,7 @@ function getPillAccent(pct) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tooltip — portaled so it escapes header overflow, theme-aware
 // ─────────────────────────────────────────────────────────────────────────────
-function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase }) {
+function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLeave, onOpenCase }) {
   const { pct, staffCount, totalCount, deptBreakdown, missedCases, trend, yearPct, yearStaffCount, yearTotalCount, monthLabel, year } = stats;
   const [showCompleted, setShowCompleted] = useState(false);
 
@@ -513,6 +513,10 @@ function PillTooltip({ stats, anchorRef, onMouseEnter, onMouseLeave, onOpenCase 
           : "0 12px 40px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.25)",
         background: surfaceBg,
         border: `1px solid ${surfaceBorder}`,
+        // While exiting, let the cursor pass through. Without this the
+        // fade-out is interactable and the pointer can hover ghost edges
+        // that no longer feel "live."
+        pointerEvents: isOpen ? "auto" : "none",
       }}
     >
       {/* Header band — turns red when >10% */}
@@ -860,22 +864,7 @@ export default function FrontOfficePill() {
   const [theme, setTheme] = useState(getThemeKey);
   const pillRef = useRef(null);
   const hoverTimerRef = useRef(null);
-  const [pinned, setPinned] = useState(false);
   const [historyCase, setHistoryCase] = useState(null); // { id, caseNumber }
-
-  // Close on click outside when pinned
-  useEffect(() => {
-    if (!pinned) return;
-    const handleOutside = (e) => {
-      if (pillRef.current && !pillRef.current.contains(e.target) &&
-          !e.target.closest(".fo-pill-tooltip")) {
-        setPinned(false);
-        setHovered(false);
-      }
-    };
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [pinned]);
 
   // React to theme changes
   useEffect(() => {
@@ -896,6 +885,15 @@ export default function FrontOfficePill() {
       window.removeEventListener("settings-applied", onDisabledChange);
     };
   }, []);
+
+  // ── Today's missed cases — local-time day boundary, daily reset
+  // Hook must run before early returns to keep call order stable.
+  const todayMissed = useMemo(() => {
+    if (!stats?.missedCases) return [];
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return stats.missedCases.filter(c => new Date(c.createdAt) >= start);
+  }, [stats?.missedCases]);
 
   const foList = getFrontOfficeList();
   if (foList.length === 0) return null;
@@ -928,28 +926,39 @@ export default function FrontOfficePill() {
     boxShadow: "0 0 12px rgba(220,38,38,0.25), 0 0 4px rgba(220,38,38,0.15)",
   } : {};
 
-  const handleMouseEnter = () => {
-    clearTimeout(hoverTimerRef.current);
-    setHovered(true);
-  };
-  const handleMouseLeave = () => {
-    if (pinned) return;
+  // Hover model:
+  //   - Only the pill opens the tooltip.
+  //   - The tooltip can keep an already-open tooltip alive (cancel a pending
+  //     close), but cannot re-open it once it's closing/closed. This prevents
+  //     the fade-out from being reversed when the cursor brushes the still-
+  //     mounted tooltip during its exit animation.
+  const cancelClose = () => clearTimeout(hoverTimerRef.current);
+  const scheduleClose = () => {
+    cancelClose();
     hoverTimerRef.current = setTimeout(() => setHovered(false), 120);
   };
-  const handleClick = () => {
-    setPinned(p => !p);
+  const handlePillEnter = () => {
+    cancelClose();
     setHovered(true);
   };
+  const handlePillLeave = () => scheduleClose();
+  const handleTooltipEnter = () => cancelClose();
+  const handleTooltipLeave = () => scheduleClose();
+
+  const hasToday = todayMissed.length > 0;
+  const labelColor = accent.level === "amber" ? accent.dot
+                  : accent.level === "red"   ? accent.dot
+                  : textColor;
 
   return (
     <div
       ref={pillRef}
       className="relative flex items-center"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      onClick={handleClick}
+      onMouseEnter={handlePillEnter}
+      onMouseLeave={handlePillLeave}
     >
       <motion.div
+        layout
         initial={{ opacity: 0, scale: 0.9 }}
         animate={
           accent.level === "red"
@@ -966,20 +975,32 @@ export default function FrontOfficePill() {
               ] }
             : { opacity: 1, scale: 1 }
         }
-        transition={
-          accent.level === "red"
+        transition={{
+          layout: { type: "spring", stiffness: 380, damping: 34 },
+          ...(accent.level === "red"
             ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
                 boxShadow: { duration: 2, repeat: Infinity, ease: "easeInOut" } }
             : accent.level === "amber"
             ? { opacity: { duration: 0.3 }, scale: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 },
                 boxShadow: { duration: 3, repeat: Infinity, ease: "easeInOut" } }
-            : { type: "spring", stiffness: 400, damping: 26, delay: 0.15 }
-        }
-        className="flex items-center gap-2 px-3 rounded-full backdrop-blur shadow-sm cursor-pointer select-none"
-        style={{ ...pillSt, ...amberPillOverrides, ...redPillOverrides, height: PILL_H }}
+            : { default: { type: "spring", stiffness: 400, damping: 26, delay: 0.15 } }
+          )
+        }}
+        className="flex items-center backdrop-blur shadow-sm select-none"
+        style={{
+          ...pillSt,
+          ...amberPillOverrides,
+          ...redPillOverrides,
+          height: PILL_H,
+          paddingLeft: "12px",
+          paddingRight: hasToday ? "10px" : "12px",
+          gap: "8px",
+          borderRadius: "9999px",
+        }}
       >
-        {/* Bar-chart icon — same 18px as ⚙️ in SettingsPill */}
-        <svg
+        {/* Bar-chart icon */}
+        <motion.svg
+          layout="position"
           className="flex-shrink-0"
           width="18"
           height="18"
@@ -990,16 +1011,70 @@ export default function FrontOfficePill() {
           <rect x="1" y="9" width="3" height="6" rx="0.75" />
           <rect x="6" y="5" width="3" height="10" rx="0.75" />
           <rect x="11" y="2" width="3" height="13" rx="0.75" />
-        </svg>
-        {/* Label */}
-        <span
+        </motion.svg>
+
+        {/* % missed label */}
+        <motion.span
+          layout="position"
           className="text-xs font-medium"
-          style={{ color: accent.level === "amber" ? accent.dot
-                        : accent.level === "red"   ? accent.dot
-                        : textColor }}
+          style={{ color: labelColor }}
         >
           {Math.round(pct)}% missed
-        </span>
+        </motion.span>
+
+        {/* Inline today's case numbers — appears inside the same pill, no separate panel */}
+        <AnimatePresence initial={false}>
+          {hasToday && (
+            <motion.div
+              key="today-inline"
+              layout
+              initial={{ opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: "auto" }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{
+                width: { type: "spring", stiffness: 360, damping: 32 },
+                opacity: { duration: 0.18 },
+              }}
+              className="flex items-center overflow-hidden"
+              style={{ gap: "6px" }}
+            >
+              {/* Subtle separator from the % label */}
+              <span
+                aria-hidden
+                style={{
+                  width: 1,
+                  height: 14,
+                  background: labelColor,
+                  opacity: 0.25,
+                  flexShrink: 0,
+                }}
+              />
+              {todayMissed.map((c, i) => (
+                <React.Fragment key={c.id}>
+                  {i > 0 && (
+                    <span
+                      aria-hidden
+                      style={{
+                        color: labelColor,
+                        opacity: 0.35,
+                        fontSize: "11px",
+                        lineHeight: 1,
+                      }}
+                    >
+                      ·
+                    </span>
+                  )}
+                  <span
+                    className="text-[11px] font-semibold tabular-nums"
+                    style={{ color: labelColor, opacity: 0.92, whiteSpace: "nowrap" }}
+                  >
+                    {c.caseNumber}
+                  </span>
+                </React.Fragment>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
 
       <AnimatePresence>
@@ -1007,8 +1082,9 @@ export default function FrontOfficePill() {
           <PillTooltip
             stats={stats}
             anchorRef={pillRef}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+            isOpen={hovered}
+            onMouseEnter={handleTooltipEnter}
+            onMouseLeave={handleTooltipLeave}
             onOpenCase={(c) => setHistoryCase({ id: c.id, caseNumber: c.caseNumber })}
           />
         )}
