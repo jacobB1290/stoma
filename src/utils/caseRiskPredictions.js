@@ -3155,13 +3155,18 @@ function OverviewTab({ prediction }) {
   const status = unifiedStatus(prediction);
   const tone = RISK_STYLE[status.tone] || RISK_STYLE.low;
 
-  const slackH = status.slackH;
-  // Card framing is derived from the unified status key, not raw arithmetic.
-  // The status pill reflects the calibrated classifier/resolver judgment;
-  // a naive (due − p50) check disagrees with it whenever the model says
-  // "ontime" despite a p50 that lands a few hours past the due timestamp.
-  // Letting the card scream "Projected overrun 16h" while the pill says
-  // "On track" is the bug we're fixing.
+  // Slack is computed against the same p50 the user sees in the Timeline tab
+  // ("Completion · p50 (best estimate)"). status.slackH uses
+  // prediction.completionETA, which is the resolver's bias-corrected ETA and
+  // can land hours later than raw p50 — that mismatch was producing
+  // "16h overrun" cards on cases whose displayed p50 sat before the due
+  // timestamp. Using totalETAs.p50 here keeps the card honest with the rest
+  // of the UI.
+  const due = prediction.dueDateCalc;
+  const p50 = prediction.totalETAs?.p50;
+  const slackH = (due && p50) ? (due.getTime() - p50.getTime()) / 3600000 : null;
+  // Card framing is also derived from the unified status key so the tone
+  // never contradicts the status pill.
   const slackLabel = (() => {
     if (slackH === null)  return { title: "Buffer",      sub: "No due date set", sign: 0 };
     if (status.dueInPast) return { title: "Past due by", sub: "Already overdue", sign: -1 };
