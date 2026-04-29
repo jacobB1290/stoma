@@ -868,19 +868,10 @@ function computeQuantiles(meanModel, sigmaModel, features) {
  * dedicated late classifier. Returns a calibrated probability via isotonic
  * regression lookup.
  */
-function predictLateProb(stageModel, features) {
-  const lateModel = stageModel?.late_classifier;
-  if (!lateModel) return null;
-  
-  // Raw classifier output
-  const rawProb = xgbPredictProba(lateModel, features);
-  
-  // Apply isotonic calibration if present
-  const xPts = lateModel.calibration_x;
-  const yPts = lateModel.calibration_y;
+function applyIsotonicCalibration(rawProb, lateModel) {
+  const xPts = lateModel?.calibration_x;
+  const yPts = lateModel?.calibration_y;
   if (!xPts || !yPts || xPts.length !== yPts.length) return rawProb;
-  
-  // Piecewise linear interpolation through calibration curve
   if (rawProb <= xPts[0]) return yPts[0];
   if (rawProb >= xPts[xPts.length - 1]) return yPts[yPts.length - 1];
   for (let i = 0; i < xPts.length - 1; i++) {
@@ -890,6 +881,116 @@ function predictLateProb(stageModel, features) {
     }
   }
   return rawProb;
+}
+
+function predictLateProb(stageModel, features) {
+  const lateModel = stageModel?.late_classifier;
+  if (!lateModel) return null;
+  const rawProb = xgbPredictProba(lateModel, features);
+  return applyIsotonicCalibration(rawProb, lateModel);
+}
+
+/** ========================================================================
+ *  TREE SHAP — per-prediction feature attribution
+ *
+ *  Computes how much each input feature shifts THIS case's late probability
+ *  using path-dependent attribution (Saabas method). For each tree we walk
+ *  the path the case actually takes and credit each split's feature with
+ *  the change in expected leaf value caused by going one way instead of the
+ *  other.
+ *
+ *  Limitation: exact TreeSHAP (Lundberg 2018) requires per-node `cover`
+ *  (training-sample counts) which is NOT present in the exported model JSON.
+ *  We use uniform leaf weighting as the standard substitute — every leaf in
+ *  a subtree contributes equally to that node's expected value. This is
+ *  biased toward features that split near the root, but the per-feature
+ *  deltas are directionally correct and sum (in log-odds space) to the
+ *  difference between the model's actual logit and its uniform-baseline
+ *  logit. We convert each log-odds contribution to a calibrated probability
+ *  delta via leave-one-out ablation against the isotonic curve so the
+ *  number we display ("+8 pp") is in the same units the user sees.
+ *  ======================================================================== */
+
+function precomputeTreeNodeStats(tree) {
+  const stats = new Map();
+  const visit = (node) => {
+    if (node.leaf !== undefined) {
+      stats.set(node.nodeid, node.leaf);
+      return { sum: node.leaf, count: 1 };
+    }
+    let sum = 0, count = 0;
+    for (const ch of (node.children || [])) {
+      const r = visit(ch);
+      sum += r.sum;
+      count += r.count;
+    }
+    stats.set(node.nodeid, count > 0 ? sum / count : 0);
+    return { sum, count };
+  };
+  visit(tree);
+  return stats;
+}
+
+function ensureTreeStats(classifierModel) {
+  if (classifierModel._nodeStats) return;
+  classifierModel._nodeStats = classifierModel.trees.map(precomputeTreeNodeStats);
+}
+
+function attributePath(tree, features, nodeStats, contribOut) {
+  if (tree.leaf !== undefined) return;
+  let node = tree;
+  let prev = nodeStats.get(node.nodeid);
+  // Hard cap on depth to defend against malformed trees.
+  for (let safety = 0; safety < 256; safety++) {
+    if (node.leaf !== undefined) return;
+    const featIdx = typeof node.split === "string"
+      ? parseInt(node.split.replace("f", ""), 10)
+      : node.split;
+    const val = features[featIdx];
+    let goId;
+    if (val === undefined || val === null || Number.isNaN(val)) {
+      goId = node.missing ?? node.yes;
+    } else {
+      goId = val < node.split_condition ? node.yes : node.no;
+    }
+    const child = node.children?.find((c) => c.nodeid === goId);
+    if (!child) return;
+    const cur = nodeStats.get(child.nodeid);
+    contribOut[featIdx] += (cur - prev);
+    prev = cur;
+    node = child;
+  }
+}
+
+function computeFeatureContributions(classifierModel, features) {
+  if (!classifierModel?.trees) return null;
+  ensureTreeStats(classifierModel);
+  const contrib = new Array(features.length).fill(0);
+  for (let i = 0; i < classifierModel.trees.length; i++) {
+    attributePath(
+      classifierModel.trees[i],
+      features,
+      classifierModel._nodeStats[i],
+      contrib,
+    );
+  }
+  // Log-odds contributions in raw classifier space.
+  // Convert each to a calibrated pp-late delta via leave-one-out.
+  const baseLogit = typeof classifierModel.base_score === "number"
+    ? classifierModel.base_score
+    : 0;
+  const totalLogit = baseLogit + contrib.reduce((a, b) => a + b, 0);
+  const sigmoid = (x) => 1 / (1 + Math.exp(-x));
+  const fullProb = applyIsotonicCalibration(sigmoid(totalLogit), classifierModel);
+
+  const probDeltas = new Array(contrib.length).fill(0);
+  for (let i = 0; i < contrib.length; i++) {
+    const s = contrib[i];
+    if (s === 0) continue;
+    const ablated = applyIsotonicCalibration(sigmoid(totalLogit - s), classifierModel);
+    probDeltas[i] = fullProb - ablated;
+  }
+  return { shapLogOdds: contrib, probDeltas };
 }
 
 
@@ -1149,6 +1250,7 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases, labContext = null,
   let stageQ = null, totalQ = null, pResched = 0.05, modelUsed = "fallback";
   let pLateDirect = null;  // From dedicated classifier
   let lateThresholds = null;
+  let featureContributions = null;  // Per-feature SHAP-style attribution
 
   if (model?.stage_mean && model?.stage_sigma) {
     stageQ = computeQuantiles(model.stage_mean, model.stage_sigma, featureArray);
@@ -1163,6 +1265,15 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases, labContext = null,
         high: model.late_classifier.thresh_high ?? 0.5,
         medium: model.late_classifier.thresh_medium ?? 0.25,
       };
+    }
+    // Per-feature contributions to THIS case's late probability (uniform-cover SHAP).
+    if (model.late_classifier) {
+      try {
+        featureContributions = computeFeatureContributions(model.late_classifier, featureArray);
+      } catch (e) {
+        console.warn("SHAP attribution failed:", e);
+        featureContributions = null;
+      }
     }
     
     modelUsed = "xgboost-v10";
@@ -1272,6 +1383,7 @@ function predictCaseML(c, stage, stageEnteredAt, activeCases, labContext = null,
     featureArray,
     featureDict: feats.dict,
     featureNames: [...V8_FEATURE_NAMES, ...V9_CONTEXT_NAMES, ...V9_INTERACTION_NAMES],
+    featureContributions,
   };
 }
 
@@ -1467,6 +1579,253 @@ export function resolveCaseState(inputs) {
       stageCutoffApplied: stageCutoff,
     },
   };
+}
+
+/** ========================================================================
+ *  RISK SIGNAL REGISTRY
+ *
+ *  Each entry binds one or more model features to a clean, data-backed
+ *  explanation. Activation gates are human thresholds (so we don't show
+ *  signals for trivial values), but the intensity bar in the UI is driven
+ *  by the model itself: the per-feature contribution to this case's late
+ *  probability, computed via path-dependent attribution against the live
+ *  XGBoost classifier (see computeFeatureContributions above).
+ *
+ *  Contract:
+ *    featureKeys:        feature names whose SHAP contributions roll up
+ *                        into this signal's strength
+ *    activate(f, p):     boolean — does this signal fire for this case?
+ *    format(f, p):       { label, detail } — short label + sentence
+ *
+ *  All thresholds and string templates live here so signals can be tuned
+ *  without touching the prediction pipeline or the modal UI.
+ *  ======================================================================== */
+
+const RISK_SIGNAL_REGISTRY = [
+  {
+    key: "rush_added_late",
+    featureKeys: ["rush_added_late", "log_hours_to_rush", "rush_late_x_elapsed"],
+    activate: (f) => f.rush_added_late === 1,
+    format: (f) => {
+      const hrs = Math.round(f.hours_to_rush || 0);
+      return {
+        label: "Rush added after the case was created",
+        detail: hrs >= 1
+          ? `Marked rush ${hrs}h after creation, so the original lead time was set without rush in mind.`
+          : "Rush flag was added after creation, after planning had already begun.",
+      };
+    },
+  },
+  {
+    key: "backward_moves",
+    featureKeys: ["backward_count", "has_backward", "backward_x_elapsed", "has_backward_move", "count_backward_move", "h_to_backward_move"],
+    activate: (f) => (f.backward_count || 0) >= 1,
+    format: (f) => {
+      const n = f.backward_count;
+      return {
+        label: n > 1 ? `Sent backward ${n} times` : "Sent backward in workflow",
+        detail: n > 1
+          ? `Returned to an earlier stage ${n} times — each loop replays prior work.`
+          : "Returned to an earlier stage at least once — replays prior work.",
+      };
+    },
+  },
+  {
+    key: "qc_loops",
+    featureKeys: ["has_prior_qc", "has_moved_to_qc", "count_moved_to_qc", "h_to_moved_to_qc"],
+    activate: (_f, p) => (p.qcLoops || 0) > 0,
+    format: (_f, p) => {
+      const n = p.qcLoops;
+      return {
+        label: n > 1 ? `${n} QC loops` : "Bounced back to QC",
+        detail: n > 1
+          ? `Returned through quality control ${n} times — each loop adds review and rework.`
+          : "Returned through quality control at least once, adding review and rework.",
+      };
+    },
+  },
+  {
+    key: "due_pulled_in",
+    featureKeys: ["due_changes_closer", "due_net_direction", "days_since_due_change", "due_changes", "has_due_changed", "count_due_changed"],
+    activate: (f) => (f.due_changes_closer || 0) >= 1,
+    format: (f) => {
+      const n = f.due_changes_closer;
+      return {
+        label: n > 1 ? `Due date pulled in ${n} times` : "Due date pulled in",
+        detail: n > 1
+          ? `Due date was moved closer ${n} times — less buffer than originally planned.`
+          : "Due date was moved closer — less buffer than originally planned.",
+      };
+    },
+  },
+  {
+    key: "overrun",
+    featureKeys: ["is_overrun", "frac_budget", "frac_budget_sq", "frac_x_rush", "frac_x_events", "elapsed_bh", "log_elapsed"],
+    activate: (f) => f.is_overrun === 1,
+    format: (f) => {
+      const pct = Math.round((f.frac_budget || 0) * 100);
+      return {
+        label: "Past the allowed time for this stage",
+        detail: `Already used ${pct}% of the working-hours budget allocated to this stage.`,
+      };
+    },
+  },
+  {
+    key: "thin_budget",
+    featureKeys: ["thin_rem_3h", "thin_rem_6h", "thin_rem_12h", "remaining_budget", "log_remaining_budget"],
+    activate: (f) => f.is_overrun !== 1 && f.thin_rem_6h === 1,
+    format: (f) => {
+      const hrs = Math.max(0, f.remaining_budget || 0);
+      return {
+        label: "Tight remaining budget",
+        detail: `Only ${hrs.toFixed(1)}h of working time left before this stage's budget runs out.`,
+      };
+    },
+  },
+  {
+    key: "hold_cycles",
+    featureKeys: ["hold_cycles", "hold_cycles_x_elapsed", "has_hold_added", "count_hold_added", "h_to_hold_added", "has_hold_removed", "count_hold_removed"],
+    activate: (f) => (f.hold_cycles || 0) >= 2,
+    format: (f) => ({
+      label: `${f.hold_cycles} hold cycles`,
+      detail: `Case was placed on hold and resumed ${f.hold_cycles} times in this stage.`,
+    }),
+  },
+  {
+    key: "long_hold",
+    featureKeys: ["hold_during", "log_hold_pre"],
+    activate: (f, p) => p.onHold && (f.hold_during || 0) >= 4 && (f.hold_cycles || 0) < 2,
+    format: (f) => {
+      const hrs = Math.round(f.hold_during || 0);
+      return {
+        label: "Long hold time",
+        detail: `On hold for ${hrs}h within this stage.`,
+      };
+    },
+  },
+  {
+    key: "concurrent_load",
+    featureKeys: ["concurrent_in_stage", "log_concurrent", "elapsed_x_concurrent", "concurrent_x_dow", "concurrent_x_friday", "idle_x_concurrent"],
+    activate: (f) => (f.concurrent_in_stage || 0) >= 8,
+    format: (f) => {
+      const n = Math.round(f.concurrent_in_stage);
+      return {
+        label: `${n} concurrent cases in this stage`,
+        detail: `Competing for capacity with ${n} other active cases at the same stage right now.`,
+      };
+    },
+  },
+  {
+    key: "idle",
+    featureKeys: ["hours_idle", "log_idle", "elapsed_x_idle", "idle_x_frac", "longest_gap", "log_longest_gap"],
+    activate: (f) => (f.hours_idle || 0) >= 18,
+    format: (f) => {
+      const hrs = Math.round(f.hours_idle);
+      return {
+        label: `Inactive for ${hrs}h`,
+        detail: `No activity recorded on the case in the last ${hrs}h.`,
+      };
+    },
+  },
+  {
+    key: "tight_batch",
+    featureKeys: ["batch_siblings", "log_batch_siblings", "pickup_x_batch", "lead_days_raw", "log_lead_days"],
+    activate: (f) => (f.batch_siblings || 0) >= 3 && (f.lead_days_raw || 0) <= 2,
+    format: (f) => {
+      const sib = f.batch_siblings;
+      const lead = (f.lead_days_raw || 0).toFixed(1);
+      return {
+        label: "Tight batch intake",
+        detail: `${sib} sibling cases came in together with only ${lead}d of lead time before due.`,
+      };
+    },
+  },
+  {
+    key: "flex_pipeline",
+    featureKeys: ["is_flex", "stages_remaining", "elapsed_x_flex", "allowed_x_flex", "lead_x_flex", "flex_x_stages_remaining"],
+    activate: (f) => f.is_flex === 1 && (f.stages_remaining || 0) >= 2,
+    format: (f) => ({
+      label: "Flex case with stages still ahead",
+      detail: `Flex priority with ${f.stages_remaining} stages still to clear before completion.`,
+    }),
+  },
+];
+
+function clamp01(x) {
+  if (!Number.isFinite(x)) return 0;
+  if (x < 0) return 0;
+  if (x > 1) return 1;
+  return x;
+}
+
+/**
+ * Activate the registry against the case's feature dict and return the top N
+ * signals. When the model produced per-feature SHAP-style contributions
+ * (probDeltas in pp-late), use those to rank signals by their actual model
+ * impact on this specific case. Otherwise fall back to a heuristic strength
+ * derived from the underlying feature value.
+ */
+function buildRiskSignals(prediction, maxSignals = 5) {
+  const f = prediction.featureDict || {};
+  const names = prediction.featureNames || [];
+  const probDeltas = prediction.featureContributions?.probDeltas || null;
+  const shapLogOdds = prediction.featureContributions?.shapLogOdds || null;
+
+  // Build name → index map once per call.
+  const nameIdx = new Map();
+  for (let i = 0; i < names.length; i++) nameIdx.set(names[i], i);
+
+  const fired = [];
+  for (const sig of RISK_SIGNAL_REGISTRY) {
+    let active = false;
+    try { active = !!sig.activate(f, prediction); } catch { active = false; }
+    if (!active) continue;
+
+    let body = null;
+    try { body = sig.format(f, prediction); } catch { body = null; }
+    if (!body || !body.label) continue;
+
+    // Aggregate per-feature contributions over the signal's bound feature keys.
+    let modelDeltaPp = 0;
+    let modelLogOdds = 0;
+    let modelKnown = false;
+    if (probDeltas && Array.isArray(sig.featureKeys)) {
+      for (const key of sig.featureKeys) {
+        const idx = nameIdx.get(key);
+        if (idx === undefined) continue;
+        modelDeltaPp += probDeltas[idx] || 0;
+        modelLogOdds += (shapLogOdds && shapLogOdds[idx]) || 0;
+        modelKnown = true;
+      }
+    }
+
+    fired.push({
+      key: sig.key,
+      label: body.label,
+      detail: body.detail || "",
+      modelKnown,
+      modelDeltaPp,            // signed probability shift (1 = 100 pp)
+      modelLogOdds,            // raw log-odds contribution
+    });
+  }
+
+  // Rank: model-derived absolute pp-delta first (when known), then alphabetic
+  // for stability. Cases without classifier output keep activation-order.
+  if (probDeltas) {
+    fired.sort((a, b) => Math.abs(b.modelDeltaPp) - Math.abs(a.modelDeltaPp));
+  }
+
+  // Normalize bar width to the strongest signal in this case (so the user
+  // sees relative ranking within the modal). Keep the signed pp-delta as the
+  // labeled value since that's the absolute, model-grounded number.
+  const maxAbs = fired.reduce((m, s) => Math.max(m, Math.abs(s.modelDeltaPp)), 0);
+  for (const s of fired) {
+    s.intensity = maxAbs > 0 && s.modelKnown
+      ? clamp01(Math.abs(s.modelDeltaPp) / maxAbs)
+      : 0;
+  }
+
+  return fired.slice(0, maxSignals);
 }
 
 /** ========================================================================
@@ -1683,11 +2042,13 @@ export function generateCaseRiskPredictions(
 
       // Diagnostics / modal data
       riskReasons: [],
+      riskSignals: [],
       recommendation: "",
       modelUsed: ml.modelUsed,
       featureArray: ml.featureArray,
       featureDict: ml.featureDict,
       featureNames: ml.featureNames,
+      featureContributions: ml.featureContributions,
 
       // Original case for reference
       _case: c,
@@ -1709,34 +2070,22 @@ export function generateCaseRiskPredictions(
     });
   }
 
-  // Build risk reasons from the feature dict (data-driven, not hand-rules)
+  // Activate the risk-signal registry for each case. Signals are derived from
+  // the V8 feature dictionary itself (activation + intensity), so explanations
+  // are always grounded in the case's real values and stay in sync with the
+  // model's input features.
   for (const p of predictions) {
-    const reasons = [];
-    const f = p.featureDict;
+    const signals = buildRiskSignals(p, 5);
+    p.riskSignals = signals;
+    // Backwards-compatible flat list consumed by other surfaces (board chips).
+    p.riskReasons = signals.map((s) => s.label);
 
-    // Order matters: list most relevant first
-    if (f.rush_added_late) reasons.push("rush added after creation");
-    if (f.backward_count >= 1) reasons.push(`${f.backward_count} backward move${f.backward_count > 1 ? "s" : ""}`);
-    if (f.due_changes_closer >= 1) reasons.push("due date pushed closer");
-    if (f.hold_cycles >= 2) reasons.push(`${f.hold_cycles} hold cycles`);
-    else if (p.onHold && f.hold_during >= 4) reasons.push("long hold time");
-    if (f.concurrent_in_stage >= 8) reasons.push(`${Math.round(f.concurrent_in_stage)} concurrent cases`);
-    if (f.hours_idle >= 18) reasons.push("inactive 18h+");
-    if (f.is_overrun) reasons.push("past allowed time");
-    if (f.batch_siblings >= 3 && f.lead_days_raw <= 2) reasons.push("tight batch intake");
-    if (f.is_flex && f.stages_remaining >= 2) reasons.push("flex case with pipeline ahead");
-    if (p.qcLoops > 0) reasons.push(`${p.qcLoops} QC loop${p.qcLoops > 1 ? "s" : ""}`);
-
-    // Recommendations keyed on risk level
-    const rec = {
+    p.recommendation = {
       critical: "Immediate escalation required",
       high: "Actively monitor and prioritize",
       medium: "Check progress today",
       low: "On track — no action needed",
     }[p.riskLevel];
-
-    p.riskReasons = reasons.slice(0, 5);
-    p.recommendation = rec;
   }
 
   const summary = {
@@ -2784,12 +3133,19 @@ const QuantileBar = RangeBar;
  * signals detected" one.
  */
 function RiskFactors({ prediction, status }) {
-  const { riskReasons } = prediction;
+  const { riskSignals, riskReasons } = prediction;
   const s = status || unifiedStatus(prediction);
   const tone = RISK_STYLE[s.tone] || RISK_STYLE.low;
   const isElevated = s.tone !== "low";
 
-  if (!riskReasons || riskReasons.length === 0) {
+  // Prefer the structured signal list (label + detail + intensity) when
+  // available. Fall back to the flat reason strings for any caller that hasn't
+  // been re-run through the new pipeline yet.
+  const signals = (riskSignals && riskSignals.length > 0)
+    ? riskSignals
+    : (riskReasons || []).map((label) => ({ key: label, label, detail: "", intensity: 0 }));
+
+  if (signals.length === 0) {
     // Truly "on track" — green reassurance
     if (!isElevated) {
       return (
@@ -2829,26 +3185,99 @@ function RiskFactors({ prediction, status }) {
     );
   }
 
+  // Pick a color per signal: positive contribution = risk-increasing (tone),
+  // negative contribution = risk-decreasing (green). When no model attribution
+  // is available we fall back to the case's overall tone.
+  const goodColor = COLORS.rLow;
+  const ppFmt = (pp) => {
+    const abs = Math.abs(pp * 100);
+    if (abs < 0.05) return "≈0 pp";
+    const sign = pp >= 0 ? "+" : "−";
+    return `${sign}${abs.toFixed(abs < 1 ? 1 : 0)} pp`;
+  };
+
   return (
     <div className="space-y-3">
-      {riskReasons.map((reason, i) => (
-        <div
-          key={i}
-          className="flex items-start gap-3 p-4 rounded-xl"
-          style={{
-            backgroundColor: COLORS.paper,
-            border: `1px solid ${COLORS.borderSoft}`,
-          }}
-        >
+      {signals.map((sig) => {
+        const intensityPct = Math.round((sig.intensity || 0) * 100);
+        const hasModel = !!sig.modelKnown;
+        const positive = (sig.modelDeltaPp || 0) >= 0;
+        const barColor = hasModel
+          ? (positive ? tone.fg : goodColor)
+          : tone.fg;
+        const numberColor = hasModel ? barColor : COLORS.inkFaint;
+        return (
           <div
-            className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0"
-            style={{ backgroundColor: tone.fg }}
-          />
-          <div className="text-sm leading-relaxed" style={{ color: COLORS.ink }}>
-            {reason}
+            key={sig.key}
+            className="p-4 rounded-xl"
+            style={{
+              backgroundColor: COLORS.paper,
+              border: `1px solid ${COLORS.borderSoft}`,
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{ backgroundColor: barColor }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="text-sm font-medium leading-snug" style={{ color: COLORS.ink }}>
+                    {sig.label}
+                  </div>
+                  {hasModel ? (
+                    <div
+                      className="text-[11px] tabular-nums flex-shrink-0 font-medium"
+                      style={{ color: numberColor, fontFamily: "monospace" }}
+                      title="Estimated change in this case's late-probability attributable to these features (path-dependent attribution against the live XGBoost classifier)."
+                    >
+                      {ppFmt(sig.modelDeltaPp)}
+                    </div>
+                  ) : null}
+                </div>
+                {sig.detail && (
+                  <div
+                    className="text-xs mt-1.5 leading-relaxed"
+                    style={{ color: COLORS.inkSoft }}
+                  >
+                    {sig.detail}
+                  </div>
+                )}
+                {intensityPct > 0 && (
+                  <div
+                    className="mt-2 h-1 rounded-full overflow-hidden"
+                    style={{ backgroundColor: `${barColor}1a` }}
+                  >
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.max(6, intensityPct)}%`,
+                        backgroundColor: barColor,
+                        transition: "width 220ms ease",
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
+        );
+      })}
+
+      {/* Footer: tell the user where the numbers come from. */}
+      {signals.some((s) => s.modelKnown) && (
+        <div
+          className="text-[10px] leading-relaxed pt-1"
+          style={{ color: COLORS.inkFaint }}
+        >
+          <span style={{ fontWeight: 500 }}>How this is computed:</span>{" "}
+          Per-feature attributions come from the live XGBoost late-classifier
+          via path-dependent attribution. Each "pp" reading is the change in
+          this case's late probability that the model assigns to those
+          features. Values approximate exact TreeSHAP — the exported model
+          omits training cover, so leaf weights are uniform.
         </div>
-      ))}
+      )}
     </div>
   );
 }
