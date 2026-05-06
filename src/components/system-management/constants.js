@@ -172,3 +172,57 @@ export const dateFormatters = {
 export const dayKey = (d) => dateFormatters.dayKey.format(new Date(d));
 export const fmtDate = (d) => dateFormatters.fullDate.format(new Date(d));
 export const fmtTime = (d) => dateFormatters.time.format(new Date(d)).replace(" ", "\u202F");
+
+// Timezone-aware "today"/"overdue" helpers \u2014 compares calendar days in the
+// configured TZ rather than UTC strings, which matters near day boundaries.
+export const todayKey = () => dateFormatters.dayKey.format(new Date());
+export const dueDayKey = (row) => row?.due ? dateFormatters.dayKey.format(new Date(row.due)) : null;
+export const isOverdueRow = (row) => {
+  const k = dueDayKey(row);
+  return !!k && k < todayKey();
+};
+export const isDueTodayRow = (row) => dueDayKey(row) === todayKey();
+
+// Rolls up qc onto finishing for display purposes (qc is a transient inspection
+// state inside the finishing workflow, not a separate top-level pipeline stage).
+export const stageOfCaseRollup = (row) => {
+  const s = stageOfCase(row);
+  return s === "qc" ? "finishing" : s;
+};
+
+// Build a rolling N-day completion bucket from history (action contains "marked done").
+// Returns an array of length `days` where index 0 is the oldest day, last is today.
+export const buildCompletionBuckets = (history, days = 7) => {
+  const buckets = new Array(days).fill(0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const startMs = today.getTime() - (days - 1) * 86400000;
+  (history || []).forEach((h) => {
+    if (!h.action?.toLowerCase().includes("marked done")) return;
+    if (!h.created_at) return;
+    const t = new Date(h.created_at).getTime();
+    if (t < startMs) return;
+    const idx = Math.floor((t - startMs) / 86400000);
+    if (idx >= 0 && idx < days) buckets[idx]++;
+  });
+  return buckets;
+};
+
+// Build per-day per-stage history "moves" buckets for sparkline-friendly trends.
+export const buildStageMoveBuckets = (history, stage, days = 7) => {
+  const buckets = new Array(days).fill(0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const startMs = today.getTime() - (days - 1) * 86400000;
+  const stageWord = stage.toLowerCase();
+  (history || []).forEach((h) => {
+    if (!h.created_at) return;
+    const t = new Date(h.created_at).getTime();
+    if (t < startMs) return;
+    const a = (h.action || "").toLowerCase();
+    if (!a.includes("moved") || !a.includes(`to ${stageWord}`)) return;
+    const idx = Math.floor((t - startMs) / 86400000);
+    if (idx >= 0 && idx < days) buckets[idx]++;
+  });
+  return buckets;
+};

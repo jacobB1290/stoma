@@ -7,7 +7,9 @@ import clsx from "clsx";
 import {
   STAGES, RISK_COLORS, STAGE_COLORS,
   stageOfCase, getEfficiencyColor, formatDisplayName, fmtTimeAgo, fmtTime,
+  buildStageMoveBuckets, normalizeForDedup,
 } from "./constants";
+import { Sparkline } from "./Sparkline";
 
 // ── StatusDot ──────────────────────────────────────────────────────────────
 export const StatusDot = memo(function StatusDot({ status, size = "normal" }) {
@@ -26,7 +28,7 @@ export const StatusDot = memo(function StatusDot({ status, size = "normal" }) {
 });
 
 // ── PipelineOverview ───────────────────────────────────────────────────────
-export const PipelineOverview = memo(function PipelineOverview({ stageCounts, stageReports, stageStats }) {
+export const PipelineOverview = memo(function PipelineOverview({ stageCounts, stageReports, stageStats, history, qcCount = 0 }) {
   const stageData = useMemo(() => {
     const scores = STAGES.map(s => stageReports[s]?.score ?? 0);
     const minScore = Math.min(...scores);
@@ -39,13 +41,17 @@ export const PipelineOverview = memo(function PipelineOverview({ stageCounts, st
       const avgMs = stats.averageTime ?? 0;
       const avgHours = avgMs > 0 ? (avgMs / 3600000).toFixed(1) + "h" : "--";
       const isBottleneck = scores.length > 0 && score === minScore && score < 100;
-      return { stage, count: stageCounts[stage] ?? 0, score, critical, high, avgHours, isBottleneck, sampleSize: stats.sampleSize ?? 0 };
+      const moves7 = buildStageMoveBuckets(history, stage, 7);
+      return { stage, count: stageCounts[stage] ?? 0, score, critical, high, avgHours, isBottleneck, sampleSize: stats.sampleSize ?? 0, moves7 };
     });
-  }, [stageCounts, stageReports, stageStats]);
+  }, [stageCounts, stageReports, stageStats, history]);
 
   return (
     <div className="glass-panel rounded-xl p-5">
-      <h3 className="text-sm font-semibold text-gray-800 mb-4">Pipeline Overview</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-gray-800">Pipeline Overview</h3>
+        <span className="text-[10px] text-gray-400">7-day inflow trend</span>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {stageData.map((data, idx) => {
           const color = STAGE_COLORS[data.stage];
@@ -53,12 +59,22 @@ export const PipelineOverview = memo(function PipelineOverview({ stageCounts, st
           const circumference = 2 * Math.PI * 28;
           const dashOffset = circumference - (data.score / 100) * circumference;
           const riskCount = data.critical + data.high;
+          const showQc = data.stage === "finishing" && qcCount > 0;
 
           return (
             <div key={data.stage} className="relative">
-              <div className="rounded-xl p-4 bg-gray-50 border border-gray-100" style={{ borderLeftWidth: 4, borderLeftColor: color }}>
+              <div className="rounded-xl p-4 bg-gray-50 border border-gray-100 transition-all hover:bg-white hover:shadow-sm"
+                style={{ borderLeftWidth: 4, borderLeftColor: color }}>
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-semibold text-gray-700 capitalize">{data.stage}</h4>
+                  <div className="flex items-center gap-1.5">
+                    <h4 className="text-sm font-semibold text-gray-700 capitalize">{data.stage}</h4>
+                    {showQc && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200"
+                        title="Cases currently in QC review">
+                        +{qcCount} QC
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-1.5">
                     {data.isBottleneck && (
                       <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Bottleneck</span>
@@ -82,12 +98,15 @@ export const PipelineOverview = memo(function PipelineOverview({ stageCounts, st
                     </div>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-2xl font-bold text-gray-800">{data.count}</div>
-                    <div className="text-[10px] text-gray-500">{data.count === 1 ? "case" : "cases"}</div>
+                    <div className="text-2xl font-bold text-gray-800 leading-none">{data.count}</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">{data.count === 1 ? "case" : "cases"}</div>
                     <div className="mt-1 text-[10px] text-gray-500">
                       Avg: <span className="text-gray-700 font-medium">{data.avgHours}</span>
-                      {data.sampleSize > 0 && <span className="text-gray-400 ml-1">({data.sampleSize} samples)</span>}
+                      {data.sampleSize > 0 && <span className="text-gray-400 ml-1">({data.sampleSize})</span>}
                     </div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <Sparkline data={data.moves7} color={color} width={48} height={28} />
                   </div>
                 </div>
               </div>
@@ -255,10 +274,14 @@ export const TeamActivity = memo(function TeamActivity({ users, recentHistory })
   const activeCount = useMemo(() => (users || []).filter(u => u.status === "active").length, [users]);
 
   const lastActionMap = useMemo(() => {
+    // Key by normalized canonical name so we match users whose displayName
+    // is canonicalized (e.g. "jane.doe" history → "Jane Doe" displayName).
     const map = new Map();
     (recentHistory || []).forEach(h => {
       const name = h.user_name;
-      if (name && !map.has(name)) map.set(name, h);
+      if (!name) return;
+      const k = normalizeForDedup(name);
+      if (k && !map.has(k)) map.set(k, h);
     });
     return map;
   }, [recentHistory]);
@@ -276,7 +299,7 @@ export const TeamActivity = memo(function TeamActivity({ users, recentHistory })
           {grouped.map(user => {
             const status = user.status || "offline";
             const initial = (user.displayName || "?").charAt(0).toUpperCase();
-            const lastAction = lastActionMap.get(user.displayName) || lastActionMap.get(user.key);
+            const lastAction = lastActionMap.get(user.key) || lastActionMap.get(normalizeForDedup(user.displayName));
             const actionText = lastAction?.action;
 
             return (
@@ -320,8 +343,10 @@ export const ActivityFeed = memo(function ActivityFeed({ history }) {
     if (lower.includes("marked done")) return "completed";
     if (lower.includes("case created")) return "created";
     if (lower.includes("moved")) {
-      const match = action.match(/moved\s+.*?(?:to|→)\s+(\w+)/i);
-      return match ? `moved to ${match[1]}` : "moved";
+      // Match destination stage including multi-word names like "Quality Control".
+      // Stops before " stage" suffix or " back" qualifier.
+      const match = action.match(/moved\s+.*?(?:to|→)\s+([A-Za-z][\w\s]*?)(?:\s+(?:stage|back)\b|$)/i);
+      return match ? `moved to ${match[1].trim()}` : "moved";
     }
     return action.length > 30 ? action.slice(0, 30) + "..." : action;
   };

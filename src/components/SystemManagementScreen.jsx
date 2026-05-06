@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// System Management Screen — Complete Redesign
-// Command center: Dashboard → Performance → Control → History
+// System Management Screen — Manager Command Center
+// Dashboard → Performance → Projections → Control → History
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
@@ -17,6 +17,7 @@ import {
   STAGES, nowIso, getStatus, stageOfCase, isDigitalGeneral, isOpenCase,
   normalizeForDedup, formatDisplayName, extractUserSettings, getDefaultSettings,
   dateFormatters, dayKey, fmtDate,
+  todayKey, isOverdueRow, isDueTodayRow,
 } from "./system-management/constants";
 
 import { PipelineOverview, AtRiskPanel, TeamActivity, ActivityFeed } from "./system-management/DashboardTab";
@@ -24,6 +25,9 @@ import { StagePerformanceCard, BottleneckAnalysis, ThroughputSummary } from "./s
 import {
   UserRow, UserSettingsPanel, PushUpdatePanel, FrontOfficePanel, SystemHealthPanel, HistoryPanel,
 } from "./system-management/ControlTab";
+import { TodaysSnapshot } from "./system-management/TodaysSnapshot";
+import { AnomaliesPanel } from "./system-management/AnomaliesPanel";
+import { ProjectionsTab } from "./system-management/ProjectionsTab";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function Toast({ message, type, onClose }) {
@@ -93,27 +97,40 @@ export default function SystemManagementScreen() {
   }, []);
 
   // ── Computed Data ────────────────────────────────────────────────────────
-  const { digitalCases, stageCounts } = useMemo(() => {
+  // NOTE: digitalCases here means "Digital department" cases — stored in DB
+  // as department="General" because the Editor remaps Digital→General on insert
+  // (caseService.js:127). Other departments (e.g. Metal) are not surfaced on
+  // this screen because the calculation utilities only support General cases.
+  const { digitalCases, stageCounts, qcCount } = useMemo(() => {
     const caseRows = allRows || rows || [];
     const open = caseRows.filter(isOpenCase);
     const digital = open.filter(isDigitalGeneral);
-    const counts = { design: 0, production: 0, finishing: 0, qc: 0 };
-    digital.forEach(c => { const s = stageOfCase(c); if (s in counts) counts[s]++; });
-    return { digitalCases: digital, stageCounts: counts };
+    const counts = { design: 0, production: 0, finishing: 0 };
+    let qc = 0;
+    digital.forEach(c => {
+      const s = stageOfCase(c);
+      // Roll qc into finishing for top-level pipeline counts; track separately
+      // so we can render a "+N QC" sub-badge on the Finishing card.
+      if (s === "qc") { counts.finishing++; qc++; }
+      else if (s in counts) counts[s]++;
+    });
+    return { digitalCases: digital, stageCounts: counts, qcCount: qc };
   }, [allRows, rows]);
 
-  const overdueCount = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return digitalCases.filter(c => new Date(c.due) < today).length;
-  }, [digitalCases]);
+  // Use timezone-aware (Boise) calendar-day comparison so cases stored as
+  // UTC midnight don't flip overdue/due-today state when local time crosses
+  // a UTC day boundary.
+  const overdueCount = useMemo(
+    () => digitalCases.filter(isOverdueRow).length,
+    [digitalCases]
+  );
 
   const holdCount = useMemo(() => digitalCases.filter(c => c.hold).length, [digitalCases]);
 
-  const dueToday = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    return digitalCases.filter(c => c.due && new Date(c.due).toISOString().slice(0, 10) === todayStr).length;
-  }, [digitalCases]);
+  const dueToday = useMemo(
+    () => digitalCases.filter(isDueTodayRow).length,
+    [digitalCases]
+  );
 
   // ── User Processing ──────────────────────────────────────────────────────
   const { allProcessedUsers, userStats } = useMemo(() => {
@@ -301,68 +318,110 @@ export default function SystemManagementScreen() {
     finally { setSending(false); }
   }, [showToast]);
 
+  // ── Tab badges (counts of attention items) ──────────────────────────────
+  const tabBadges = useMemo(() => {
+    const dashCount = (() => {
+      let c = 0;
+      STAGES.forEach((s) => {
+        c += stageReports?.[s]?.predictions?.summary?.critical ?? 0;
+      });
+      return c + overdueCount;
+    })();
+
+    const bottleneckCount = STAGES.filter((s) => {
+      const score = stageReports?.[s]?.score;
+      return score != null && score < 60;
+    }).length;
+
+    const projectionsAttention = (() => {
+      // Severely overdue (>3d past due) on this screen
+      let n = 0;
+      const tk = todayKey();
+      digitalCases.forEach((c) => {
+        if (!c.due || c.completed) return;
+        const k = dateFormatters.dayKey.format(new Date(c.due));
+        if (k >= tk) return;
+        const days = Math.floor((Date.now() - new Date(c.due).getTime()) / 86400000);
+        if (days >= 3) n++;
+      });
+      return n;
+    })();
+
+    return {
+      dashboard: dashCount,
+      performance: bottleneckCount,
+      projections: projectionsAttention,
+      control: userStats.outdated || 0,
+      history: 0,
+    };
+  }, [stageReports, overdueCount, digitalCases, userStats.outdated]);
+
   // ── Render ───────────────────────────────────────────────────────────────
   const TABS = [
-    { key: "dashboard", label: "Dashboard" },
-    { key: "performance", label: "Performance" },
-    { key: "control", label: "Control" },
-    { key: "history", label: "History" },
+    { key: "dashboard", label: "Dashboard", icon: "◉" },
+    { key: "performance", label: "Performance", icon: "▲" },
+    { key: "projections", label: "Projections", icon: "⌁" },
+    { key: "control", label: "Control", icon: "⚙" },
+    { key: "history", label: "History", icon: "⌖" },
   ];
 
   return (
-    <main className="flex-1 overflow-auto bg-gradient-to-br from-gray-100 to-gray-200 pb-44 text-gray-900">
+    <main className="flex-1 overflow-auto bg-gradient-to-br from-gray-100 via-slate-100 to-gray-200 pb-44 text-gray-900">
       <div className="mx-auto max-w-7xl p-4 sm:p-6">
 
-        {/* ── Status Bar (always visible) ─────────────────────────────── */}
-        <div className="glass-panel rounded-xl p-3 mb-4">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div>
-              <span className="text-[10px] uppercase text-gray-500 tracking-wide">Open Cases</span>
-              <div className="text-lg font-bold text-gray-800">{digitalCases.length}</div>
-            </div>
-            <div>
-              <span className="text-[10px] uppercase text-gray-500 tracking-wide">Due Today</span>
-              <div className={clsx("text-lg font-bold", dueToday > 0 ? "text-amber-600" : "text-gray-800")}>{dueToday}</div>
-            </div>
-            <div>
-              <span className="text-[10px] uppercase text-gray-500 tracking-wide">Overdue</span>
-              <div className={clsx("text-lg font-bold", overdueCount > 0 ? "text-red-600" : "text-gray-800")}>
-                {overdueCount > 0 && <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse mr-1 align-middle" />}
-                {overdueCount}
-              </div>
-            </div>
-            <div>
-              <span className="text-[10px] uppercase text-gray-500 tracking-wide">On Hold</span>
-              <div className={clsx("text-lg font-bold", holdCount > 0 ? "text-amber-500" : "text-gray-800")}>{holdCount}</div>
-            </div>
-            <div>
-              <span className="text-[10px] uppercase text-gray-500 tracking-wide">Active Users</span>
-              <div className="text-lg font-bold text-gray-800">
-                <span className="text-emerald-600">{userStats.active}</span>
-                <span className="text-xs text-gray-400 font-normal ml-1">{userStats.idle > 0 && `+${userStats.idle} idle`}</span>
-              </div>
-            </div>
-            <div className="ml-auto flex items-center gap-3">
-              <span className="text-xs text-gray-400">v{APP_VERSION}</span>
-              <span className="text-xs text-gray-400">{dateFormatters.fullDateTime.format(new Date())}</span>
-              <button onClick={runProjections} disabled={running}
-                className={clsx("px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
-                  running ? "bg-gray-100 text-gray-400" : "bg-[#16525F] text-white hover:bg-[#0f3f4a]"
-                )}>
-                {running ? <span className="flex items-center gap-1"><LoadingSpinner size="sm" /> Calculating...</span> : "Refresh Data"}
-              </button>
-            </div>
-          </div>
+        {/* ── Today's Snapshot (replaces status bar with richer hero) ──── */}
+        <div className="mb-4">
+          <TodaysSnapshot
+            cases={digitalCases}
+            history={history}
+            stageReports={stageReports}
+            stageStats={stageStats}
+            stageCounts={stageCounts}
+            userStats={userStats}
+            running={running}
+          />
+        </div>
+
+        {/* ── Compact secondary bar: meta + refresh ────────────────────── */}
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-xs text-gray-500">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Live · {dateFormatters.fullDateTime.format(new Date(now))}
+          </span>
+          <span>v{APP_VERSION}</span>
+          <span className="text-gray-300">·</span>
+          <span>{digitalCases.length} open · {dueToday} due today · {overdueCount} overdue · {holdCount} on hold</span>
+          <div className="flex-1" />
+          <button onClick={runProjections} disabled={running}
+            className={clsx("px-3 py-1.5 rounded-lg text-xs font-medium transition-all border",
+              running
+                ? "bg-gray-100 text-gray-400 border-gray-200"
+                : "bg-white text-[#16525F] border-[#16525F]/20 hover:bg-[#16525F] hover:text-white hover:border-[#16525F]"
+            )}>
+            {running ? <span className="flex items-center gap-1.5"><LoadingSpinner size="sm" /> Recalculating</span> : "↻ Refresh Stats"}
+          </button>
         </div>
 
         {/* ── Tab Navigation ──────────────────────────────────────────── */}
-        <nav className="mb-5 flex gap-1 glass-panel p-1 rounded-xl">
-          {TABS.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={clsx("whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition-all",
-                tab === t.key ? "bg-[#16525F] text-white shadow" : "text-gray-600 hover:bg-gray-100"
-              )}>{t.label}</button>
-          ))}
+        <nav className="mb-5 flex gap-1 glass-panel p-1 rounded-xl overflow-x-auto">
+          {TABS.map(t => {
+            const badge = tabBadges[t.key];
+            const isActive = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={clsx("whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition-all flex items-center gap-2",
+                  isActive ? "bg-[#16525F] text-white shadow-md" : "text-gray-600 hover:bg-gray-100"
+                )}>
+                <span aria-hidden className={clsx("text-[14px] leading-none", isActive ? "opacity-90" : "opacity-50")}>{t.icon}</span>
+                <span>{t.label}</span>
+                {badge > 0 && (
+                  <span className={clsx("text-[10px] font-bold px-1.5 rounded-full min-w-[18px] text-center leading-tight py-0.5",
+                    isActive ? "bg-white/25 text-white" : "bg-red-100 text-red-700"
+                  )}>{badge}</span>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         {/* ── Tab Content ─────────────────────────────────────────────── */}
@@ -370,11 +429,14 @@ export default function SystemManagementScreen() {
         {/* DASHBOARD */}
         {tab === "dashboard" && (
           <div className="space-y-5">
-            <PipelineOverview stageCounts={stageCounts} stageReports={stageReports} stageStats={stageStats} />
+            <PipelineOverview stageCounts={stageCounts} stageReports={stageReports} stageStats={stageStats}
+              history={history} qcCount={qcCount} />
             <div className="grid gap-5 lg:grid-cols-5">
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-3 space-y-5">
                 <AtRiskPanel cases={digitalCases} stageReports={stageReports}
                   onTogglePriority={togglePriority} onToggleHold={toggleHold} onToggleRush={toggleRush} />
+                <AnomaliesPanel cases={digitalCases} history={history}
+                  stageStats={stageStats} stageReports={stageReports} />
               </div>
               <div className="lg:col-span-2 space-y-5">
                 <TeamActivity users={allProcessedUsers} recentHistory={history} />
@@ -397,6 +459,12 @@ export default function SystemManagementScreen() {
               <ThroughputSummary cases={digitalCases} history={history} />
             </div>
           </div>
+        )}
+
+        {/* PROJECTIONS */}
+        {tab === "projections" && (
+          <ProjectionsTab cases={digitalCases} history={history}
+            stageReports={stageReports} stageStats={stageStats} running={running} />
         )}
 
         {/* CONTROL */}
