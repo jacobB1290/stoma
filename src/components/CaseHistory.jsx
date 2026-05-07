@@ -1277,11 +1277,21 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       scrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
+  // Forecast eligibility:
+  //  - case row exists with a due date
+  //  - case isn't completed (the cases table has a `completed` boolean,
+  //    NOT a `completed_at` timestamp — same field-name fix applied to
+  //    the active-pool filter below)
+  //  - department is one the ML model was trained on. The model has
+  //    only seen Digital and General cases; Metal (Stage 1/2) and C&B
+  //    have different stage definitions and aren't in the training set,
+  //    so showing a forecast for them would be misleading.
+  const FORECAST_DEPARTMENTS = new Set(["Digital", "General"]);
   const canShowForecast =
     !!caseData &&
     !!caseData.due &&
-    !caseData.completed_at &&
-    !caseData.modifiers?.includes("completed");
+    caseData.completed !== true &&
+    FORECAST_DEPARTMENTS.has(caseData.department);
 
   // Single-case compute with full peer context, scheduled at the lowest
   // browser priority. The previous attempt passed the entire active pool
