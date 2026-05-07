@@ -1283,15 +1283,21 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     !caseData.completed_at &&
     !caseData.modifiers?.includes("completed");
 
-  // Single full-pool compute, scheduled at the lowest browser priority.
-  // Uses the same active-case pool shape as the Efficiency screen so the
-  // verdict (and the per-case "concurrent in stage" count) agree across
-  // both surfaces — passing only [caseData] gave concurrent=0 and could
-  // flip the verdict from On track to Will miss. Rewriting this means
-  // wall-clock goes back up to ~1–2s on a typical pool, but the work
-  // runs at scheduler.postTask({priority:'background'}) so it only
-  // executes during true idle time and the user sees the modal pop
-  // open immediately with a "Calculating…" placeholder.
+  // Single-case compute with full peer context, scheduled at the lowest
+  // browser priority. The previous attempt passed the entire active pool
+  // as `activeCases` so the engine ran predictions for ALL cases (~1–2s
+  // synchronous) — that was the freeze. Worse, the peer rows came from
+  // DataContext without any stage field set, so the engine's peer filter
+  // (`o.currentStage || o.stage`) couldn't tell what stage anyone was in
+  // and `concurrent` came out as 0.
+  //
+  // Fix: compute prediction for just [caseData] (single per-case loop
+  // iteration, ~50ms) but pass the full pool as a `peerPool` option so
+  // cross-case features (`concurrent`, batch siblings, etc.) read from
+  // the real pool. Each peer is enriched with `currentStage` /
+  // `current_stage` / `stage` derived from its `modifiers` so the
+  // engine's stage-matching filters (lines 449 and 1108 of the engine)
+  // both see the right stage.
   useEffect(() => {
     if (!canShowForecast) return undefined;
     if (forecastFetchedRef.current) return undefined;
@@ -1324,6 +1330,17 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setTimeout(resolve, 100);
       });
 
+    // Match the stage-derivation pattern used elsewhere in the app
+    // (App.jsx, Board.jsx, MetaCol.jsx).
+    const stageFromModifiers = (mods) => {
+      if (!Array.isArray(mods)) return null;
+      if (mods.includes("stage-qc")) return "qc";
+      if (mods.includes("stage-finishing")) return "finishing";
+      if (mods.includes("stage-production")) return "production";
+      if (mods.includes("stage-design")) return "design";
+      return null;
+    };
+
     const compute = async () => {
       forecastFetchedRef.current = true;
       if (mountedRef.current) {
@@ -1331,53 +1348,61 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setForecastError(null);
       }
       try {
-        // Yield once before doing any setup so the case-modal entrance
-        // animation has a chance to settle.
         await yieldToBackground();
         if (cancelled) return;
 
-        // Build the full active pool the engine needs to compute peer
-        // counts, queue depth, and the rest of the cross-case features.
-        // Substitute this case with its history-enriched copy so the
-        // per-case features for THIS case are accurate.
-        const pool = allRows
+        // Build the peer pool from the active cases in DataContext, with
+        // each row enriched with stage fields the engine looks for. The
+        // engine reads two distinct field-name patterns in different
+        // spots — `currentStage || stage` (peer concurrent count) and
+        // `stage || current_stage` (lab-context per-stage load) — so we
+        // set all three.
+        const peerPool = allRows
           .filter(
             (r) =>
               !r.completed_at &&
               !r.modifiers?.includes("completed") &&
               !r.modifiers?.includes("excluded")
           )
-          .map((c) => (c.id === id ? caseData : c));
+          .map((c) => {
+            if (c.id === id) return caseData; // history-enriched copy
+            const s = stageFromModifiers(c.modifiers);
+            return s
+              ? { ...c, currentStage: s, current_stage: s, stage: s }
+              : c;
+          });
 
         await yieldToBackground();
         if (cancelled) return;
 
-        const stageMod = caseData.modifiers?.find?.((m) =>
-          m.startsWith("stage-")
-        );
-        const stage = stageMod ? stageMod.replace("stage-", "") : "design";
+        const stage =
+          stageFromModifiers(caseData.modifiers) || "design";
 
-        // Optional: feed labContext + recentCompletedVisits so the engine
-        // can short-circuit its own derivations. Both come from the same
-        // pool, which is all we have without firing extra DB queries.
         const now = new Date();
-        const visits = extractRecentCompletedVisits(pool, now, 30);
+        const visits = extractRecentCompletedVisits(peerPool, now, 30);
 
         await yieldToBackground();
         if (cancelled) return;
 
-        const labContext = computeLabContextV9(pool, visits, now);
+        const labContext = computeLabContextV9(peerPool, visits, now);
 
         await yieldToBackground();
         if (cancelled) return;
 
-        const result = generateCaseRiskPredictions(pool, null, stage, null, {
-          labContext,
-          recentCompletedVisits: visits,
-        });
-        const pred = result?.predictions?.find(
-          (p) => p.id === id || p.caseNumber === caseData.case_number
+        // activeCases = [caseData] → engine runs one ML inference.
+        // peerPool = full pool → cross-case features computed correctly.
+        const result = generateCaseRiskPredictions(
+          [caseData],
+          null,
+          stage,
+          null,
+          {
+            peerPool,
+            labContext,
+            recentCompletedVisits: visits,
+          }
         );
+        const pred = result?.predictions?.[0];
 
         if (!pred) {
           if (mountedRef.current) setForecastError("Forecast unavailable.");

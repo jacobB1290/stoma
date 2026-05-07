@@ -1884,6 +1884,15 @@ export function generateCaseRiskPredictions(
   const labContext = options.labContext
     || computeLabContextV9(activeCases, recentCompletedVisits, now);
 
+  // peerPool decouples "cases to compute predictions for" (activeCases) from
+  // "cases used as peers for cross-case feature derivation" (peerPool). When
+  // omitted, the two are the same — preserves existing behavior. CaseHistory
+  // uses this to compute a prediction for a single case while still reading
+  // concurrent-in-stage / batch-siblings / etc. from the full active pool.
+  const peerPool = Array.isArray(options.peerPool) && options.peerPool.length
+    ? options.peerPool
+    : activeCases;
+
   if (typeof console !== "undefined") {
     const stgCtx = labContext.perStage?.[currentStage] || {};
     console.log("[v10 labContext]", {
@@ -1913,7 +1922,7 @@ export function generateCaseRiskPredictions(
     const stageEnteredAt = getStageEnteredAtFor(c, currentStage);
     const timeInStageMs = Math.max(0, nowTs - (stageEnteredAt?.getTime?.() || nowTs));
 
-    const ml = predictCaseML(c, currentStage, stageEnteredAt, activeCases, labContext, recentCompletedVisits);
+    const ml = predictCaseML(c, currentStage, stageEnteredAt, peerPool, labContext, recentCompletedVisits);
     const dueDateCalc = dueEOD(c.due);
     const dueDateDisplay = parseDueDateForDisplay(c.due);
     const isRush = !!(c?.rush || c?.priority);
