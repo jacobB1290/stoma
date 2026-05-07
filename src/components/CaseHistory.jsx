@@ -1357,11 +1357,16 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         // spots — `currentStage || stage` (peer concurrent count) and
         // `stage || current_stage` (lab-context per-stage load) — so we
         // set all three.
+        //
+        // IMPORTANT: the cases table has a `completed` boolean column,
+        // not `completed_at` — filtering on `completed_at` lets every
+        // ever-completed case through (verified against Supabase: of 874
+        // non-archived rows, only 73 have completed=false). Using the
+        // wrong filter is what caused the "169 concurrent" reading.
         const peerPool = allRows
           .filter(
             (r) =>
-              !r.completed_at &&
-              !r.modifiers?.includes("completed") &&
+              r.completed !== true &&
               !r.modifiers?.includes("excluded")
           )
           .map((c) => {
