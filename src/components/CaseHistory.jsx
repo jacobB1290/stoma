@@ -1221,24 +1221,18 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
   const [viewTransitioning, setViewTransitioning] = useState(false);
   const viewTransitionTimer = useRef(null);
 
-  // Risk forecast: pre-computed in the background when the case modal
-  // opens (during browser idle time) so the inline pill renders without
-  // jank and the "View detailed forecast" button opens the modal instantly
-  // instead of triggering a 500–1000ms synchronous compute on click.
-  // The prediction itself comes from the same engine the Efficiency screen
-  // uses, so the inline pill (tone + label) and the full modal are always
-  // showing the same underlying prediction object.
+  // Risk forecast: a single full compute runs in the background when the
+  // case modal opens. We use the same active-case pool the Efficiency
+  // screen uses so the verdict and concurrent-in-stage count agree with
+  // what's shown there. The compute is heavy (~1–2s for ~50 cases) so
+  // it's scheduled at the lowest browser priority — the modal opens
+  // immediately with a "Calculating…" placeholder, and the prediction
+  // lands when the browser has nothing else to do.
   const [forecastPrediction, setForecastPrediction] = useState(null);
   const [forecastLoading, setForecastLoading] = useState(false);
   const [forecastError, setForecastError] = useState(null);
   const [forecastModalOpen, setForecastModalOpen] = useState(false);
-  const forecastIdleHandle = useRef(null);
   const forecastFetchedRef = useRef(false);
-  // Phase 2: once the cheap single-case prediction lands, a background
-  // refinement runs at lowest scheduler priority and re-derives the
-  // prediction with fleet-wide context. This ref guards it from running
-  // more than once per case-modal open.
-  const forecastRefinedRef = useRef(false);
 
   const popupRef = useRef(null);
   const mountedRef = useRef(true);
@@ -1289,94 +1283,29 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     !caseData.completed_at &&
     !caseData.modifiers?.includes("completed");
 
-  const computeForecast = useCallback(() => {
-    if (forecastFetchedRef.current || !canShowForecast) return;
-    forecastFetchedRef.current = true;
-    setForecastLoading(true);
-    setForecastError(null);
-    try {
-      // Single-case compute: pass just this case (with its history
-      // attached) instead of the whole active pool. This drops the
-      // wall-clock from ~1–2s to under 100ms because the engine's
-      // per-case loop only runs once and the lab-context derivations
-      // operate on a one-element array. Cross-case features (queue
-      // depth, throughput trend) will be zero, which is acceptable
-      // here — this strip only needs the per-case verdict, and the
-      // Efficiency screen remains the place for fleet-aware analysis.
-      const stageMod = caseData.modifiers?.find?.((m) =>
-        m.startsWith("stage-")
-      );
-      const stage = stageMod ? stageMod.replace("stage-", "") : "design";
-      const result = generateCaseRiskPredictions([caseData], null, stage);
-      const pred = result?.predictions?.[0];
-      if (!pred) {
-        setForecastError("Forecast unavailable for this case.");
-      } else if (mountedRef.current) {
-        setForecastPrediction(pred);
-      }
-    } catch (err) {
-      console.warn("[CaseHistory] Forecast load failed:", err);
-      forecastFetchedRef.current = false;
-      if (mountedRef.current) setForecastError("Forecast unavailable.");
-    } finally {
-      if (mountedRef.current) setForecastLoading(false);
-    }
-  }, [caseData, canShowForecast]);
-
-  // Prefetch in idle time so the click is instant.
+  // Single full-pool compute, scheduled at the lowest browser priority.
+  // Uses the same active-case pool shape as the Efficiency screen so the
+  // verdict (and the per-case "concurrent in stage" count) agree across
+  // both surfaces — passing only [caseData] gave concurrent=0 and could
+  // flip the verdict from On track to Will miss. Rewriting this means
+  // wall-clock goes back up to ~1–2s on a typical pool, but the work
+  // runs at scheduler.postTask({priority:'background'}) so it only
+  // executes during true idle time and the user sees the modal pop
+  // open immediately with a "Calculating…" placeholder.
   useEffect(() => {
     if (!canShowForecast) return undefined;
     if (forecastFetchedRef.current) return undefined;
-
-    const ric =
-      typeof window !== "undefined" && typeof window.requestIdleCallback === "function"
-        ? window.requestIdleCallback
-        : (cb) => setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 }), 250);
-    const cic =
-      typeof window !== "undefined" && typeof window.cancelIdleCallback === "function"
-        ? window.cancelIdleCallback
-        : clearTimeout;
-
-    const handle = ric(() => computeForecast(), { timeout: 2000 });
-    forecastIdleHandle.current = { handle, cancel: cic };
-    return () => {
-      const ref = forecastIdleHandle.current;
-      if (ref) {
-        try { ref.cancel(ref.handle); } catch { /* ignore */ }
-        forecastIdleHandle.current = null;
-      }
-    };
-  }, [canShowForecast, computeForecast]);
-
-  // Phase 2: once the cheap single-case prediction is in state, run a
-  // background refinement that re-derives the forecast with fleet-wide
-  // context (lab queue depth, throughput trend, recent stage timings).
-  // The work is split into small steps with explicit yields between them
-  // so the browser can interrupt at any point — typing, scrolling, or any
-  // user interaction takes priority. Lands silently: if the refined
-  // prediction has the same verdict the pill doesn't visually change; if
-  // it differs (e.g. "On track" → "Watch") the pill and any open Details
-  // modal both update on the next render.
-  useEffect(() => {
-    if (!forecastPrediction) return undefined;
-    if (forecastRefinedRef.current) return undefined;
     if (!caseData || !allRows?.length) return undefined;
 
     let cancelled = false;
 
-    // Lowest-priority scheduler: prefer scheduler.postTask({priority:
-    // 'background'}) where available, fall back to requestIdleCallback,
-    // then setTimeout. Background tasks are the lowest priority class —
-    // browsers run them only when nothing else is queued and can pause
-    // them indefinitely under load.
     const yieldToBackground = () =>
       new Promise((resolve) => {
         if (cancelled) {
           resolve();
           return;
         }
-        const sched =
-          typeof window !== "undefined" ? window.scheduler : null;
+        const sched = typeof window !== "undefined" ? window.scheduler : null;
         if (sched && typeof sched.postTask === "function") {
           try {
             sched.postTask(resolve, { priority: "background" });
@@ -1395,28 +1324,42 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setTimeout(resolve, 100);
       });
 
-    const refine = async () => {
+    const compute = async () => {
+      forecastFetchedRef.current = true;
+      if (mountedRef.current) {
+        setForecastLoading(true);
+        setForecastError(null);
+      }
       try {
+        // Yield once before doing any setup so the case-modal entrance
+        // animation has a chance to settle.
         await yieldToBackground();
         if (cancelled) return;
 
-        const activeCases = allRows.filter(
-          (r) =>
-            !r.completed_at &&
-            !r.modifiers?.includes("completed") &&
-            !r.modifiers?.includes("excluded")
-        );
-        // Substitute the in-modal case for its enriched copy so its
-        // case_history is available to the engine when it shows up in
-        // the pool (other rows still come without history; that's the
-        // limit of what we can do without firing additional queries).
-        const pool = activeCases.map((c) =>
-          c.id === id ? caseData : c
-        );
+        // Build the full active pool the engine needs to compute peer
+        // counts, queue depth, and the rest of the cross-case features.
+        // Substitute this case with its history-enriched copy so the
+        // per-case features for THIS case are accurate.
+        const pool = allRows
+          .filter(
+            (r) =>
+              !r.completed_at &&
+              !r.modifiers?.includes("completed") &&
+              !r.modifiers?.includes("excluded")
+          )
+          .map((c) => (c.id === id ? caseData : c));
 
         await yieldToBackground();
         if (cancelled) return;
 
+        const stageMod = caseData.modifiers?.find?.((m) =>
+          m.startsWith("stage-")
+        );
+        const stage = stageMod ? stageMod.replace("stage-", "") : "design";
+
+        // Optional: feed labContext + recentCompletedVisits so the engine
+        // can short-circuit its own derivations. Both come from the same
+        // pool, which is all we have without firing extra DB queries.
         const now = new Date();
         const visits = extractRecentCompletedVisits(pool, now, 30);
 
@@ -1428,48 +1371,40 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         await yieldToBackground();
         if (cancelled) return;
 
-        const stageMod = caseData.modifiers?.find?.((m) =>
-          m.startsWith("stage-")
+        const result = generateCaseRiskPredictions(pool, null, stage, null, {
+          labContext,
+          recentCompletedVisits: visits,
+        });
+        const pred = result?.predictions?.find(
+          (p) => p.id === id || p.caseNumber === caseData.case_number
         );
-        const stage = stageMod ? stageMod.replace("stage-", "") : "design";
-        const result = generateCaseRiskPredictions(
-          [caseData],
-          null,
-          stage,
-          null,
-          { labContext, recentCompletedVisits: visits }
-        );
-        const refined = result?.predictions?.[0];
 
-        if (refined && !cancelled && mountedRef.current) {
-          forecastRefinedRef.current = true;
-          setForecastPrediction(refined);
+        if (!pred) {
+          if (mountedRef.current) setForecastError("Forecast unavailable.");
+        } else if (mountedRef.current && !cancelled) {
+          setForecastPrediction(pred);
         }
       } catch (err) {
-        // Refinement is best-effort: keep the phase-1 prediction visible
-        // and just log so the user never sees an error from this path.
-        console.warn("[CaseHistory] Forecast refinement skipped:", err);
+        console.warn("[CaseHistory] Forecast load failed:", err);
+        forecastFetchedRef.current = false;
+        if (mountedRef.current) setForecastError("Forecast unavailable.");
+      } finally {
+        if (mountedRef.current) setForecastLoading(false);
       }
     };
 
-    refine();
+    compute();
 
     return () => {
       cancelled = true;
     };
-  }, [forecastPrediction, caseData, allRows, id]);
+  }, [canShowForecast, caseData, allRows, id]);
 
   const handleOpenForecast = useCallback(() => {
-    if (forecastPrediction) {
-      setForecastModalOpen(true);
-      return;
-    }
-    // User clicked before the idle prefetch ran (or it errored) — compute
-    // eagerly now and open as soon as the prediction lands.
-    if (forecastLoading) return;
-    computeForecast();
+    // Click is allowed at any time; the modal renders only when the
+    // prediction lands (gated below on `forecastModalOpen && forecastPrediction`).
     setForecastModalOpen(true);
-  }, [forecastPrediction, forecastLoading, computeForecast]);
+  }, []);
 
   const forecastSummary = useMemo(() => {
     if (!forecastPrediction) return null;
