@@ -2826,7 +2826,9 @@ function TimelineHero({ prediction }) {
           </div>
         </div>
 
-        {/* NOW marker — full-height vertical */}
+        {/* NOW marker — full-height vertical. Label hugs the left/right
+            edge when its marker is near 0%/100% so it never clips out of
+            the panel. */}
         {totalG.nowPct >= 0 && totalG.nowPct <= 100 && (
           <>
             <div
@@ -2842,7 +2844,12 @@ function TimelineHero({ prediction }) {
               style={{
                 top: 0,
                 left: `${totalG.nowPct}%`,
-                transform: "translate(-50%, -120%)",
+                transform:
+                  totalG.nowPct < 4
+                    ? "translate(0, -120%)"
+                    : totalG.nowPct > 96
+                    ? "translate(-100%, -120%)"
+                    : "translate(-50%, -120%)",
                 color: COLORS.ink,
               }}
             >
@@ -2851,7 +2858,8 @@ function TimelineHero({ prediction }) {
           </>
         )}
 
-        {/* DUE marker — full-height, colored by verdict */}
+        {/* DUE marker — full-height, colored by verdict. Same edge-aware
+            label alignment as NOW. */}
         {dueTs && (
           <>
             <div
@@ -2864,11 +2872,22 @@ function TimelineHero({ prediction }) {
               }}
             />
             <div
-              className="absolute flex flex-col items-center whitespace-nowrap"
+              className="absolute flex flex-col whitespace-nowrap"
               style={{
                 top: 0,
                 left: `${totalG.duePct}%`,
-                transform: "translate(-50%, -105%)",
+                transform:
+                  totalG.duePct < 6
+                    ? "translate(0, -105%)"
+                    : totalG.duePct > 94
+                    ? "translate(-100%, -105%)"
+                    : "translate(-50%, -105%)",
+                alignItems:
+                  totalG.duePct < 6
+                    ? "flex-start"
+                    : totalG.duePct > 94
+                    ? "flex-end"
+                    : "center",
                 color: toneFg,
               }}
             >
@@ -2895,22 +2914,29 @@ function TimelineHero({ prediction }) {
           }}
         />
 
-        {/* Tick labels */}
-        {ticks.map((t, i) => (
-          <div
-            key={`l${i}`}
-            className="absolute text-[9px] uppercase tracking-[0.1em] whitespace-nowrap"
-            style={{
-              bottom: 8,
-              left: `${t.pct}%`,
-              transform: i === 0 ? "translateX(0)" : i === ticks.length - 1 ? "translateX(-100%)" : "translateX(-50%)",
-              color: COLORS.inkFaint,
-              fontFamily: "monospace",
-            }}
-          >
-            {formatDate(new Date(t.ts), false)}
-          </div>
-        ))}
+        {/* Tick labels — compact M/D format keeps the axis readable when
+            ticks fall on every day boundary. All labels are centered on
+            their tick; the format is short enough that edge ticks never
+            clip the panel padding. */}
+        {ticks.map((t, i) => {
+          const d = new Date(t.ts);
+          return (
+            <div
+              key={`l${i}`}
+              className="absolute text-[10px] whitespace-nowrap"
+              style={{
+                bottom: 8,
+                left: `${t.pct}%`,
+                transform: "translate(-50%, 0)",
+                color: COLORS.inkFaint,
+                fontFamily: "monospace",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {`${d.getMonth() + 1}/${d.getDate()}`}
+            </div>
+          );
+        })}
       </div>
 
       {/* Legend / footer strip */}
