@@ -800,12 +800,10 @@ const TimelineForecast = memo(function TimelineForecast({ predictions }) {
       return result;
     };
 
-    const points = [
-      { label: "Now", offset: 0 },
-      { label: "+1d", offset: 1 },
-      { label: "+3d", offset: 3 },
-      { label: "+1wk", offset: 7 },
-    ];
+    const points = Array.from({ length: 8 }, (_, i) => ({
+      label: i === 0 ? "Now" : `+${i}d`,
+      offset: i,
+    }));
 
     return points.map(({ label, offset }) => {
       const targetDate = addDays(now, offset);
