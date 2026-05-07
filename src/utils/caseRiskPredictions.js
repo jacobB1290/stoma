@@ -2569,12 +2569,34 @@ function TimelineHero({ prediction }) {
     etas: totalETAs, now, due: dueDateCalc, minTs, maxTs,
   });
 
-  // Draw a labeled date tick on the axis every ~25% across the span.
+  // Draw a labeled date tick at every 1-day boundary (local midnight) across
+  // the span. This keeps x-axis spacing literal — equal pixel gaps always
+  // mean equal calendar days — instead of the previous "5 evenly-spaced
+  // ticks" approach which produced 2-day or longer steps depending on span.
   const ticks = [];
-  for (let i = 0; i <= 4; i++) {
-    const pctPos = (i / 4) * 100;
-    const tickTs = minTs + ((maxTs - minTs) * i) / 4;
-    ticks.push({ pct: pctPos, ts: tickTs });
+  const DAY_MS = 24 * 3600 * 1000;
+  const startOfDay = (ts) => {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  let dayTs = startOfDay(minTs);
+  if (dayTs < minTs) dayTs += DAY_MS;
+  while (dayTs <= maxTs) {
+    const pctPos = ((dayTs - minTs) / (maxTs - minTs)) * 100;
+    ticks.push({ pct: pctPos, ts: dayTs });
+    dayTs += DAY_MS;
+  }
+  // Safety: very short spans (< 1 day) get the legacy quartile fallback so
+  // the axis isn't blank.
+  if (ticks.length < 2) {
+    ticks.length = 0;
+    for (let i = 0; i <= 4; i++) {
+      ticks.push({
+        pct: (i / 4) * 100,
+        ts: minTs + ((maxTs - minTs) * i) / 4,
+      });
+    }
   }
 
   // If the P50 pin falls too close to a tick mark OR the Due marker, suppress
