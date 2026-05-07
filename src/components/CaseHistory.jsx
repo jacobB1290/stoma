@@ -16,6 +16,8 @@ import {
   CaseRiskAnalyticsModal,
   unifiedStatus as computePredictionStatus,
   RISK_STYLE,
+  extractRecentCompletedVisits,
+  computeLabContextV9,
 } from "../utils/caseRiskPredictions";
 import clsx from "clsx";
 
@@ -1232,6 +1234,11 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
   const [forecastModalOpen, setForecastModalOpen] = useState(false);
   const forecastIdleHandle = useRef(null);
   const forecastFetchedRef = useRef(false);
+  // Phase 2: once the cheap single-case prediction lands, a background
+  // refinement runs at lowest scheduler priority and re-derives the
+  // prediction with fleet-wide context. This ref guards it from running
+  // more than once per case-modal open.
+  const forecastRefinedRef = useRef(false);
 
   const popupRef = useRef(null);
   const mountedRef = useRef(true);
@@ -1340,6 +1347,117 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       }
     };
   }, [canShowForecast, computeForecast]);
+
+  // Phase 2: once the cheap single-case prediction is in state, run a
+  // background refinement that re-derives the forecast with fleet-wide
+  // context (lab queue depth, throughput trend, recent stage timings).
+  // The work is split into small steps with explicit yields between them
+  // so the browser can interrupt at any point — typing, scrolling, or any
+  // user interaction takes priority. Lands silently: if the refined
+  // prediction has the same verdict the pill doesn't visually change; if
+  // it differs (e.g. "On track" → "Watch") the pill and any open Details
+  // modal both update on the next render.
+  useEffect(() => {
+    if (!forecastPrediction) return undefined;
+    if (forecastRefinedRef.current) return undefined;
+    if (!caseData || !allRows?.length) return undefined;
+
+    let cancelled = false;
+
+    // Lowest-priority scheduler: prefer scheduler.postTask({priority:
+    // 'background'}) where available, fall back to requestIdleCallback,
+    // then setTimeout. Background tasks are the lowest priority class —
+    // browsers run them only when nothing else is queued and can pause
+    // them indefinitely under load.
+    const yieldToBackground = () =>
+      new Promise((resolve) => {
+        if (cancelled) {
+          resolve();
+          return;
+        }
+        const sched =
+          typeof window !== "undefined" ? window.scheduler : null;
+        if (sched && typeof sched.postTask === "function") {
+          try {
+            sched.postTask(resolve, { priority: "background" });
+            return;
+          } catch {
+            /* fall through */
+          }
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.requestIdleCallback === "function"
+        ) {
+          window.requestIdleCallback(() => resolve(), { timeout: 5000 });
+          return;
+        }
+        setTimeout(resolve, 100);
+      });
+
+    const refine = async () => {
+      try {
+        await yieldToBackground();
+        if (cancelled) return;
+
+        const activeCases = allRows.filter(
+          (r) =>
+            !r.completed_at &&
+            !r.modifiers?.includes("completed") &&
+            !r.modifiers?.includes("excluded")
+        );
+        // Substitute the in-modal case for its enriched copy so its
+        // case_history is available to the engine when it shows up in
+        // the pool (other rows still come without history; that's the
+        // limit of what we can do without firing additional queries).
+        const pool = activeCases.map((c) =>
+          c.id === id ? caseData : c
+        );
+
+        await yieldToBackground();
+        if (cancelled) return;
+
+        const now = new Date();
+        const visits = extractRecentCompletedVisits(pool, now, 30);
+
+        await yieldToBackground();
+        if (cancelled) return;
+
+        const labContext = computeLabContextV9(pool, visits, now);
+
+        await yieldToBackground();
+        if (cancelled) return;
+
+        const stageMod = caseData.modifiers?.find?.((m) =>
+          m.startsWith("stage-")
+        );
+        const stage = stageMod ? stageMod.replace("stage-", "") : "design";
+        const result = generateCaseRiskPredictions(
+          [caseData],
+          null,
+          stage,
+          null,
+          { labContext, recentCompletedVisits: visits }
+        );
+        const refined = result?.predictions?.[0];
+
+        if (refined && !cancelled && mountedRef.current) {
+          forecastRefinedRef.current = true;
+          setForecastPrediction(refined);
+        }
+      } catch (err) {
+        // Refinement is best-effort: keep the phase-1 prediction visible
+        // and just log so the user never sees an error from this path.
+        console.warn("[CaseHistory] Forecast refinement skipped:", err);
+      }
+    };
+
+    refine();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [forecastPrediction, caseData, allRows, id]);
 
   const handleOpenForecast = useCallback(() => {
     if (forecastPrediction) {
