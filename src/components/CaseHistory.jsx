@@ -1717,6 +1717,13 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
   }, [handleClose]);
   useEffect(() => {
     const onClick = (e) => {
+      // While the forecast detail modal is open, every click lands
+      // outside CaseHistory's popupRef (the forecast lives in its own
+      // portal at document.body), which would otherwise fire handleClose
+      // and tear down the case history immediately. Skip the dismiss
+      // check while the forecast is showing — the forecast modal
+      // dismisses both via its own onClose callback below.
+      if (forecastModalOpen) return;
       if (popupRef.current && !popupRef.current.contains(e.target))
         handleClose();
     };
@@ -1728,7 +1735,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       clearTimeout(t);
       window.removeEventListener("mousedown", onClick, true);
     };
-  }, [handleClose, defer]);
+  }, [handleClose, defer, forecastModalOpen]);
 
   /* ── Stage progress with upstream-awareness ── */
   const stageProgressData = useMemo(() => {
@@ -2041,7 +2048,14 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     <AnimatePresence onExitComplete={onClose}>
       {!isClosing && (
         <motion.div
-          className="fixed inset-0 z-[10100] pointer-events-none"
+          className={clsx(
+            "fixed inset-0 z-[10100] pointer-events-none",
+            // While the forecast detail modal is open, hide the case
+            // history behind it so the user only sees one modal at a
+            // time. Without this the user perceives "two modals open"
+            // and has to close both individually.
+            forecastModalOpen && "invisible"
+          )}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -2763,7 +2777,15 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       {forecastModalOpen && forecastPrediction && (
         <CaseRiskAnalyticsModal
           prediction={forecastPrediction}
-          onClose={() => setForecastModalOpen(false)}
+          onClose={() => {
+            // Dismiss both: the forecast and the (now-hidden) case
+            // history. The user clicked Details to dive into the
+            // forecast — closing it returns them to wherever they came
+            // from before opening the case modal, not back to a stack
+            // of modals they have to clear one by one.
+            setForecastModalOpen(false);
+            handleClose();
+          }}
           zIndex={10200}
         />
       )}
