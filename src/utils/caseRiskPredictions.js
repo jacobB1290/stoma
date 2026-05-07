@@ -2120,7 +2120,7 @@ export function generateCaseRiskPredictions(
  *  UI UTILITIES
  *  ======================================================================== */
 
-const RISK_STYLE = {
+export const RISK_STYLE = {
   critical: { fg: COLORS.rCritical, bg: COLORS.rCriticalBg, label: "Critical" },
   high:     { fg: COLORS.rHigh,     bg: COLORS.rHighBg,     label: "High" },
   medium:   { fg: COLORS.rMedium,   bg: COLORS.rMediumBg,   label: "Medium" },
@@ -2293,7 +2293,7 @@ function VerdictChip({ verdict, size = "md" }) {
  * surface dual readings in the UI, but we can soften confidence when the
  * two signals disagree sharply.
  */
-function unifiedStatus(prediction) {
+export function unifiedStatus(prediction) {
   const now = getCurrentTime();
   const due = prediction.dueDateCalc;
   const eta = prediction.completionETA || prediction.totalETAs?.p50;

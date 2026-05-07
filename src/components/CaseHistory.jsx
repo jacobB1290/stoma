@@ -14,6 +14,8 @@ import { formatHistoryAction } from "../utils/historyActionFormatter";
 import {
   generateCaseRiskPredictions,
   CaseRiskAnalyticsModal,
+  unifiedStatus as computePredictionStatus,
+  RISK_STYLE,
 } from "../utils/caseRiskPredictions";
 import clsx from "clsx";
 
@@ -1217,13 +1219,19 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
   const [viewTransitioning, setViewTransitioning] = useState(false);
   const viewTransitionTimer = useRef(null);
 
-  // Risk forecast: lazy-computed when the user clicks the forecast button.
-  // Uses the same engine as the Efficiency screen so the modal shows the
-  // canonical prediction; nothing is summarised inline to keep the case
-  // modal free of duplicated/competing risk numbers.
+  // Risk forecast: pre-computed in the background when the case modal
+  // opens (during browser idle time) so the inline pill renders without
+  // jank and the "View detailed forecast" button opens the modal instantly
+  // instead of triggering a 500–1000ms synchronous compute on click.
+  // The prediction itself comes from the same engine the Efficiency screen
+  // uses, so the inline pill (tone + label) and the full modal are always
+  // showing the same underlying prediction object.
   const [forecastPrediction, setForecastPrediction] = useState(null);
   const [forecastLoading, setForecastLoading] = useState(false);
   const [forecastError, setForecastError] = useState(null);
+  const [forecastModalOpen, setForecastModalOpen] = useState(false);
+  const forecastIdleHandle = useRef(null);
+  const forecastFetchedRef = useRef(false);
 
   const popupRef = useRef(null);
   const mountedRef = useRef(true);
@@ -1274,8 +1282,9 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     !caseData.completed_at &&
     !caseData.modifiers?.includes("completed");
 
-  const handleOpenForecast = useCallback(async () => {
-    if (forecastLoading || !canShowForecast) return;
+  const computeForecast = useCallback(() => {
+    if (forecastFetchedRef.current || !canShowForecast) return;
+    forecastFetchedRef.current = true;
     setForecastLoading(true);
     setForecastError(null);
     try {
@@ -1295,16 +1304,65 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       );
       if (!pred) {
         setForecastError("Forecast unavailable for this case.");
-      } else {
+      } else if (mountedRef.current) {
         setForecastPrediction(pred);
       }
     } catch (err) {
       console.warn("[CaseHistory] Forecast load failed:", err);
-      setForecastError("Forecast unavailable.");
+      forecastFetchedRef.current = false;
+      if (mountedRef.current) setForecastError("Forecast unavailable.");
     } finally {
-      setForecastLoading(false);
+      if (mountedRef.current) setForecastLoading(false);
     }
-  }, [allRows, caseData, id, forecastLoading, canShowForecast]);
+  }, [allRows, caseData, id, canShowForecast]);
+
+  // Prefetch in idle time so the click is instant.
+  useEffect(() => {
+    if (!canShowForecast) return undefined;
+    if (forecastFetchedRef.current) return undefined;
+
+    const ric =
+      typeof window !== "undefined" && typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback
+        : (cb) => setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 }), 250);
+    const cic =
+      typeof window !== "undefined" && typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback
+        : clearTimeout;
+
+    const handle = ric(() => computeForecast(), { timeout: 2000 });
+    forecastIdleHandle.current = { handle, cancel: cic };
+    return () => {
+      const ref = forecastIdleHandle.current;
+      if (ref) {
+        try { ref.cancel(ref.handle); } catch { /* ignore */ }
+        forecastIdleHandle.current = null;
+      }
+    };
+  }, [canShowForecast, computeForecast]);
+
+  const handleOpenForecast = useCallback(() => {
+    if (forecastPrediction) {
+      setForecastModalOpen(true);
+      return;
+    }
+    // User clicked before the idle prefetch ran (or it errored) — compute
+    // eagerly now and open as soon as the prediction lands.
+    if (forecastLoading) return;
+    computeForecast();
+    setForecastModalOpen(true);
+  }, [forecastPrediction, forecastLoading, computeForecast]);
+
+  const forecastSummary = useMemo(() => {
+    if (!forecastPrediction) return null;
+    try {
+      const status = computePredictionStatus(forecastPrediction);
+      const style = RISK_STYLE[status.tone] || RISK_STYLE.low;
+      return { label: status.label, fg: style.fg, bg: style.bg };
+    } catch {
+      return null;
+    }
+  }, [forecastPrediction]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2441,7 +2499,12 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                               </motion.div>
                             )}
 
-                            {/* ── Risk Forecast (lazy entry point) ── */}
+                            {/* ── Risk Forecast ──
+                                Inline strip with a tone-colored verdict
+                                pill on the left and a "Details →" affordance
+                                on the right. Pulls its label/color from the
+                                same prediction object the full modal uses,
+                                so the two can never disagree. */}
                             {canShowForecast && (
                               <motion.div
                                 layout="position"
@@ -2454,36 +2517,47 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                                 <button
                                   type="button"
                                   onClick={handleOpenForecast}
-                                  disabled={forecastLoading}
-                                  className="w-full group flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors rounded-lg px-3 py-2.5 sm:py-3 text-left disabled:opacity-60 disabled:cursor-wait"
+                                  disabled={forecastLoading && !forecastSummary}
+                                  className="w-full group flex items-center justify-between gap-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-lg px-3 py-2.5 sm:py-3 text-left disabled:cursor-wait"
                                 >
-                                  <span className="flex items-center gap-2.5 text-xs sm:text-sm text-gray-700">
-                                    <svg
-                                      className="w-4 h-4 text-gray-400 group-hover:text-gray-500 transition-colors"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                      strokeWidth={2}
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M3 12l4-4 4 4 4-6 6 8"
-                                      />
-                                    </svg>
-                                    {forecastLoading
-                                      ? "Loading forecast…"
-                                      : "View detailed forecast"}
+                                  <span className="flex items-center gap-2.5 min-w-0">
+                                    {forecastSummary ? (
+                                      <>
+                                        <span
+                                          className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                                          style={{
+                                            backgroundColor: forecastSummary.fg,
+                                            boxShadow: `0 0 0 3px ${forecastSummary.bg}`,
+                                          }}
+                                        />
+                                        <span
+                                          className="text-xs sm:text-sm font-semibold truncate"
+                                          style={{ color: forecastSummary.fg }}
+                                        >
+                                          {forecastSummary.label}
+                                        </span>
+                                      </>
+                                    ) : forecastError ? (
+                                      <>
+                                        <span className="inline-block w-2 h-2 rounded-full bg-gray-300 flex-shrink-0" />
+                                        <span className="text-xs sm:text-sm text-gray-500 truncate">
+                                          Forecast unavailable
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="inline-block w-2 h-2 rounded-full bg-gray-300 animate-pulse flex-shrink-0" />
+                                        <span className="text-xs sm:text-sm text-gray-400">
+                                          Calculating…
+                                        </span>
+                                      </>
+                                    )}
                                   </span>
-                                  <span className="text-gray-400 group-hover:text-gray-500 transition-colors text-base leading-none">
-                                    →
+                                  <span className="flex items-center gap-1.5 text-[11px] sm:text-xs text-gray-500 group-hover:text-gray-700 transition-colors flex-shrink-0">
+                                    Details
+                                    <span className="text-base leading-none">→</span>
                                   </span>
                                 </button>
-                                {forecastError && (
-                                  <p className="mt-1.5 text-[11px] text-gray-400">
-                                    {forecastError}
-                                  </p>
-                                )}
                               </motion.div>
                             )}
 
@@ -2599,10 +2673,10 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
           </AnimatePresence>
         </motion.div>
       )}
-      {forecastPrediction && (
+      {forecastModalOpen && forecastPrediction && (
         <CaseRiskAnalyticsModal
           prediction={forecastPrediction}
-          onClose={() => setForecastPrediction(null)}
+          onClose={() => setForecastModalOpen(false)}
           zIndex={10200}
         />
       )}
