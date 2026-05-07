@@ -11,6 +11,10 @@ import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 import { useMut } from "../context/DataContext";
 import { getWorkflowStatus } from "../utils/workflowDetection";
 import { formatHistoryAction } from "../utils/historyActionFormatter";
+import {
+  generateCaseRiskPredictions,
+  CaseRiskAnalyticsModal,
+} from "../utils/caseRiskPredictions";
 import clsx from "clsx";
 
 /* ══════════════════════════════════════════════ */
@@ -1213,6 +1217,14 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
   const [viewTransitioning, setViewTransitioning] = useState(false);
   const viewTransitionTimer = useRef(null);
 
+  // Risk forecast: lazy-computed when the user clicks the forecast button.
+  // Uses the same engine as the Efficiency screen so the modal shows the
+  // canonical prediction; nothing is summarised inline to keep the case
+  // modal free of duplicated/competing risk numbers.
+  const [forecastPrediction, setForecastPrediction] = useState(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastError, setForecastError] = useState(null);
+
   const popupRef = useRef(null);
   const mountedRef = useRef(true);
   const loadingStartRef = useRef(null);
@@ -1255,6 +1267,44 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     if (scrollRef.current)
       scrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
+
+  const canShowForecast =
+    !!caseData &&
+    !!caseData.due &&
+    !caseData.completed_at &&
+    !caseData.modifiers?.includes("completed");
+
+  const handleOpenForecast = useCallback(async () => {
+    if (forecastLoading || !canShowForecast) return;
+    setForecastLoading(true);
+    setForecastError(null);
+    try {
+      const activeCases = (allRows || []).filter(
+        (r) =>
+          !r.completed_at &&
+          !r.modifiers?.includes("completed") &&
+          !r.modifiers?.includes("excluded")
+      );
+      const stageMod = caseData.modifiers?.find?.((m) =>
+        m.startsWith("stage-")
+      );
+      const stage = stageMod ? stageMod.replace("stage-", "") : "design";
+      const result = generateCaseRiskPredictions(activeCases, null, stage);
+      const pred = (result?.predictions || []).find(
+        (p) => p.id === id || p.caseNumber === caseData.case_number
+      );
+      if (!pred) {
+        setForecastError("Forecast unavailable for this case.");
+      } else {
+        setForecastPrediction(pred);
+      }
+    } catch (err) {
+      console.warn("[CaseHistory] Forecast load failed:", err);
+      setForecastError("Forecast unavailable.");
+    } finally {
+      setForecastLoading(false);
+    }
+  }, [allRows, caseData, id, forecastLoading, canShowForecast]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2391,6 +2441,52 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                               </motion.div>
                             )}
 
+                            {/* ── Risk Forecast (lazy entry point) ── */}
+                            {canShowForecast && (
+                              <motion.div
+                                layout="position"
+                                transition={smoothSpring}
+                                className="mb-4"
+                              >
+                                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">
+                                  Risk Forecast
+                                </h3>
+                                <button
+                                  type="button"
+                                  onClick={handleOpenForecast}
+                                  disabled={forecastLoading}
+                                  className="w-full group flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors rounded-lg px-3 py-2.5 sm:py-3 text-left disabled:opacity-60 disabled:cursor-wait"
+                                >
+                                  <span className="flex items-center gap-2.5 text-xs sm:text-sm text-gray-700">
+                                    <svg
+                                      className="w-4 h-4 text-gray-400 group-hover:text-gray-500 transition-colors"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      strokeWidth={2}
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M3 12l4-4 4 4 4-6 6 8"
+                                      />
+                                    </svg>
+                                    {forecastLoading
+                                      ? "Loading forecast…"
+                                      : "View detailed forecast"}
+                                  </span>
+                                  <span className="text-gray-400 group-hover:text-gray-500 transition-colors text-base leading-none">
+                                    →
+                                  </span>
+                                </button>
+                                {forecastError && (
+                                  <p className="mt-1.5 text-[11px] text-gray-400">
+                                    {forecastError}
+                                  </p>
+                                )}
+                              </motion.div>
+                            )}
+
                             <motion.div
                               layoutId="divider"
                               transition={smoothSpring}
@@ -2502,6 +2598,13 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
             )}
           </AnimatePresence>
         </motion.div>
+      )}
+      {forecastPrediction && (
+        <CaseRiskAnalyticsModal
+          prediction={forecastPrediction}
+          onClose={() => setForecastPrediction(null)}
+          zIndex={10200}
+        />
       )}
     </AnimatePresence>,
     document.body

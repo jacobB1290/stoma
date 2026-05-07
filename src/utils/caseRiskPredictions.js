@@ -3450,7 +3450,7 @@ function FeatureTable({ prediction }) {
 /**
  * Main Analytics Modal
  */
-export function CaseRiskAnalyticsModal({ prediction, onClose }) {
+export function CaseRiskAnalyticsModal({ prediction, onClose, zIndex = 10002 }) {
   const [tab, setTab] = useState("overview");
 
   if (!prediction) return null;
@@ -3460,7 +3460,8 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      style={{ zIndex }}
       onClick={onClose}
     >
       <div
