@@ -1708,7 +1708,8 @@ const SETTING_DEFINITIONS = [
   { key: "boostDarkMode", label: "Boost Dark Mode", type: "toggle" },
   { key: "autoUpdate", label: "Auto Update", type: "toggle" },
   { key: "facultySystemManager", label: "Faculty: System Manager", type: "toggle" },
-  { key: "lite-ui", label: "Lite UI", type: "toggle" },
+  // "lite-ui" intentionally omitted — Lite/Performance Mode is a per-device
+  // preference and is no longer pushed through the per-user settings channel.
 ];
 
 const SettingsPanel = memo(function SettingsPanel({

@@ -438,6 +438,9 @@ export async function reportActive(reason = "unknown") {
       device_id:   deviceId,
     };
 
+    // NOTE: "lite-ui" is intentionally excluded — Performance / Lite Mode is
+    // a per-device preference (saved in localStorage only) and must not follow
+    // the user across machines.
     const settingsKeys = [
       "boardTheme",
       "showInfoBar",
@@ -449,7 +452,6 @@ export async function reportActive(reason = "unknown") {
       "boostDarkMode",
       "autoUpdate",
       "facultySystemManager",
-      "lite-ui",
     ];
 
     const settings = {};
@@ -783,6 +785,11 @@ export function applySettings(settings) {
     return false;
   }
 
+  // NOTE: "lite-ui" is intentionally excluded — Performance / Lite Mode is a
+  // per-device preference (localStorage only) and must not follow the user
+  // across machines. The legacy "liteUi" key is also ignored for the same
+  // reason; old Supabase records carrying it will simply be left alone and the
+  // device's existing local value wins.
   const settingsKeys = [
     "boardTheme",
     "showInfoBar",
@@ -794,7 +801,6 @@ export function applySettings(settings) {
     "boostDarkMode",
     "autoUpdate",
     "facultySystemManager",
-    "lite-ui",
   ];
 
   let appliedCount = 0;
@@ -812,26 +818,6 @@ export function applySettings(settings) {
       }
     }
   });
-
-  // Backward compat: old Supabase records stored lite mode as "liteUi" (camelCase).
-  // If the canonical "lite-ui" key wasn't in the settings payload but the old key is,
-  // apply it to the correct key so pre-fix sessions still restore Lite Mode correctly.
-  if (
-    settings["liteUi"] !== undefined &&
-    settings["liteUi"] !== null &&
-    settings["lite-ui"] === undefined
-  ) {
-    try {
-      localStorage.setItem("lite-ui", settings["liteUi"]);
-      appliedSettings["lite-ui"] = settings["liteUi"];
-      appliedCount++;
-      console.log(
-        `[UserService] Applied legacy liteUi → lite-ui: ${settings["liteUi"]}`
-      );
-    } catch (e) {
-      console.warn("[UserService] Failed to apply legacy liteUi setting:", e);
-    }
-  }
 
   console.log(`[UserService] Applied ${appliedCount} settings`);
 

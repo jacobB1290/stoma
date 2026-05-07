@@ -11,6 +11,14 @@ import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 import { useMut } from "../context/DataContext";
 import { getWorkflowStatus } from "../utils/workflowDetection";
 import { formatHistoryAction } from "../utils/historyActionFormatter";
+import {
+  generateCaseRiskPredictions,
+  CaseRiskAnalyticsModal,
+  unifiedStatus as computePredictionStatus,
+  RISK_STYLE,
+  extractRecentCompletedVisits,
+  computeLabContextV9,
+} from "../utils/caseRiskPredictions";
 import clsx from "clsx";
 
 /* ══════════════════════════════════════════════ */
@@ -1213,6 +1221,19 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
   const [viewTransitioning, setViewTransitioning] = useState(false);
   const viewTransitionTimer = useRef(null);
 
+  // Risk forecast: a single full compute runs in the background when the
+  // case modal opens. We use the same active-case pool the Efficiency
+  // screen uses so the verdict and concurrent-in-stage count agree with
+  // what's shown there. The compute is heavy (~1–2s for ~50 cases) so
+  // it's scheduled at the lowest browser priority — the modal opens
+  // immediately with a "Calculating…" placeholder, and the prediction
+  // lands when the browser has nothing else to do.
+  const [forecastPrediction, setForecastPrediction] = useState(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastError, setForecastError] = useState(null);
+  const [forecastModalOpen, setForecastModalOpen] = useState(false);
+  const forecastFetchedRef = useRef(false);
+
   const popupRef = useRef(null);
   const mountedRef = useRef(true);
   const loadingStartRef = useRef(null);
@@ -1255,6 +1276,186 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     if (scrollRef.current)
       scrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
+
+  // Forecast eligibility:
+  //  - case row exists with a due date
+  //  - case isn't completed (the cases table has a `completed` boolean,
+  //    NOT a `completed_at` timestamp — same field-name fix applied to
+  //    the active-pool filter below)
+  //  - department is one the ML model was trained on. The model has
+  //    only seen Digital and General cases; Metal (Stage 1/2) and C&B
+  //    have different stage definitions and aren't in the training set,
+  //    so showing a forecast for them would be misleading.
+  const FORECAST_DEPARTMENTS = new Set(["Digital", "General"]);
+  const canShowForecast =
+    !!caseData &&
+    !!caseData.due &&
+    caseData.completed !== true &&
+    FORECAST_DEPARTMENTS.has(caseData.department);
+
+  // Single-case compute with full peer context, scheduled at the lowest
+  // browser priority. The previous attempt passed the entire active pool
+  // as `activeCases` so the engine ran predictions for ALL cases (~1–2s
+  // synchronous) — that was the freeze. Worse, the peer rows came from
+  // DataContext without any stage field set, so the engine's peer filter
+  // (`o.currentStage || o.stage`) couldn't tell what stage anyone was in
+  // and `concurrent` came out as 0.
+  //
+  // Fix: compute prediction for just [caseData] (single per-case loop
+  // iteration, ~50ms) but pass the full pool as a `peerPool` option so
+  // cross-case features (`concurrent`, batch siblings, etc.) read from
+  // the real pool. Each peer is enriched with `currentStage` /
+  // `current_stage` / `stage` derived from its `modifiers` so the
+  // engine's stage-matching filters (lines 449 and 1108 of the engine)
+  // both see the right stage.
+  useEffect(() => {
+    if (!canShowForecast) return undefined;
+    if (forecastFetchedRef.current) return undefined;
+    if (!caseData || !allRows?.length) return undefined;
+
+    let cancelled = false;
+
+    const yieldToBackground = () =>
+      new Promise((resolve) => {
+        if (cancelled) {
+          resolve();
+          return;
+        }
+        const sched = typeof window !== "undefined" ? window.scheduler : null;
+        if (sched && typeof sched.postTask === "function") {
+          try {
+            sched.postTask(resolve, { priority: "background" });
+            return;
+          } catch {
+            /* fall through */
+          }
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.requestIdleCallback === "function"
+        ) {
+          window.requestIdleCallback(() => resolve(), { timeout: 5000 });
+          return;
+        }
+        setTimeout(resolve, 100);
+      });
+
+    // Match the stage-derivation pattern used elsewhere in the app
+    // (App.jsx, Board.jsx, MetaCol.jsx).
+    const stageFromModifiers = (mods) => {
+      if (!Array.isArray(mods)) return null;
+      if (mods.includes("stage-qc")) return "qc";
+      if (mods.includes("stage-finishing")) return "finishing";
+      if (mods.includes("stage-production")) return "production";
+      if (mods.includes("stage-design")) return "design";
+      return null;
+    };
+
+    const compute = async () => {
+      forecastFetchedRef.current = true;
+      if (mountedRef.current) {
+        setForecastLoading(true);
+        setForecastError(null);
+      }
+      try {
+        await yieldToBackground();
+        if (cancelled) return;
+
+        // Build the peer pool from the active cases in DataContext, with
+        // each row enriched with stage fields the engine looks for. The
+        // engine reads two distinct field-name patterns in different
+        // spots — `currentStage || stage` (peer concurrent count) and
+        // `stage || current_stage` (lab-context per-stage load) — so we
+        // set all three.
+        //
+        // IMPORTANT: the cases table has a `completed` boolean column,
+        // not `completed_at` — filtering on `completed_at` lets every
+        // ever-completed case through (verified against Supabase: of 874
+        // non-archived rows, only 73 have completed=false). Using the
+        // wrong filter is what caused the "169 concurrent" reading.
+        const peerPool = allRows
+          .filter(
+            (r) =>
+              r.completed !== true &&
+              !r.modifiers?.includes("excluded")
+          )
+          .map((c) => {
+            if (c.id === id) return caseData; // history-enriched copy
+            const s = stageFromModifiers(c.modifiers);
+            return s
+              ? { ...c, currentStage: s, current_stage: s, stage: s }
+              : c;
+          });
+
+        await yieldToBackground();
+        if (cancelled) return;
+
+        const stage =
+          stageFromModifiers(caseData.modifiers) || "design";
+
+        const now = new Date();
+        const visits = extractRecentCompletedVisits(peerPool, now, 30);
+
+        await yieldToBackground();
+        if (cancelled) return;
+
+        const labContext = computeLabContextV9(peerPool, visits, now);
+
+        await yieldToBackground();
+        if (cancelled) return;
+
+        // activeCases = [caseData] → engine runs one ML inference.
+        // peerPool = full pool → cross-case features computed correctly.
+        const result = generateCaseRiskPredictions(
+          [caseData],
+          null,
+          stage,
+          null,
+          {
+            peerPool,
+            labContext,
+            recentCompletedVisits: visits,
+          }
+        );
+        const pred = result?.predictions?.[0];
+
+        if (!pred) {
+          if (mountedRef.current) setForecastError("Forecast unavailable.");
+        } else if (mountedRef.current && !cancelled) {
+          setForecastPrediction(pred);
+        }
+      } catch (err) {
+        console.warn("[CaseHistory] Forecast load failed:", err);
+        forecastFetchedRef.current = false;
+        if (mountedRef.current) setForecastError("Forecast unavailable.");
+      } finally {
+        if (mountedRef.current) setForecastLoading(false);
+      }
+    };
+
+    compute();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canShowForecast, caseData, allRows, id]);
+
+  const handleOpenForecast = useCallback(() => {
+    // Click is allowed at any time; the modal renders only when the
+    // prediction lands (gated below on `forecastModalOpen && forecastPrediction`).
+    setForecastModalOpen(true);
+  }, []);
+
+  const forecastSummary = useMemo(() => {
+    if (!forecastPrediction) return null;
+    try {
+      const status = computePredictionStatus(forecastPrediction);
+      const style = RISK_STYLE[status.tone] || RISK_STYLE.low;
+      return { label: status.label, fg: style.fg, bg: style.bg };
+    } catch {
+      return null;
+    }
+  }, [forecastPrediction]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1315,6 +1516,10 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       }
 
       const mapped = mapCaseRow(rawCase);
+      // Attach raw case_history so the risk-prediction engine has stage
+      // entry/exit timestamps when it's invoked for this case. Cheap; the
+      // history is already in memory.
+      mapped.case_history = hist;
       setCaseData(mapped);
 
       const now = new Date();
@@ -1522,6 +1727,13 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
   }, [handleClose]);
   useEffect(() => {
     const onClick = (e) => {
+      // While the forecast detail modal is open, every click lands
+      // outside CaseHistory's popupRef (the forecast lives in its own
+      // portal at document.body), which would otherwise fire handleClose
+      // and tear down the case history immediately. Skip the dismiss
+      // check while the forecast is showing — the forecast modal
+      // dismisses both via its own onClose callback below.
+      if (forecastModalOpen) return;
       if (popupRef.current && !popupRef.current.contains(e.target))
         handleClose();
     };
@@ -1533,7 +1745,7 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
       clearTimeout(t);
       window.removeEventListener("mousedown", onClick, true);
     };
-  }, [handleClose, defer]);
+  }, [handleClose, defer, forecastModalOpen]);
 
   /* ── Stage progress with upstream-awareness ── */
   const stageProgressData = useMemo(() => {
@@ -1846,7 +2058,14 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
     <AnimatePresence onExitComplete={onClose}>
       {!isClosing && (
         <motion.div
-          className="fixed inset-0 z-[10100] pointer-events-none"
+          className={clsx(
+            "fixed inset-0 z-[10100] pointer-events-none",
+            // While the forecast detail modal is open, hide the case
+            // history behind it so the user only sees one modal at a
+            // time. Without this the user perceives "two modals open"
+            // and has to close both individually.
+            forecastModalOpen && "invisible"
+          )}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -2391,6 +2610,68 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
                               </motion.div>
                             )}
 
+                            {/* ── Risk Forecast ──
+                                Inline strip with a tone-colored verdict
+                                pill on the left and a "Details →" affordance
+                                on the right. Pulls its label/color from the
+                                same prediction object the full modal uses,
+                                so the two can never disagree. */}
+                            {canShowForecast && (
+                              <motion.div
+                                layout="position"
+                                transition={smoothSpring}
+                                className="mb-4"
+                              >
+                                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">
+                                  Risk Forecast
+                                </h3>
+                                <button
+                                  type="button"
+                                  onClick={handleOpenForecast}
+                                  disabled={forecastLoading && !forecastSummary}
+                                  className="w-full group flex items-center justify-between gap-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-lg px-3 py-2.5 sm:py-3 text-left disabled:cursor-wait"
+                                >
+                                  <span className="flex items-center gap-2.5 min-w-0">
+                                    {forecastSummary ? (
+                                      <>
+                                        <span
+                                          className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                                          style={{
+                                            backgroundColor: forecastSummary.fg,
+                                            boxShadow: `0 0 0 3px ${forecastSummary.bg}`,
+                                          }}
+                                        />
+                                        <span
+                                          className="text-xs sm:text-sm font-semibold truncate"
+                                          style={{ color: forecastSummary.fg }}
+                                        >
+                                          {forecastSummary.label}
+                                        </span>
+                                      </>
+                                    ) : forecastError ? (
+                                      <>
+                                        <span className="inline-block w-2 h-2 rounded-full bg-gray-300 flex-shrink-0" />
+                                        <span className="text-xs sm:text-sm text-gray-500 truncate">
+                                          Forecast unavailable
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="inline-block w-2 h-2 rounded-full bg-gray-300 animate-pulse flex-shrink-0" />
+                                        <span className="text-xs sm:text-sm text-gray-400">
+                                          Calculating…
+                                        </span>
+                                      </>
+                                    )}
+                                  </span>
+                                  <span className="flex items-center gap-1.5 text-[11px] sm:text-xs text-gray-500 group-hover:text-gray-700 transition-colors flex-shrink-0">
+                                    Details
+                                    <span className="text-base leading-none">→</span>
+                                  </span>
+                                </button>
+                              </motion.div>
+                            )}
+
                             <motion.div
                               layoutId="divider"
                               transition={smoothSpring}
@@ -2502,6 +2783,21 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
             )}
           </AnimatePresence>
         </motion.div>
+      )}
+      {forecastModalOpen && forecastPrediction && (
+        <CaseRiskAnalyticsModal
+          prediction={forecastPrediction}
+          onClose={() => {
+            // Dismiss both: the forecast and the (now-hidden) case
+            // history. The user clicked Details to dive into the
+            // forecast — closing it returns them to wherever they came
+            // from before opening the case modal, not back to a stack
+            // of modals they have to clear one by one.
+            setForecastModalOpen(false);
+            handleClose();
+          }}
+          zIndex={10200}
+        />
       )}
     </AnimatePresence>,
     document.body

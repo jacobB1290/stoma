@@ -1884,6 +1884,15 @@ export function generateCaseRiskPredictions(
   const labContext = options.labContext
     || computeLabContextV9(activeCases, recentCompletedVisits, now);
 
+  // peerPool decouples "cases to compute predictions for" (activeCases) from
+  // "cases used as peers for cross-case feature derivation" (peerPool). When
+  // omitted, the two are the same — preserves existing behavior. CaseHistory
+  // uses this to compute a prediction for a single case while still reading
+  // concurrent-in-stage / batch-siblings / etc. from the full active pool.
+  const peerPool = Array.isArray(options.peerPool) && options.peerPool.length
+    ? options.peerPool
+    : activeCases;
+
   if (typeof console !== "undefined") {
     const stgCtx = labContext.perStage?.[currentStage] || {};
     console.log("[v10 labContext]", {
@@ -1913,7 +1922,7 @@ export function generateCaseRiskPredictions(
     const stageEnteredAt = getStageEnteredAtFor(c, currentStage);
     const timeInStageMs = Math.max(0, nowTs - (stageEnteredAt?.getTime?.() || nowTs));
 
-    const ml = predictCaseML(c, currentStage, stageEnteredAt, activeCases, labContext, recentCompletedVisits);
+    const ml = predictCaseML(c, currentStage, stageEnteredAt, peerPool, labContext, recentCompletedVisits);
     const dueDateCalc = dueEOD(c.due);
     const dueDateDisplay = parseDueDateForDisplay(c.due);
     const isRush = !!(c?.rush || c?.priority);
@@ -2120,7 +2129,7 @@ export function generateCaseRiskPredictions(
  *  UI UTILITIES
  *  ======================================================================== */
 
-const RISK_STYLE = {
+export const RISK_STYLE = {
   critical: { fg: COLORS.rCritical, bg: COLORS.rCriticalBg, label: "Critical" },
   high:     { fg: COLORS.rHigh,     bg: COLORS.rHighBg,     label: "High" },
   medium:   { fg: COLORS.rMedium,   bg: COLORS.rMediumBg,   label: "Medium" },
@@ -2293,7 +2302,7 @@ function VerdictChip({ verdict, size = "md" }) {
  * surface dual readings in the UI, but we can soften confidence when the
  * two signals disagree sharply.
  */
-function unifiedStatus(prediction) {
+export function unifiedStatus(prediction) {
   const now = getCurrentTime();
   const due = prediction.dueDateCalc;
   const eta = prediction.completionETA || prediction.totalETAs?.p50;
@@ -2569,12 +2578,34 @@ function TimelineHero({ prediction }) {
     etas: totalETAs, now, due: dueDateCalc, minTs, maxTs,
   });
 
-  // Draw a labeled date tick on the axis every ~25% across the span.
+  // Draw a labeled date tick at every 1-day boundary (local midnight) across
+  // the span. This keeps x-axis spacing literal — equal pixel gaps always
+  // mean equal calendar days — instead of the previous "5 evenly-spaced
+  // ticks" approach which produced 2-day or longer steps depending on span.
   const ticks = [];
-  for (let i = 0; i <= 4; i++) {
-    const pctPos = (i / 4) * 100;
-    const tickTs = minTs + ((maxTs - minTs) * i) / 4;
-    ticks.push({ pct: pctPos, ts: tickTs });
+  const DAY_MS = 24 * 3600 * 1000;
+  const startOfDay = (ts) => {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  let dayTs = startOfDay(minTs);
+  if (dayTs < minTs) dayTs += DAY_MS;
+  while (dayTs <= maxTs) {
+    const pctPos = ((dayTs - minTs) / (maxTs - minTs)) * 100;
+    ticks.push({ pct: pctPos, ts: dayTs });
+    dayTs += DAY_MS;
+  }
+  // Safety: very short spans (< 1 day) get the legacy quartile fallback so
+  // the axis isn't blank.
+  if (ticks.length < 2) {
+    ticks.length = 0;
+    for (let i = 0; i <= 4; i++) {
+      ticks.push({
+        pct: (i / 4) * 100,
+        ts: minTs + ((maxTs - minTs) * i) / 4,
+      });
+    }
   }
 
   // If the P50 pin falls too close to a tick mark OR the Due marker, suppress
@@ -2804,7 +2835,9 @@ function TimelineHero({ prediction }) {
           </div>
         </div>
 
-        {/* NOW marker — full-height vertical */}
+        {/* NOW marker — full-height vertical. Label hugs the left/right
+            edge when its marker is near 0%/100% so it never clips out of
+            the panel. */}
         {totalG.nowPct >= 0 && totalG.nowPct <= 100 && (
           <>
             <div
@@ -2820,7 +2853,12 @@ function TimelineHero({ prediction }) {
               style={{
                 top: 0,
                 left: `${totalG.nowPct}%`,
-                transform: "translate(-50%, -120%)",
+                transform:
+                  totalG.nowPct < 4
+                    ? "translate(0, -120%)"
+                    : totalG.nowPct > 96
+                    ? "translate(-100%, -120%)"
+                    : "translate(-50%, -120%)",
                 color: COLORS.ink,
               }}
             >
@@ -2829,7 +2867,8 @@ function TimelineHero({ prediction }) {
           </>
         )}
 
-        {/* DUE marker — full-height, colored by verdict */}
+        {/* DUE marker — full-height, colored by verdict. Same edge-aware
+            label alignment as NOW. */}
         {dueTs && (
           <>
             <div
@@ -2842,11 +2881,22 @@ function TimelineHero({ prediction }) {
               }}
             />
             <div
-              className="absolute flex flex-col items-center whitespace-nowrap"
+              className="absolute flex flex-col whitespace-nowrap"
               style={{
                 top: 0,
                 left: `${totalG.duePct}%`,
-                transform: "translate(-50%, -105%)",
+                transform:
+                  totalG.duePct < 6
+                    ? "translate(0, -105%)"
+                    : totalG.duePct > 94
+                    ? "translate(-100%, -105%)"
+                    : "translate(-50%, -105%)",
+                alignItems:
+                  totalG.duePct < 6
+                    ? "flex-start"
+                    : totalG.duePct > 94
+                    ? "flex-end"
+                    : "center",
                 color: toneFg,
               }}
             >
@@ -2873,22 +2923,29 @@ function TimelineHero({ prediction }) {
           }}
         />
 
-        {/* Tick labels */}
-        {ticks.map((t, i) => (
-          <div
-            key={`l${i}`}
-            className="absolute text-[9px] uppercase tracking-[0.1em] whitespace-nowrap"
-            style={{
-              bottom: 8,
-              left: `${t.pct}%`,
-              transform: i === 0 ? "translateX(0)" : i === ticks.length - 1 ? "translateX(-100%)" : "translateX(-50%)",
-              color: COLORS.inkFaint,
-              fontFamily: "monospace",
-            }}
-          >
-            {formatDate(new Date(t.ts), false)}
-          </div>
-        ))}
+        {/* Tick labels — compact M/D format keeps the axis readable when
+            ticks fall on every day boundary. All labels are centered on
+            their tick; the format is short enough that edge ticks never
+            clip the panel padding. */}
+        {ticks.map((t, i) => {
+          const d = new Date(t.ts);
+          return (
+            <div
+              key={`l${i}`}
+              className="absolute text-[10px] whitespace-nowrap"
+              style={{
+                bottom: 8,
+                left: `${t.pct}%`,
+                transform: "translate(-50%, 0)",
+                color: COLORS.inkFaint,
+                fontFamily: "monospace",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {`${d.getMonth() + 1}/${d.getDate()}`}
+            </div>
+          );
+        })}
       </div>
 
       {/* Legend / footer strip */}
@@ -3402,7 +3459,7 @@ function FeatureTable({ prediction }) {
 /**
  * Main Analytics Modal
  */
-export function CaseRiskAnalyticsModal({ prediction, onClose }) {
+export function CaseRiskAnalyticsModal({ prediction, onClose, zIndex = 10002 }) {
   const [tab, setTab] = useState("overview");
 
   if (!prediction) return null;
@@ -3412,7 +3469,8 @@ export function CaseRiskAnalyticsModal({ prediction, onClose }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      style={{ zIndex }}
       onClick={onClose}
     >
       <div
