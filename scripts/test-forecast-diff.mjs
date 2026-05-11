@@ -162,33 +162,25 @@ async function main() {
   console.log(`History rows attached: ${(focal.case_history || []).length}\n`);
 
   // ────────────────────────────────────────────────────────────────────
-  //   Path A — "Efficiency"
-  //   Mirrors efficiencyCalculations.js exactly:
-  //     - allCasesInStage: active cases filtered to focal.stage
-  //     - labPoolSource:   ALL active cases (any stage), enriched
-  //     - recentCompletedVisits derived from labPoolSource — but
-  //       Efficiency separately *also* feeds stageStatistics.allActiveCases
-  //       which can include completed cases recently. Here we pass the
-  //       active pool with history attached, plus a completedCasesForContext
-  //       option so the engine extracts completed-stage visits properly.
+  //   Path A — "Efficiency" (exact mirror of efficiencyCalculations.js)
+  //
+  //   The production pipeline calls extractRecentCompletedVisits on
+  //   `stageStatistics.allActiveCases` — NOT on completed cases. Visits
+  //   come from active cases' past stage transitions found in their
+  //   case_history (a case currently in finishing has visits for its
+  //   prior design + production stages). Completed cases are not in the
+  //   pool at all. labContext uses the same pool.
+  //
+  //   `allCasesInStage` (passed as activeCases) is filtered to one stage.
   // ────────────────────────────────────────────────────────────────────
   const activePool = allRows
     .filter((r) => r.completed !== true)
     .filter((r) => !r.modifiers?.includes("excluded"))
     .map(enrichStage);
-  const recentCompletedWithHistory = allRows
-    .filter((r) => r.completed === true)
-    .filter((r) => (r.case_history || []).length > 0) // limited to last 30d
-    .map(enrichStage);
-
   const inStagePool = activePool.filter((c) => c.currentStage === stage);
 
   const tA0 = Date.now();
-  const visitsA = extractRecentCompletedVisits(
-    recentCompletedWithHistory,
-    new Date(),
-    30
-  );
+  const visitsA = extractRecentCompletedVisits(activePool, new Date(), 30);
   const labCtxA = computeLabContextV9(activePool, visitsA, new Date());
   const resultA = generateCaseRiskPredictions(
     inStagePool,
@@ -225,15 +217,12 @@ async function main() {
   const predB = resultB?.predictions?.[0];
 
   // ────────────────────────────────────────────────────────────────────
-  //   Path C — "CaseHistory FIXED" (proposed: feed completed-case history)
-  //     Same as B but with completed-case visits feeding labContext.
+  //   Path C — "CaseHistory + active-history visits" (peerPool=all-active)
+  //   Mirrors Efficiency's visit/labContext sourcing (active cases only,
+  //   no completed cases) but uses a full active pool as peerPool.
   // ────────────────────────────────────────────────────────────────────
   const tC0 = Date.now();
-  const visitsC = extractRecentCompletedVisits(
-    [...activePool, ...recentCompletedWithHistory],
-    new Date(),
-    30
-  );
+  const visitsC = extractRecentCompletedVisits(activePool, new Date(), 30);
   const labCtxC = computeLabContextV9(activePool, visitsC, new Date());
   const resultC = generateCaseRiskPredictions(
     [enrichStage(focal)],
@@ -248,6 +237,30 @@ async function main() {
   );
   const tC = Date.now() - tC0;
   const predC = resultC?.predictions?.[0];
+
+  // ────────────────────────────────────────────────────────────────────
+  //   Path D — "FULL PARITY"
+  //   Same visits + labContext as Path A (active cases only). peerPool
+  //   filtered to same-stage active cases — matches the `activeCases`
+  //   shape Efficiency passes, so timesSeen / sameDayCases / batchSiblings
+  //   all read from the identical pool.
+  // ────────────────────────────────────────────────────────────────────
+  const tD0 = Date.now();
+  const visitsD = extractRecentCompletedVisits(activePool, new Date(), 30);
+  const labCtxD = computeLabContextV9(activePool, visitsD, new Date());
+  const resultD = generateCaseRiskPredictions(
+    [enrichStage(focal)],
+    null,
+    stage,
+    null,
+    {
+      peerPool: inStagePool,
+      labContext: labCtxD,
+      recentCompletedVisits: visitsD,
+    }
+  );
+  const tD = Date.now() - tD0;
+  const predD = resultD?.predictions?.[0];
 
   // ─── print labContext diff ──
   const labKeys = [
@@ -264,14 +277,17 @@ async function main() {
     pad("key", 20),
     pad("Efficiency", 14),
     pad("CaseHistory", 14),
-    pad("FIXED (with hist)", 18)
+    pad("with hist", 13),
+    pad("FULL PARITY", 14)
   );
+  console.log("─".repeat(78));
   for (const k of labKeys) {
     console.log(
       pad(k, 20),
       pad(fmt(labCtxA[k]), 14),
       pad(fmt(labCtxB[k]), 14),
-      pad(fmt(labCtxC[k]), 18)
+      pad(fmt(labCtxC[k]), 13),
+      pad(fmt(labCtxD[k]), 14)
     );
   }
 
@@ -289,19 +305,21 @@ async function main() {
     pad("key", 20),
     pad("Efficiency", 14),
     pad("CaseHistory", 14),
-    pad("FIXED (with hist)", 18)
+    pad("with hist", 13),
+    pad("FULL PARITY", 14)
   );
   for (const k of stgKeys) {
     console.log(
       pad(k, 20),
       pad(fmt(labCtxA.perStage?.[stage]?.[k]), 14),
       pad(fmt(labCtxB.perStage?.[stage]?.[k]), 14),
-      pad(fmt(labCtxC.perStage?.[stage]?.[k]), 18)
+      pad(fmt(labCtxC.perStage?.[stage]?.[k]), 13),
+      pad(fmt(labCtxD.perStage?.[stage]?.[k]), 14)
     );
   }
 
   console.log(
-    `\nrecentCompletedVisits.length: A=${visitsA.length}  B=${visitsB.length}  C=${visitsC.length}`
+    `\nrecentCompletedVisits.length: A=${visitsA.length}  B=${visitsB.length}  C=${visitsC.length}  D=${visitsD.length}`
   );
 
   // ─── print prediction diff ──
@@ -327,21 +345,28 @@ async function main() {
     pad("field", 28),
     pad("Efficiency", 14),
     pad("CaseHistory", 14),
-    pad("FIXED (with hist)", 18)
+    pad("with hist", 13),
+    pad("FULL PARITY", 14)
   );
+  console.log("─".repeat(78));
   let anyDiff = false;
+  let pathDMatchesA = true;
   for (const f of fields) {
     const a = predA?.[f];
     const b = predB?.[f];
     const c = predC?.[f];
+    const d = predD?.[f];
     const diffAB = !same(a, b);
     const diffAC = !same(a, c);
+    const diffAD = !same(a, d);
     if (diffAB) anyDiff = true;
+    if (diffAD) pathDMatchesA = false;
     console.log(
       pad(f, 28),
       pad(fmt(a), 14),
       pad(fmt(b) + (diffAB ? " ◀" : ""), 14),
-      pad(fmt(c) + (diffAC ? " ◀" : "  ✓"), 18)
+      pad(fmt(c) + (diffAC ? " ◀" : "  ✓"), 13),
+      pad(fmt(d) + (diffAD ? " ◀" : "  ✓"), 14)
     );
   }
 
@@ -353,8 +378,17 @@ async function main() {
     `  CaseHistory  : ${tB}ms  (single predict, no completed history)`
   );
   console.log(
-    `  FIXED        : ${tC}ms  (single predict + completed history visits)`
+    `  with hist    : ${tC}ms  (single predict + completed history)`
   );
+  console.log(
+    `  FULL PARITY  : ${tD}ms  (single predict + completed history + same-stage peerPool)`
+  );
+  console.log("");
+  if (pathDMatchesA) {
+    console.log("  ✓ FULL PARITY path matches Efficiency exactly.");
+  } else {
+    console.log("  ✗ FULL PARITY path still disagrees with Efficiency.");
+  }
 
   console.log("\nVerdict:");
   if (!anyDiff) {

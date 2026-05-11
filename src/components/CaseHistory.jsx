@@ -1361,64 +1361,28 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         await yieldToBackground();
         if (cancelled) return;
 
-        // Build the peer pool from the active cases in DataContext, with
-        // each row enriched with stage fields the engine looks for. The
-        // engine reads two distinct field-name patterns in different
-        // spots — `currentStage || stage` (peer concurrent count) and
-        // `stage || current_stage` (lab-context per-stage load) — so we
-        // set all three.
-        //
-        // IMPORTANT: the cases table has a `completed` boolean column,
-        // not `completed_at` — filtering on `completed_at` lets every
-        // ever-completed case through (verified against Supabase: of 874
-        // non-archived rows, only 73 have completed=false). Using the
-        // wrong filter is what caused the "169 concurrent" reading.
-        const peerPool = allRows
-          .filter(
-            (r) =>
-              r.completed !== true &&
-              !r.modifiers?.includes("excluded")
-          )
-          .map((c) => {
-            if (c.id === id) return caseData; // history-enriched copy
-            const s = stageFromModifiers(c.modifiers);
-            return s
-              ? { ...c, currentStage: s, current_stage: s, stage: s }
-              : c;
-          });
-
-        await yieldToBackground();
-        if (cancelled) return;
-
         const stage =
           stageFromModifiers(caseData.modifiers) || "design";
 
-        // Fetch case_history for completed cases over the last 30 days.
-        // This is what makes our prediction agree with the Efficiency
-        // screen's: the engine's stage-timing features (stageAvg7d,
-        // stageThroughput7d, stageTrend, recentCompletedVisits) come
-        // from completed-case history. Without it the model sees only
-        // this one case's history (4 visits) instead of the lab's ~185
-        // and silently produces a different verdict.
-        //
-        // Verified with scripts/test-forecast-diff.mjs: for case #459,
-        // omitting this query produced riskLevel=low / pLate=0.33;
-        // including it matches Efficiency's riskLevel=critical /
-        // pLate=0.85. The query runs in background priority so the
-        // user doesn't notice it.
-        const thirtyDaysAgoIso = new Date(
-          Date.now() - 30 * 86400 * 1000
-        ).toISOString();
-        const { data: recentHistRows } = await db
+        // Fetch case_history for every active case. Efficiency's pipeline
+        // fetches this up front; without it, extractRecentCompletedVisits
+        // sees only the focal case's transitions and the stage-timing
+        // features (stageAvg7d, stageThroughput7d, stageTrend) come out
+        // wrong. Verified via scripts/test-forecast-diff.mjs: feeding the
+        // full active-pool history (and matching Efficiency's pool
+        // shapes) makes the per-case prediction identical to the one
+        // shown on the Efficiency screen.
+        const activeIds = allRows
+          .filter((r) => r.completed !== true)
+          .map((r) => r.id);
+        const { data: activeHistRows } = await db
           .from("case_history")
           .select("id, case_id, action, user_name, created_at")
-          .gte("created_at", thirtyDaysAgoIso);
+          .in("case_id", activeIds);
         if (cancelled) return;
 
-        // Attach history to completed cases so the engine can extract
-        // stage exits from them.
         const histByCaseId = new Map();
-        for (const h of recentHistRows || []) {
+        for (const h of activeHistRows || []) {
           if (!histByCaseId.has(h.case_id)) histByCaseId.set(h.case_id, []);
           histByCaseId.get(h.case_id).push(h);
         }
@@ -1429,21 +1393,53 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
               new Date(a.created_at).getTime()
           );
         }
-        const recentCompletedPool = allRows
-          .filter((r) => r.completed === true && histByCaseId.has(r.id))
-          .map((c) => ({
-            ...c,
-            case_history: histByCaseId.get(c.id),
-          }));
+
+        // Build the full active pool — used to derive labContext and
+        // recentCompletedVisits, matching Efficiency's labPoolSource.
+        // Each peer row has stage fields set from modifiers (engine reads
+        // both `currentStage || stage` and `stage || current_stage` in
+        // different spots) and case_history attached.
+        //
+        // Filter note: cases table has a `completed` BOOLEAN column —
+        // not `completed_at` (no such column).
+        const fullActivePool = allRows
+          .filter(
+            (r) =>
+              r.completed !== true &&
+              !r.modifiers?.includes("excluded")
+          )
+          .map((c) => {
+            if (c.id === id) return caseData; // already has history
+            const s = stageFromModifiers(c.modifiers);
+            const hist = histByCaseId.get(c.id) || [];
+            return s
+              ? {
+                  ...c,
+                  case_history: hist,
+                  currentStage: s,
+                  current_stage: s,
+                  stage: s,
+                }
+              : { ...c, case_history: hist };
+          });
+
+        // peerPool: same-stage subset. This is what Efficiency passes as
+        // `activeCases` to the engine, so timesSeen / sameDayCases /
+        // batchSiblings (which the ML model reads) scan the identical
+        // pool — guaranteeing the prediction matches.
+        const peerPool = fullActivePool.filter(
+          (c) => stageFromModifiers(c.modifiers) === stage
+        );
 
         await yieldToBackground();
         if (cancelled) return;
 
         const now = new Date();
-        // Extract from BOTH active and recent-completed so the engine
-        // sees the lab's full stage-throughput history.
+        // Efficiency derives visits + labContext from the FULL active
+        // pool (cases that have past stage exits in their history),
+        // not from completed cases. We do the same here.
         const visits = extractRecentCompletedVisits(
-          [...peerPool, ...recentCompletedPool],
+          fullActivePool,
           now,
           30
         );
@@ -1451,15 +1447,14 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         await yieldToBackground();
         if (cancelled) return;
 
-        const labContext = computeLabContextV9(peerPool, visits, now);
+        const labContext = computeLabContextV9(fullActivePool, visits, now);
 
         await yieldToBackground();
         if (cancelled) return;
 
         // activeCases = [caseData] → engine runs one ML inference.
-        // peerPool = full pool → cross-case features computed correctly.
-        // visits / labContext include completed-case timings → ML
-        // features (stageAvg7d, stageTrend, etc.) match Efficiency.
+        // peerPool   = same-stage subset → cross-case features identical
+        // to Efficiency's. Verified parity in scripts/test-forecast-diff.mjs.
         const result = generateCaseRiskPredictions(
           [caseData],
           null,
