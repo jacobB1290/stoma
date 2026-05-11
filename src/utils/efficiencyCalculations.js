@@ -1483,7 +1483,7 @@ export const calculateDepartmentEfficiency = async (
   const recentCompletedVisits = extractRecentCompletedVisits(labPoolSource, labNow, 30);
   const labContext = computeLabContextV9(labPoolSource, recentCompletedVisits, labNow);
 
-  const predictions = generateCaseRiskPredictions(
+  const predictions = await generateCaseRiskPredictions(
     allActiveCasesForRisk,
     throughputAnalysis,
     currentStage,
