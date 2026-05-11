@@ -12,13 +12,11 @@ import { useMut } from "../context/DataContext";
 import { getWorkflowStatus } from "../utils/workflowDetection";
 import { formatHistoryAction } from "../utils/historyActionFormatter";
 import {
-  generateCaseRiskPredictions,
   CaseRiskAnalyticsModal,
   unifiedStatus as computePredictionStatus,
   RISK_STYLE,
-  extractRecentCompletedVisits,
-  computeLabContextV9,
 } from "../utils/caseRiskPredictions";
+import { computeCaseForecast } from "../utils/caseForecastCompute";
 import clsx from "clsx";
 
 /* ══════════════════════════════════════════════ */
@@ -1340,17 +1338,6 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setTimeout(resolve, 100);
       });
 
-    // Match the stage-derivation pattern used elsewhere in the app
-    // (App.jsx, Board.jsx, MetaCol.jsx).
-    const stageFromModifiers = (mods) => {
-      if (!Array.isArray(mods)) return null;
-      if (mods.includes("stage-qc")) return "qc";
-      if (mods.includes("stage-finishing")) return "finishing";
-      if (mods.includes("stage-production")) return "production";
-      if (mods.includes("stage-design")) return "design";
-      return null;
-    };
-
     const compute = async () => {
       forecastFetchedRef.current = true;
       if (mountedRef.current) {
@@ -1358,119 +1345,22 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setForecastError(null);
       }
       try {
-        await yieldToBackground();
+        // Single source of truth for the compute logic — same function
+        // the parity harness runs against — so the in-modal pill, the
+        // detail modal opened from this strip, and the Efficiency screen
+        // all see the same prediction object.
+        const pred = await computeCaseForecast({
+          caseData,
+          allRows,
+          id,
+          dbClient: db,
+          yieldFn: yieldToBackground,
+        });
         if (cancelled) return;
-
-        const stage =
-          stageFromModifiers(caseData.modifiers) || "design";
-
-        // Fetch case_history for every active case. Efficiency's pipeline
-        // fetches this up front; without it, extractRecentCompletedVisits
-        // sees only the focal case's transitions and the stage-timing
-        // features (stageAvg7d, stageThroughput7d, stageTrend) come out
-        // wrong. Verified via scripts/test-forecast-diff.mjs: feeding the
-        // full active-pool history (and matching Efficiency's pool
-        // shapes) makes the per-case prediction identical to the one
-        // shown on the Efficiency screen.
-        const activeIds = allRows
-          .filter((r) => r.completed !== true)
-          .map((r) => r.id);
-        const { data: activeHistRows } = await db
-          .from("case_history")
-          .select("id, case_id, action, user_name, created_at")
-          .in("case_id", activeIds);
-        if (cancelled) return;
-
-        const histByCaseId = new Map();
-        for (const h of activeHistRows || []) {
-          if (!histByCaseId.has(h.case_id)) histByCaseId.set(h.case_id, []);
-          histByCaseId.get(h.case_id).push(h);
-        }
-        for (const arr of histByCaseId.values()) {
-          arr.sort(
-            (a, b) =>
-              new Date(b.created_at).getTime() -
-              new Date(a.created_at).getTime()
-          );
-        }
-
-        // Build the full active pool — used to derive labContext and
-        // recentCompletedVisits, matching Efficiency's labPoolSource.
-        // Each peer row has stage fields set from modifiers (engine reads
-        // both `currentStage || stage` and `stage || current_stage` in
-        // different spots) and case_history attached.
-        //
-        // Filter note: cases table has a `completed` BOOLEAN column —
-        // not `completed_at` (no such column).
-        const fullActivePool = allRows
-          .filter(
-            (r) =>
-              r.completed !== true &&
-              !r.modifiers?.includes("excluded")
-          )
-          .map((c) => {
-            if (c.id === id) return caseData; // already has history
-            const s = stageFromModifiers(c.modifiers);
-            const hist = histByCaseId.get(c.id) || [];
-            return s
-              ? {
-                  ...c,
-                  case_history: hist,
-                  currentStage: s,
-                  current_stage: s,
-                  stage: s,
-                }
-              : { ...c, case_history: hist };
-          });
-
-        // peerPool: same-stage subset. This is what Efficiency passes as
-        // `activeCases` to the engine, so timesSeen / sameDayCases /
-        // batchSiblings (which the ML model reads) scan the identical
-        // pool — guaranteeing the prediction matches.
-        const peerPool = fullActivePool.filter(
-          (c) => stageFromModifiers(c.modifiers) === stage
-        );
-
-        await yieldToBackground();
-        if (cancelled) return;
-
-        const now = new Date();
-        // Efficiency derives visits + labContext from the FULL active
-        // pool (cases that have past stage exits in their history),
-        // not from completed cases. We do the same here.
-        const visits = extractRecentCompletedVisits(
-          fullActivePool,
-          now,
-          30
-        );
-
-        await yieldToBackground();
-        if (cancelled) return;
-
-        const labContext = computeLabContextV9(fullActivePool, visits, now);
-
-        await yieldToBackground();
-        if (cancelled) return;
-
-        // activeCases = [caseData] → engine runs one ML inference.
-        // peerPool   = same-stage subset → cross-case features identical
-        // to Efficiency's. Verified parity in scripts/test-forecast-diff.mjs.
-        const result = generateCaseRiskPredictions(
-          [caseData],
-          null,
-          stage,
-          null,
-          {
-            peerPool,
-            labContext,
-            recentCompletedVisits: visits,
-          }
-        );
-        const pred = result?.predictions?.[0];
 
         if (!pred) {
           if (mountedRef.current) setForecastError("Forecast unavailable.");
-        } else if (mountedRef.current && !cancelled) {
+        } else if (mountedRef.current) {
           setForecastPrediction(pred);
         }
       } catch (err) {
