@@ -1,2 +1,2 @@
-- The app now opens faster the first time you start it, because the bigger screens for editing cases and management only load when you open them.
-- If something unexpected goes wrong in one of those bigger screens, you now see a friendly message with a Try again button instead of a blank page.
+- Messages about saving, archiving, and deleting now show up as small notes inside the app instead of as pop-ups from the browser.
+- When you delete an archived case, the confirmation now appears as a small message inside the app instead of a browser pop-up.

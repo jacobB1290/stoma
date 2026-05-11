@@ -12,6 +12,7 @@ import ArchiveModal from "./ArchiveModal";
 import DeleteCompletedModal from "./DeleteCompletedModal";
 import { db, archiveCases } from "../services/caseService";
 import { useMut } from "../context/DataContext";
+import { useToast } from "../context/ToastContext";
 
 // CaseTable.jsx - Optimized with progressive loading that doesn't block UI
 
@@ -440,6 +441,7 @@ export default memo(function CaseTable({
   forceOpen = false,
   showDividers = true,
 }) {
+  const toast = useToast();
   const [showArchive, setShowArchive] = useState(false);
   const [archiveCount, setArchiveCount] = useState(0);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -527,10 +529,10 @@ export default memo(function CaseTable({
         }
       } catch (err) {
         console.error("Error archiving cases:", err);
-        alert(`Failed to archive cases: ${err.message || err}`);
+        toast.error(`Failed to archive cases: ${err.message || err}`);
       }
     },
-    [fetchCases, completed, searchQuery]
+    [fetchCases, completed, searchQuery, toast]
   );
 
   const handleArchiveFromMenu = useCallback(

@@ -26,6 +26,8 @@ import { LiteModeProvider } from "./LiteModePerformancePatch";
 import SettingsModal from "./components/SettingsModal";
 import FrontOfficePill from "./components/FrontOfficeBubble";
 import { startVersionPolling } from "./services/versionCheckService";
+import { ToastProvider } from "./context/ToastContext";
+import Toast from "./components/ui/Toast";
 
 // Code-split heavy views — these bundles only download when the user opens
 // the corresponding tab, so the initial board view loads faster.
@@ -528,9 +530,12 @@ const Divider = () => <div className="border-t border-gray-200 my-1" />;
 
 export default function App() {
   return (
-    <UserProvider>
-      <AuthGate />
-    </UserProvider>
+    <ToastProvider>
+      <UserProvider>
+        <AuthGate />
+      </UserProvider>
+      <Toast />
+    </ToastProvider>
   );
 }
 
