@@ -366,18 +366,20 @@ The GitHub Action reads the **squash commit subject** (= PR title) to decide the
 
 #### Release Notes Entry
 
-Instead of relying solely on git commit messages for the changelog, you can provide user-friendly release notes that will be displayed to users in the app's update notifier.
+Write release notes as if explaining changes to someone who has never used software before. No tech vocabulary at all. Imagine a co-worker who isn't on a computer often reading this on their phone.
 
-Keep the notes very short and very plain. A few one-line sentences, one per change, written for non-technical users. No headers, no bullets, no bold, no emojis, no section dividers — just plain lines.
+Words to AVOID entirely: modal, dialog, window (as UI jargon), page lag/freeze (use "the page felt slow"), API, sync, cache, render, state, component, prop, deploy, build, schema, query, cross-device, per-user, per-device (say "on your computer" / "for your account" / "follows you when you sign in elsewhere"). Don't name internal screens by their developer names ("Risk Modal", "Efficiency Screen", "Case Modal", "Forecast Strip") — describe what the user sees and does instead ("when you open a case", "the page that shows efficiency numbers", "the small tag at the top of each case").
+
+Keep it short. A few one-line sentences, one per change. No headers, no bullets, no bold, no emojis, no markdown of any kind — just plain lines separated by line breaks.
 
 Creating custom release notes:
 
 1. During PR development, create or overwrite a file called `RELEASE_NOTES_ENTRY.md` at the repo root. Use this exact style:
 ```
-Fixed a bug where the case modal showed a different forecast than the Efficiency screen.
-Fixed a bug where opening the case history modal could briefly freeze the page.
-Added a small Risk Forecast strip inside the case modal.
-The Performance toggle in Settings is now saved per device instead of per user.
+The case details and the Efficiency page used to sometimes show different predictions for the same case. Now they always agree.
+Opening a case used to make the page feel slow for a second. It opens instantly now.
+Each case now shows a quick on track or at risk tag near the top.
+Turning on Performance Mode now only affects the computer you turn it on with.
 ```
 
 2. The `scripts/generate-changelog.mjs` script will automatically detect this file during build
@@ -387,12 +389,14 @@ The Performance toggle in Settings is now saved per device instead of per user.
 Rules:
 
 - Always create `RELEASE_NOTES_ENTRY.md` for every PR — required, not optional.
-- One line per change. Start each with a verb the user understands: "Fixed a bug…", "Added…", "Changed…", "Improved…".
-- No markdown syntax (no `#`, `*`, `-`, `**`, no emojis, no horizontal rules). Plain lines only.
+- One line per change. Start with what the user will notice, not the technical name of what changed.
+- Past-tense for fixes ("used to do X, now does Y"); present-tense for new behavior ("Each case now shows…"). Either way, plain English.
+- No markdown syntax (no `#`, `*`, `-`, `**`, no emojis, no horizontal rules, no code blocks). Plain lines only.
+- No tech jargon. Re-read each line and ask: would my grandmother understand this? If not, rewrite.
 - Keep the whole file to a handful of lines. If you wrote more than ~6 lines, trim.
-- Write for users, not developers. Skip internal-only refactors and scaffolding.
+- Skip internal-only refactors, test harnesses, build scaffolding — anything the user can't see or feel.
 - This file is committed as part of your PR (it stays in git history).
 
 Why this matters:
 
-Git commit subjects are often abbreviated and technical. Plain user-facing one-liners are what the update notifier shows; keep them readable to a non-technical reader scanning at a glance.
+This file is what the update notifier shows users when a new version ships. Most readers have no technical background. A line like "Fixed a stale prediction in the case-history modal" reads as gibberish to them. "The case details and the Efficiency page now show the same prediction for the same case" reads as a clear, helpful update.

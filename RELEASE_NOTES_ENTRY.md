@@ -1,5 +1,5 @@
-Fixed a bug where the case modal showed a different forecast than the Efficiency screen for the same case.
-Fixed a bug where opening the case history modal could briefly freeze the page.
-Fixed a bug where clicking Details on the forecast strip opened two stacked modals you had to close one at a time.
-Added a small Risk Forecast strip inside the case modal that shows the verdict at a glance and opens the full risk modal on click.
-The Performance / Lite Mode toggle in Settings is now saved per device instead of per user.
+The case details and the Efficiency page used to sometimes show different predictions for the same case. Now they always agree.
+Opening a case used to make the page lag for a second. It opens instantly now.
+The Details button used to open two windows you had to close one by one. Now it just opens one.
+Each case now shows a quick on track or at risk tag near the top, so you can tell at a glance without opening the full risk view.
+Turning on Performance Mode now only affects the computer you turn it on with, instead of following you to every computer you sign into.
