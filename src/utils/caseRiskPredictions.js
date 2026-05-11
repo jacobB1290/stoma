@@ -1884,25 +1884,6 @@ export function generateCaseRiskPredictions(
   const labContext = options.labContext
     || computeLabContextV9(activeCases, recentCompletedVisits, now);
 
-  if (typeof console !== "undefined") {
-    const stgCtx = labContext.perStage?.[currentStage] || {};
-    console.log("[v10 labContext]", {
-      stage: currentStage,
-      labActive: labContext.labActive,
-      labRush: labContext.labRush,
-      labOverdue: labContext.labOverdue,
-      labDueToday: labContext.labDueToday,
-      labDue3d: labContext.labDue3d,
-      stageActiveCount: stgCtx.stageActiveCount,
-      stageActiveRush: stgCtx.stageActiveRush,
-      stageAvg7d: stgCtx.stageAvg7d,
-      stageThroughput7d: stgCtx.stageThroughput7d,
-      stageAvg30d: stgCtx.stageAvg30d,
-      stageTrend: stgCtx.stageTrend,
-      recentCompletedVisitsCount: recentCompletedVisits.length,
-    });
-  }
-
   // v10.4: per-call branch counter (logged once for analytics)
   const branchCounts = { agreement: 0, false_alarm: 0, classifier_alert: 0 };
 

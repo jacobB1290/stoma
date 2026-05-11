@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { db } from "../services/caseService";
 import { ThrottledProcessor } from "./throttledProcessor";
+import { logger } from "./logger";
 
 /* Working Hours Calculation Helper */
 export const calculateWorkingHours = (startDate, endDate) => {
@@ -349,7 +350,7 @@ export const calculateStageTime = (caseItem, targetStage, history) => {
 /* Calculate stage statistics - THE source of truth for all averages */
 export const calculateStageStatistics = async (stage, onProgress) => {
   try {
-    console.log(`[calculateStageStatistics] Starting for ${stage} stage`);
+    logger.debug(`[calculateStageStatistics] Starting for ${stage} stage`);
 
     // Create throttled processor
     const processor = new ThrottledProcessor({
@@ -359,7 +360,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
     });
 
     // Fetch cases
-    console.log("[calculateStageStatistics] Fetching cases from database...");
+    logger.debug("[calculateStageStatistics] Fetching cases from database...");
     const { data: rawCases, error: dbError } = await db
       .from("cases")
       .select("*, case_history(*)")
@@ -368,12 +369,12 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       .order("created_at", { ascending: false });
 
     if (dbError) {
-      console.error("[calculateStageStatistics] Database error:", dbError);
+      logger.error("[calculateStageStatistics] Database error:", dbError);
       throw dbError;
     }
 
     if (!rawCases) {
-      console.log("[calculateStageStatistics] No cases returned from database");
+      logger.debug("[calculateStageStatistics] No cases returned from database");
       return null;
     }
 
@@ -383,7 +384,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       return cn !== "update" && cn !== "syscmd" && cn !== "force-cmd";
     });
 
-    console.log(
+    logger.debug(
       `[calculateStageStatistics] Fetched ${casesWithHistory.length} cases (${rawCases.length - casesWithHistory.length} sentinel rows filtered)`
     );
 
@@ -434,7 +435,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
     const MAX_STAGE_TIME = 30 * 24 * 60 * 60 * 1000;
 
     // Process cases with throttling
-    console.log("[calculateStageStatistics] Processing cases...");
+    logger.debug("[calculateStageStatistics] Processing cases...");
     const processedCases = await processor.processArray(
       casesWithHistory,
       (caseItem) => {
@@ -522,7 +523,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       }
     );
 
-    console.log(
+    logger.debug(
       `[calculateStageStatistics] Processed ${processedCases.length} cases`
     );
 
@@ -546,13 +547,13 @@ export const calculateStageStatistics = async (stage, onProgress) => {
       }
     });
 
-    console.log(
+    logger.debug(
       `[calculateStageStatistics] Valid cases: ${caseDetails.length}, Excluded: ${excludedCases.length}`
     );
 
     // Apply outlier detection in a throttled manner
     if (caseDetails.length > 3) {
-      console.log("[calculateStageStatistics] Applying outlier detection...");
+      logger.debug("[calculateStageStatistics] Applying outlier detection...");
       await processor.processInBatches(caseDetails, 50, (batch) => {
         const times = caseDetails
           .map((c) => c.timeInStage)
@@ -580,12 +581,12 @@ export const calculateStageStatistics = async (stage, onProgress) => {
     const validCases = caseDetails.filter((c) => !c.isOutlier);
     const validTimes = validCases.map((c) => c.timeInStage);
 
-    console.log(
+    logger.debug(
       `[calculateStageStatistics] Valid cases after outlier removal: ${validCases.length}`
     );
 
     if (validCases.length === 0) {
-      console.log(
+      logger.debug(
         "[calculateStageStatistics] No valid cases found, returning noData"
       );
       return {
@@ -598,7 +599,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
     }
 
     // Calculate final statistics
-    console.log("[calculateStageStatistics] Calculating final statistics...");
+    logger.debug("[calculateStageStatistics] Calculating final statistics...");
     const stats = await calculateFinalStatistics(
       validCases,
       validTimes,
@@ -610,7 +611,7 @@ export const calculateStageStatistics = async (stage, onProgress) => {
     stats.allCasesInStage = allCasesInStage;
     stats.allActiveCases = allActiveCases;
 
-    console.log("[calculateStageStatistics] Complete. Returning stats:", {
+    logger.debug("[calculateStageStatistics] Complete. Returning stats:", {
       averageTime: stats.averageTime,
       medianTime: stats.medianTime,
       sampleSize: stats.sampleSize,
@@ -619,8 +620,8 @@ export const calculateStageStatistics = async (stage, onProgress) => {
 
     return stats;
   } catch (error) {
-    console.error("[calculateStageStatistics] Error:", error);
-    console.error("[calculateStageStatistics] Stack:", error.stack);
+    logger.error("[calculateStageStatistics] Error:", error);
+    logger.error("[calculateStageStatistics] Stack:", error.stack);
     throw error;
   }
 };

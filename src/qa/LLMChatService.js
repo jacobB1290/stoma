@@ -6,6 +6,7 @@
 
 import { db } from "../services/caseService";
 import * as CaseService from "../services/caseService";
+import { logger } from "../utils/logger";
 
 // ============================================================================
 // CONFIGURATION - All settings in one place for easy editing
@@ -120,7 +121,7 @@ function logEvent(type, data = {}) {
 
 // Current status for UI (not logged to event chain - too noisy)
 function updateStatus(status, detail = null, extra = {}) {
-  console.log(`[LLM Status] ${status}${detail ? ": " + detail : ""}`);
+  logger.debug(`[LLM Status] ${status}${detail ? ": " + detail : ""}`);
 
   // Only update UI callback, don't log every status change
   if (statusCallback) {
@@ -158,7 +159,7 @@ function parseInlineUIElements(text) {
       }
       cleanText = cleanText.replace(match[0], "");
     } catch (e) {
-      console.warn(
+      logger.warn(
         "[parseInlineUI] Failed to parse HTML comment format:",
         e.message
       );
@@ -181,7 +182,7 @@ function parseInlineUIElements(text) {
       }
       cleanText = cleanText.replace(match[0], "");
     } catch (e) {
-      console.warn(
+      logger.warn(
         "[parseInlineUI] Failed to parse code block format:",
         e.message
       );
@@ -204,7 +205,7 @@ function parseInlineUIElements(text) {
       }
       cleanText = cleanText.replace(match[0], "");
     } catch (e) {
-      console.warn("[parseInlineUI] Failed to parse inline format:", e.message);
+      logger.warn("[parseInlineUI] Failed to parse inline format:", e.message);
     }
   }
 
@@ -1155,7 +1156,7 @@ async function ensureDataLoaded() {
     !cacheTimestamp ||
     now - cacheTimestamp > LLM_CONFIG.CACHE_TTL
   ) {
-    console.log("[LLM] Loading database on-demand...");
+    logger.debug("[LLM] Loading database on-demand...");
     updateStatus(STATUS_TYPES.LOADING_DATA, "Fetching data from database...");
     const loadStart = Date.now();
     const data = await loadFullDatabase(true);
@@ -2302,7 +2303,7 @@ async function checkLocalProxy() {
     proxyStatus.localProxyAvailable = res.ok;
 
     if (res.ok) {
-      console.log("[LLM] Local proxy detected at", LLM_CONFIG.LOCAL_PROXY_URL);
+      logger.debug("[LLM] Local proxy detected at", LLM_CONFIG.LOCAL_PROXY_URL);
     }
 
     return proxyStatus.localProxyAvailable;
@@ -2372,12 +2373,12 @@ async function callResponsesAPI(messages, tools) {
         // Use local proxy - no timeout limits!
         endpoint = `${LLM_CONFIG.LOCAL_PROXY_URL}/v1/responses`;
         proxyStatus.usingLocalProxy = true;
-        console.log("[LLM] Using local proxy (no timeout limits)");
+        logger.debug("[LLM] Using local proxy (no timeout limits)");
 
         try {
           res = await makeRequest(endpoint);
         } catch (localProxyError) {
-          console.warn(
+          logger.warn(
             "[LLM] Local proxy failed, trying direct connection:",
             localProxyError.message
           );
@@ -2396,7 +2397,7 @@ async function callResponsesAPI(messages, tools) {
             directError.message?.includes("Failed to fetch") ||
             directError.name === "TypeError"
           ) {
-            console.warn(
+            logger.warn(
               "[LLM] Direct connection failed, using corsproxy.io (WARNING: 30s timeout limit)"
             );
             endpoint = `https://corsproxy.io/?${encodeURIComponent(
@@ -2639,7 +2640,7 @@ class LLMChatService {
               LLM_CONFIG.MAX_TOOLS_PER_ITERATION
             );
             if (toolCalls.length > LLM_CONFIG.MAX_TOOLS_PER_ITERATION) {
-              console.warn(
+              logger.warn(
                 `[LLM] Model tried to call ${toolCalls.length} tools, limiting to ${LLM_CONFIG.MAX_TOOLS_PER_ITERATION}`
               );
             }
@@ -2683,7 +2684,7 @@ class LLMChatService {
                     ? JSON.parse(tc.arguments)
                     : tc.arguments || {};
               } catch (parseErr) {
-                console.error(
+                logger.error(
                   "[LLM] Failed to parse tool arguments:",
                   tc.arguments,
                   parseErr
@@ -2692,7 +2693,7 @@ class LLMChatService {
 
               // Debug logging for render_ui
               if (tc.name === "render_ui") {
-                console.log("[LLM] render_ui called with:", {
+                logger.debug("[LLM] render_ui called with:", {
                   hasComponentCode: !!args.component_code,
                   hasData: !!args.data,
                   dataType: typeof args.data,
@@ -2702,13 +2703,13 @@ class LLMChatService {
 
                 // Format expansion: if data is a JSON string, try to parse it
                 if (typeof args.data === "string") {
-                  console.log(
+                  logger.debug(
                     "[LLM] render_ui: data is string, attempting to parse as JSON"
                   );
                   try {
                     args.data = JSON.parse(args.data);
                   } catch (e) {
-                    console.log("[LLM] render_ui: failed to parse data string");
+                    logger.debug("[LLM] render_ui: failed to parse data string");
                     // Leave as-is, the handler will wrap it
                   }
                 }
@@ -2902,7 +2903,7 @@ class LLMChatService {
 
               // If we found inline UI elements, accept them!
               if (inlineUIElements.length > 0) {
-                console.log(
+                logger.debug(
                   `[LLM] Found ${inlineUIElements.length} inline UI elements in direct text - accepting`
                 );
 
@@ -2942,7 +2943,7 @@ class LLMChatService {
 
               // If we still have iterations left, force the model to use display_to_user
               if (iterations < LLM_CONFIG.MAX_ITERATIONS - 1) {
-                console.log(
+                logger.debug(
                   "[LLM] Direct text rejected - forcing display_to_user call"
                 );
 
@@ -2971,7 +2972,7 @@ Alternative: You can also embed UI directly using these formats:
                 continue;
               } else {
                 // Out of iterations - use the direct text as fallback but log warning
-                console.warn(
+                logger.warn(
                   "[LLM] Out of iterations - using direct text as fallback"
                 );
                 finalMessage = directText;
@@ -3036,7 +3037,7 @@ Alternative: You can also embed UI directly using these formats:
         });
         return finalContent + " [COMPONENTS:llm_codex]";
       } catch (error) {
-        console.error(`[LLM] Error (attempt ${retryCount + 1}):`, error);
+        logger.error(`[LLM] Error (attempt ${retryCount + 1}):`, error);
 
         const errorMsg = error.message || "";
 
