@@ -1,5 +1,7 @@
 /* src/index.css */
 
+@import "./styles/tokens.css";
+
 /* ── Tailwind base, components, utilities ─────────────────────────── */
 @tailwind base;
 @tailwind components;
