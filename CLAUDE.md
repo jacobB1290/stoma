@@ -70,7 +70,7 @@ src/
 │   └── usePrioBar.js       # Animated priority bar (Framer Motion)
 ├── qa/                 # AI / LLM integration
 │   ├── LLMChatService.js   # OpenAI API client + tool-calling loop
-│   └── QAEngine.js         # Smart routing, context-aware Q&A (v3.1.0)
+│   └── AppQAKernel.js      # Smart routing, context-aware Q&A (formerly QAEngine.js)
 ├── services/           # Database & external service abstractions
 │   ├── caseService.js      # Supabase CRUD + audit logging
 │   ├── userService.js      # Multi-layer user storage
@@ -186,19 +186,18 @@ Modifiers are stored as a string array on each case row. Known values:
 - Configured at app startup in `src/index.js` via `configureLLM({ apiKey })`
 - Key exports: `configureLLM`, `setStatusCallback`, `setEventLogCallback`, `sendMessage`
 
-### QAEngine (`src/qa/QAEngine.js`, v3.1.0)
+### AppQAKernel (`src/qa/AppQAKernel.js`, formerly QAEngine.js)
 
-Wraps `LLMChatService` with smart routing and component-based response handling. Query categories: CORE, DISCOVERY, ANALYSIS, and more. Import and use `QAEngine` in UI components rather than calling `LLMChatService` directly.
+Wraps `LLMChatService` with smart routing and component-based response handling. Query categories: CORE, DISCOVERY, ANALYSIS, and more. Import and use `AppQAKernel` in UI components rather than calling `LLMChatService` directly.
 
 ---
 
 ## Styling Conventions
 
-The app uses **three concurrent CSS systems** — be aware of all three when modifying styles:
+The app uses **two concurrent CSS systems** — be aware of both when modifying styles:
 
 1. **Tailwind CSS** (utility classes) — available via CDN in `public/index.html` and PostCSS in the build. Use for layout and spacing.
 2. **Theme CSS files** (`theme-dark.css`, `theme-pink.css`, `theme-white.css`) — CSS custom properties applied via a class on `<html>` or a wrapper element. Modify here for theme-specific colors.
-3. **Material-UI** (`@mui/material` + `@emotion/styled`) — used for specific UI components. MUI theme overrides live within the components that use them.
 
 Glass/blur effects are defined in `src/styles/glass.css`. Flash animations are in `src/flash.css`.
 
@@ -206,14 +205,11 @@ Glass/blur effects are defined in `src/styles/glass.css`. Flash animations are i
 
 ## Animation Libraries
 
-Two animation libraries are in use — use the right one for the right job:
-
 | Library | Version | Use for |
 |---|---|---|
-| **Framer Motion** | 12.34.3 | React component enter/exit animations, spring physics, `usePrioBar` hook |
-| **GSAP** | 3.13.0 | Imperative timeline animations, canvas effects, `animationEngine.js` |
+| **motion** (Framer Motion) | ^12.34.3 | React component enter/exit animations, spring physics, `usePrioBar` hook, imperative timelines, canvas effects |
 
-> The `package.json` overrides section forces `framer-motion` and its sub-packages to a consistent version. Do not change these overrides without testing a Vercel build, as mismatched motion packages caused a past build failure.
+> The `package.json` `overrides` section currently pins only `typescript` to `4.9.5`. Test a Vercel build before adding or changing any override — mismatched motion packages have caused past build failures.
 
 ---
 
