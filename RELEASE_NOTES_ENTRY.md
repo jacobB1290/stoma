@@ -1,2 +1,11 @@
-- The app runs a bit lighter behind the scenes now.
-- Background chatter the app used to write to itself is hidden in the live version, so things feel snappier without changing anything you see.
+- Pop-up messages about saving and deleting now appear inside the app instead of harsh browser pop-ups.
+- The pink and dark themes now color more parts of the app correctly when you switch between them.
+- The board feels snappier when cases update — fewer parts of the page have to redo work behind the scenes.
+- The first time you open the app it loads faster, and the big screens like editing cases and management load only when you open them.
+- The prediction info on cases now loads in the background instead of slowing down the app's first opening.
+- Times on the case history page now match the rest of the app (was showing in the wrong timezone).
+- The system records changes more reliably when a save runs into a hiccup.
+- The download size of the app is smaller now.
+- The notification sound and a few other small parts of the case editor have been tidied up.
+- Behind-the-scenes work to make pop-up windows, buttons, loading spinners, and settings respond more consistently across the app.
+- Stricter code checks now run automatically before changes go live to catch problems earlier.
