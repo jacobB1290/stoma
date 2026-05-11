@@ -32,6 +32,11 @@ const INTERACTION_THRESHOLD = 0.8;
 const BUBBLE_GAP = 20;
 const MOBILE_BUBBLE_OFFSET = 10;
 
+// Short notification beep used by playWarningSound — kept as a data URI to avoid
+// bundling a binary asset; isolated here so the function body stays readable.
+const NOTIFY_SOUND_DATA_URI =
+  "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE";
+
 // Helper: count business days between 2 ISO dates (start exclusive, end inclusive)
 const businessDaysBetweenISO = (startISO, endISO) => {
   if (!startISO || !endISO) return null;
@@ -1003,12 +1008,14 @@ export default function Editor({ data, deptDefault }) {
 
   const playWarningSound = () => {
     try {
-      const audio = new Audio(
-        "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE"
-      );
+      const audio = new Audio(NOTIFY_SOUND_DATA_URI);
       audio.volume = 0.1;
-      audio.play().catch(() => {});
-    } catch (e) {}
+      audio.play().catch(() => {
+        // audio playback blocked by browser autoplay policy — non-fatal
+      });
+    } catch (e) {
+      // Audio constructor unavailable or URI rejected — non-fatal
+    }
   };
 
   useEffect(() => {
@@ -1022,7 +1029,9 @@ export default function Editor({ data, deptDefault }) {
       preloadAllHistoryModal()
         .then(() => preloadAllHistoryData())
         .then(() => setHistoryPreloaded(true))
-        .catch(() => {});
+        .catch(() => {
+          /* preload failure is non-fatal — modal will load on actual open */
+        });
     });
     return () => {
       if (window.cancelIdleCallback) window.cancelIdleCallback(id);
@@ -1037,7 +1046,9 @@ export default function Editor({ data, deptDefault }) {
       preloadAllHistoryModal();
       preloadAllHistoryData()
         .then(() => setHistoryPreloaded(true))
-        .catch(() => {});
+        .catch(() => {
+          /* preload failure is non-fatal — modal will load on actual open */
+        });
     }
   }, [historyPreloaded]);
 
