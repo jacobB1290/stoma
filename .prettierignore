@@ -1,0 +1,15 @@
+# Build output
+build/
+
+# Dependencies
+node_modules/
+
+# Static assets and HTML shell (also covers generated public/version.json
+# and public/changelog.json that Vercel regenerates on every deploy)
+public/
+
+# Large model JSON
+xgb_v10_final.json
+
+# Lockfile — managed by npm
+package-lock.json

@@ -7,7 +7,6 @@ import "./flash.css"; // existing
 import "./index.css"; // Tailwind base + app globals
 import { configureLLM } from "./qa/LLMChatService";
 import { deepRefresh } from "./utils/deepRefresh";
-import { loadModels } from "./utils/caseRiskPredictions";
 
 // API key is read from the REACT_APP_OPENAI_API_KEY environment variable.
 // Set it in Vercel → Project Settings → Environment Variables,
@@ -16,8 +15,9 @@ configureLLM({
   apiKey: process.env.REACT_APP_OPENAI_API_KEY || "",
 });
 
-// Pre-fetch XGBoost risk prediction models (lazy, non-blocking)
-loadModels();
+// XGBoost risk-prediction models load lazily on the first prediction call
+// (see ensureModelsLoaded in utils/caseRiskPredictions.js) so the 6.4MB
+// fetch stays off the critical startup path.
 
 // Note: Front office list DB sync is initialised inside DataProvider (DataContext.jsx)
 // so it has access to the Supabase client and proper React lifecycle cleanup.

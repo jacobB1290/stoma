@@ -18,12 +18,28 @@ export const db = createClient(URL, KEY, { auth: { persistSession: false } });
       name survives browser closes and restarts on shared Chrome
       profiles. sessionStorage is intentionally not used here
       because it is cleared on every browser close.
+
+      The result is cached at module scope because the layers
+      (localStorage and document.cookie) are touched on every
+      audit-log write. userService.setName should call
+      invalidateUserNameCache() whenever the stored name changes.
       ─────────────────────────────────────────────────────────── */
+let cachedUserName = null;
+
+export const invalidateUserNameCache = () => {
+  cachedUserName = null;
+};
+
 const getCurrentUserName = () => {
+  if (cachedUserName) return cachedUserName;
+
   // 1. localStorage (primary — survives browser close/reopen)
   try {
     const v = localStorage.getItem("userName");
-    if (v && v.trim()) return v.trim();
+    if (v && v.trim()) {
+      cachedUserName = v.trim();
+      return cachedUserName;
+    }
   } catch { /* ignore read errors */ }
 
   // 2. Cookie backup (survives some localStorage clears)
@@ -33,7 +49,10 @@ const getCurrentUserName = () => {
       const t = c.trim();
       if (t.startsWith(nameEQ)) {
         const v = decodeURIComponent(t.slice(nameEQ.length)).trim();
-        if (v) return v;
+        if (v) {
+          cachedUserName = v;
+          return cachedUserName;
+        }
       }
     }
   } catch { /* ignore read errors */ }
@@ -93,6 +112,35 @@ export const logCase = async (caseId, action) =>
   });
 
 /* ──────────────────────────────────────────────────────────────
+      Shared toggle helper
+      Reads/writes the modifiers array, checks the Supabase
+      response, and only writes an audit-history row when the
+      mutation actually succeeded.
+      ─────────────────────────────────────────────────────────── */
+const toggleModifier = async ({
+  id,
+  modifiers = [],
+  flag,
+  addedLabel,
+  removedLabel,
+}) => {
+  const m = new Set(modifiers);
+  const present = m.has(flag);
+  if (present) m.delete(flag); else m.add(flag);
+  const next = [...m];
+
+  const { error } = await db
+    .from("cases")
+    .update({ modifiers: next })
+    .eq("id", id);
+
+  if (error) return { error };
+
+  await logCase(id, present ? removedLabel : addedLabel);
+  return { data: next };
+};
+
+/* ──────────────────────────────────────────────────────────────
       CRUD helpers
       ─────────────────────────────────────────────────────────── */
 
@@ -150,11 +198,12 @@ export const addCase = async ({
 /* ---------- Update (with diff logging) ---------- */
 export const updateCase = async (payload) => {
   const { id } = payload;
-  const { data: prev } = await db
+  const { data: prev, error: fetchError } = await db
     .from("cases")
     .select("casenumber,department,due,priority,modifiers")
     .eq("id", id)
     .single();
+  if (fetchError) return { error: fetchError };
   if (!prev) return { error: new Error("Row not found") };
 
   const prevNewAccount = prev.modifiers?.includes("newaccount") ?? false;
@@ -240,64 +289,66 @@ export const updateCase = async (payload) => {
       `Due changed from ${prev.due.slice(0, 10)} to ${nextRow.due.slice(0, 10)}`
     );
 
-  for (const l of logs) await logCase(id, l);
+  await Promise.all(logs.map((l) => logCase(id, l)));
   return { error: null };
 };
 
 /* ---------- Stage-2 toggle ---------- */
-export const toggleStage2 = async ({ id, modifiers = [] }) => {
-  const m = new Set(modifiers);
-  const nowStage2 = !m.has("stage2");
-  nowStage2 ? m.add("stage2") : m.delete("stage2");
-  await db
-    .from("cases")
-    .update({ modifiers: [...m] })
-    .eq("id", id);
-  await logCase(id, nowStage2 ? "Moved to Stage 2" : "Moved back to Stage 1");
-};
+export const toggleStage2 = ({ id, modifiers = [] }) =>
+  toggleModifier({
+    id,
+    modifiers,
+    flag: "stage2",
+    addedLabel: "Moved to Stage 2",
+    removedLabel: "Moved back to Stage 1",
+  });
 
 /* ---------- Simple toggles ---------- */
 export const togglePriority = async ({ id, priority }) => {
-  await db.from("cases").update({ priority: !priority }).eq("id", id);
+  const { error } = await db
+    .from("cases")
+    .update({ priority: !priority })
+    .eq("id", id);
+  if (error) return { error };
   await logCase(id, !priority ? "Priority added" : "Priority removed");
+  return { data: !priority };
 };
 
-export const toggleRush = async ({ id, modifiers = [] }) => {
-  const m = new Set(modifiers);
-  m.has("rush") ? m.delete("rush") : m.add("rush");
-  await db
-    .from("cases")
-    .update({ modifiers: [...m] })
-    .eq("id", id);
-  await logCase(id, m.has("rush") ? "rush added" : "rush removed");
-};
-
-export const toggleHold = async ({ id, modifiers = [] }) => {
-  const m = new Set(modifiers);
-  m.has("hold") ? m.delete("hold") : m.add("hold");
-  await db
-    .from("cases")
-    .update({ modifiers: [...m] })
-    .eq("id", id);
-  await logCase(id, m.has("hold") ? "hold added" : "hold removed");
-};
-
-export const toggleNewAccount = async ({ id, modifiers = [] }) => {
-  const m = new Set(modifiers);
-  m.has("newaccount") ? m.delete("newaccount") : m.add("newaccount");
-  await db
-    .from("cases")
-    .update({ modifiers: [...m] })
-    .eq("id", id);
-  await logCase(
+export const toggleRush = ({ id, modifiers = [] }) =>
+  toggleModifier({
     id,
-    m.has("newaccount") ? "New Account added" : "New Account removed"
-  );
-};
+    modifiers,
+    flag: "rush",
+    addedLabel: "rush added",
+    removedLabel: "rush removed",
+  });
+
+export const toggleHold = ({ id, modifiers = [] }) =>
+  toggleModifier({
+    id,
+    modifiers,
+    flag: "hold",
+    addedLabel: "hold added",
+    removedLabel: "hold removed",
+  });
+
+export const toggleNewAccount = ({ id, modifiers = [] }) =>
+  toggleModifier({
+    id,
+    modifiers,
+    flag: "newaccount",
+    addedLabel: "New Account added",
+    removedLabel: "New Account removed",
+  });
 
 export const toggleComplete = async (id, cur) => {
-  await db.from("cases").update({ completed: !cur }).eq("id", id);
+  const { error } = await db
+    .from("cases")
+    .update({ completed: !cur })
+    .eq("id", id);
+  if (error) return { error };
   await logCase(id, !cur ? "Marked done" : "Undo done");
+  return { data: !cur };
 };
 
 /* ---------- Delete ---------- */
@@ -314,9 +365,7 @@ export const archiveCases = async (caseIds) => {
     .in("id", caseIds);
 
   if (!error) {
-    for (const id of caseIds) {
-      await logCase(id, "Case archived");
-    }
+    await Promise.all(caseIds.map((id) => logCase(id, "Case archived")));
   }
 
   return { error };
@@ -425,9 +474,8 @@ export const toggleCaseExclusion = async (
   if (fetchError) return { error: fetchError };
 
   const currentModifiers = currentCase.modifiers || [];
-  const newModifiers = [...currentModifiers];
 
-  const filteredModifiers = newModifiers.filter(
+  const filteredModifiers = currentModifiers.filter(
     (m) =>
       !m.startsWith("stats-exclude") && !m.startsWith("stats-exclude-reason:")
   );
@@ -477,54 +525,58 @@ export const batchToggleExclusions = async (
   stage = null,
   reason = null
 ) => {
-  const results = [];
+  if (!caseIds?.length) return [];
 
-  for (const caseId of caseIds) {
-    const { data: currentCase } = await db
-      .from("cases")
-      .select("modifiers")
-      .eq("id", caseId)
-      .single();
+  const { data: rows, error: fetchError } = await db
+    .from("cases")
+    .select("id,modifiers")
+    .in("id", caseIds);
 
-    if (!currentCase) continue;
-
-    const currentModifiers = currentCase.modifiers || [];
-    let newModifiers = currentModifiers.filter(
-      (m) =>
-        !m.startsWith("stats-exclude") && !m.startsWith("stats-exclude-reason:")
-    );
-
-    if (exclude) {
-      if (stage) {
-        newModifiers.push(`stats-exclude:${stage}`);
-      } else {
-        newModifiers.push("stats-exclude:all");
-      }
-      if (reason) {
-        newModifiers.push(`stats-exclude-reason:${reason}`);
-      }
-    }
-
-    const { error } = await db
-      .from("cases")
-      .update({ modifiers: newModifiers })
-      .eq("id", caseId);
-
-    if (!error) {
-      const action = exclude
-        ? stage
-          ? `Excluded from ${stage} stage statistics`
-          : "Excluded from all statistics"
-        : stage
-        ? `Included in ${stage} stage statistics`
-        : "Included in all statistics";
-      await logCase(caseId, action);
-    }
-
-    results.push({ caseId, success: !error, error });
+  if (fetchError) {
+    return caseIds.map((caseId) => ({
+      caseId,
+      success: false,
+      error: fetchError,
+    }));
   }
 
-  return results;
+  const byId = new Map((rows || []).map((r) => [r.id, r.modifiers || []]));
+  const action = exclude
+    ? stage
+      ? `Excluded from ${stage} stage statistics`
+      : "Excluded from all statistics"
+    : stage
+    ? `Included in ${stage} stage statistics`
+    : "Included in all statistics";
+
+  const updates = caseIds
+    .filter((caseId) => byId.has(caseId))
+    .map((caseId) => {
+      const current = byId.get(caseId);
+      const filtered = current.filter(
+        (m) =>
+          !m.startsWith("stats-exclude") &&
+          !m.startsWith("stats-exclude-reason:")
+      );
+
+      if (exclude) {
+        filtered.push(stage ? `stats-exclude:${stage}` : "stats-exclude:all");
+        if (reason) filtered.push(`stats-exclude-reason:${reason}`);
+      }
+
+      return { caseId, next: filtered };
+    });
+
+  return Promise.all(
+    updates.map(async ({ caseId, next }) => {
+      const { error } = await db
+        .from("cases")
+        .update({ modifiers: next })
+        .eq("id", caseId);
+      if (!error) await logCase(caseId, action);
+      return { caseId, success: !error, error };
+    })
+  );
 };
 
 /* ---------- Check for duplicates ---------- */

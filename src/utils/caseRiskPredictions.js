@@ -17,8 +17,10 @@
 //
 // SETUP
 //   1. Place xgb_v10_origdue.json in /public
-//   2. Import { loadModels, generateCaseRiskPredictions, CaseRiskAnalyticsModal }
-//   3. Call loadModels() once at app init (returns a Promise)
+//   2. Import { generateCaseRiskPredictions, CaseRiskAnalyticsModal }
+//   3. Models load lazily on the first call to generateCaseRiskPredictions
+//      (or any prediction entry point). Concurrent callers share a single
+//      in-flight fetch; subsequent calls reuse the cached resolved value.
 //   4. IMPORTANT: pass `recentCompletedVisits` OR `completedCasesForContext`
 //      into generateCaseRiskPredictions options. If you can only pass one
 //      list of cases, include completed cases from the last 30 days as well
@@ -791,6 +793,13 @@ export function loadModels(modelUrl = "/xgb_v10_origdue.json") {
       return null;
     });
   return modelLoadPromise;
+}
+
+// Alias for clarity at prediction call sites — loadModels() is already
+// idempotent and memoized, so calling it on every prediction is cheap after
+// the first fetch resolves.
+export function ensureModelsLoaded() {
+  return loadModels();
 }
 
 export function modelsReady() { return !!XGB_MODELS; }
@@ -1832,7 +1841,7 @@ function buildRiskSignals(prediction, maxSignals = 5) {
  *  MAIN GENERATOR — produces prediction objects for all active cases
  *  ======================================================================== */
 
-export function generateCaseRiskPredictions(
+export async function generateCaseRiskPredictions(
   activeCases,
   throughputAnalysis,
   stage = null,
@@ -1846,6 +1855,9 @@ export function generateCaseRiskPredictions(
       byRiskLevel: { critical: [], high: [], medium: [], low: [] },
     };
   }
+
+  // Defer the 6.4MB model fetch from app startup to the first prediction call.
+  await ensureModelsLoaded();
 
   const now = getCurrentTime();
   const nowTs = now.getTime();
@@ -1892,25 +1904,6 @@ export function generateCaseRiskPredictions(
   const peerPool = Array.isArray(options.peerPool) && options.peerPool.length
     ? options.peerPool
     : activeCases;
-
-  if (typeof console !== "undefined") {
-    const stgCtx = labContext.perStage?.[currentStage] || {};
-    console.log("[v10 labContext]", {
-      stage: currentStage,
-      labActive: labContext.labActive,
-      labRush: labContext.labRush,
-      labOverdue: labContext.labOverdue,
-      labDueToday: labContext.labDueToday,
-      labDue3d: labContext.labDue3d,
-      stageActiveCount: stgCtx.stageActiveCount,
-      stageActiveRush: stgCtx.stageActiveRush,
-      stageAvg7d: stgCtx.stageAvg7d,
-      stageThroughput7d: stgCtx.stageThroughput7d,
-      stageAvg30d: stgCtx.stageAvg30d,
-      stageTrend: stgCtx.stageTrend,
-      recentCompletedVisitsCount: recentCompletedVisits.length,
-    });
-  }
 
   // v10.4: per-call branch counter (logged once for analytics)
   const branchCounts = { agreement: 0, false_alarm: 0, classifier_alert: 0 };

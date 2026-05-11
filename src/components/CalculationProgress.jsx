@@ -1,12 +1,8 @@
 // components/CalculationProgress.jsx
-import React, { useEffect } from "react";
+import React from "react";
 import { motion, AnimatePresence } from "motion/react";
 
 const CalculationProgress = ({ progress, isVisible }) => {
-  useEffect(() => {
-    console.log("CalculationProgress:", { progress, isVisible });
-  }, [progress, isVisible]);
-
   return (
     <AnimatePresence mode="wait">
       {isVisible && (

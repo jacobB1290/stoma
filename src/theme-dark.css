@@ -90,6 +90,34 @@ html.theme-dark {
 
   --primary: var(--d-accent);
   --primary-hover: var(--d-accent-hover);
+
+  /* ───────── semantic aliases (shared with other themes) ───────── */
+  --surface: var(--d-surface);
+  --surface-elevated: var(--d-surface-2);
+  --text: var(--d-text);
+  --text-muted: var(--d-text-muted);
+  --hover-bg: rgba(255, 255, 255, 0.05);
+  --border: var(--d-border);
+
+  /* ───────── front-office pill / tooltip tokens ───────── */
+  --fo-pill-bg: rgba(255, 255, 255, 0.10);
+  --fo-pill-border: rgba(255, 255, 255, 0.20);
+  --fo-pill-text: rgba(255, 255, 255, 0.90);
+  --fo-tooltip-surface: #1a2e33;
+  --fo-tooltip-border: rgba(255, 255, 255, 0.10);
+  --fo-tooltip-text-primary: #f1f5f9;
+  --fo-tooltip-text-muted: #94a3b8;
+  --fo-tooltip-track: rgba(255, 255, 255, 0.08);
+  --fo-tooltip-divider: rgba(255, 255, 255, 0.08);
+  --fo-tooltip-shadow: 0 12px 40px rgba(0, 0, 0, 0.40),
+    0 2px 8px rgba(0, 0, 0, 0.25);
+  --fo-tooltip-row-bg: rgba(255, 255, 255, 0.05);
+  --fo-tooltip-row-bg-hover: rgba(255, 255, 255, 0.10);
+  --fo-tooltip-row-chip-bg: rgba(255, 255, 255, 0.08);
+  --fo-tooltip-ytd-bg: rgba(255, 255, 255, 0.03);
+  --fo-header-gradient: linear-gradient(135deg, #0d2e35 0%, #1cc7b6 100%);
+  --fo-amber-pill-bg: rgba(245, 158, 11, 0.14);
+  --fo-red-pill-bg: rgba(220, 38, 38, 0.18);
 }
 
 /* ───────── BOOST MODE OVERRIDES (~30-35% lightness) ───────── */
@@ -300,12 +328,12 @@ html.theme-dark [role="dialog"] summary:hover,
 html.theme-dark [role="dialog"] [role="button"]:hover,
 html.theme-dark
   [role="dialog"]
-  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not([role="switch"]):hover,
+  button:not(.bg-\[\#16525F\]):not(.bg-\[var\(--primary\)\]):not(.bg-teal-600):not([role="switch"]):hover,
 html.theme-dark [aria-modal="true"] summary:hover,
 html.theme-dark [aria-modal="true"] [role="button"]:hover,
 html.theme-dark
   [aria-modal="true"]
-  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not([role="switch"]):hover {
+  button:not(.bg-\[\#16525F\]):not(.bg-\[var\(--primary\)\]):not(.bg-teal-600):not([role="switch"]):hover {
   background-color: rgba(255, 255, 255, 0.03) !important;
 }
 
@@ -322,7 +350,7 @@ html.theme-dark.theme-dark-boost [role="dialog"] summary:hover,
 html.theme-dark.theme-dark-boost [role="dialog"] [role="button"]:hover,
 html.theme-dark.theme-dark-boost
   [role="dialog"]
-  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not([role="switch"]):hover {
+  button:not(.bg-\[\#16525F\]):not(.bg-\[var\(--primary\)\]):not(.bg-teal-600):not([role="switch"]):hover {
   background-color: rgba(255, 255, 255, 0.035) !important;
 }
 
@@ -350,11 +378,11 @@ html.theme-dark tr:hover {
 
 /* Button hovers (Global but excluding teal) */
 html.theme-dark
-  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(.bg-teal-700):hover,
+  button:not(.bg-\[\#16525F\]):not(.bg-\[var\(--primary\)\]):not(.bg-teal-600):not(.bg-teal-700):hover,
 html.theme-dark
-  [role="button"]:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(
-    .bg-teal-700
-  ):hover {
+  [role="button"]:not(.bg-\[\#16525F\]):not(.bg-\[var\(--primary\)\]):not(
+    .bg-teal-600
+  ):not(.bg-teal-700):hover {
   background-color: rgba(255, 255, 255, 0.05);
 }
 
@@ -362,6 +390,7 @@ html.theme-dark
 html.theme-dark
   :is(button, a, [role="button"]):is(
     .bg-\[\#16525F\],
+    .bg-\[var\(--primary\)\],
     .bg-teal-600,
     .bg-teal-700
   ):hover {
@@ -379,11 +408,11 @@ html.theme-dark.theme-dark-boost tr:hover {
 }
 
 html.theme-dark.theme-dark-boost
-  button:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(.bg-teal-700):hover,
+  button:not(.bg-\[\#16525F\]):not(.bg-\[var\(--primary\)\]):not(.bg-teal-600):not(.bg-teal-700):hover,
 html.theme-dark.theme-dark-boost
-  [role="button"]:not(.bg-\[\#16525F\]):not(.bg-teal-600):not(
-    .bg-teal-700
-  ):hover {
+  [role="button"]:not(.bg-\[\#16525F\]):not(.bg-\[var\(--primary\)\]):not(
+    .bg-teal-600
+  ):not(.bg-teal-700):hover {
   background-color: rgba(255, 255, 255, 0.055);
 }
 
@@ -750,6 +779,7 @@ html.theme-dark .border-green-200 {
 html.theme-dark
   :is(button, a, [role="button"]):is(
     .bg-\[\#16525F\],
+    .bg-\[var\(--primary\)\],
     .bg-teal-600,
     .bg-teal-700
   ) {
@@ -786,7 +816,10 @@ html.theme-dark
 }
 
 /* ───────── BOARD COLUMNS ───────── */
-html.theme-dark .bg-\[\#16525F\]:not(button):not(a):not([role="button"]) {
+html.theme-dark
+  :is(.bg-\[\#16525F\], .bg-\[var\(--primary\)\]):not(button):not(a):not(
+    [role="button"]
+  ) {
   background: var(--d-surface-solid);
   border: 1px solid var(--d-border);
   box-shadow: var(--d-shadow-2);

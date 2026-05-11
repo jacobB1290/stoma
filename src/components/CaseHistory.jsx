@@ -17,6 +17,7 @@ import {
   RISK_STYLE,
 } from "../utils/caseRiskPredictions";
 import { computeCaseForecast } from "../utils/caseForecastCompute";
+import { TZ } from "../constants";
 import clsx from "clsx";
 
 /* ══════════════════════════════════════════════ */
@@ -31,7 +32,7 @@ const fmtTs = (ts) =>
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone: "America/Denver",
+    timeZone: TZ,
   });
 
 const fmtTsShort = (ts) =>
@@ -41,7 +42,7 @@ const fmtTsShort = (ts) =>
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone: "America/Denver",
+    timeZone: TZ,
   });
 
 const fmtDateOnly = (dateStr) => {

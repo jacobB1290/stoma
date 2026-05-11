@@ -255,7 +255,7 @@ const ReleasePopover = ({ caseItem, onConfirm, onCancel, anchorRect }) => {
         </button>
         <button
           onClick={handleRelease}
-          className="flex-1 px-3 py-1.5 rounded-lg bg-[#16525F] hover:bg-[#1F6F7C] text-white text-sm font-medium transition-all hover:translate-y-[-1px] shadow-[0_1px_3px_rgba(22,82,95,0.3)] hover:shadow-[0_4px_12px_rgba(22,82,95,0.25)]"
+          className="flex-1 px-3 py-1.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-sm font-medium transition-all hover:translate-y-[-1px] shadow-[0_1px_3px_rgba(22,82,95,0.3)] hover:shadow-[0_4px_12px_rgba(22,82,95,0.25)]"
         >
           Release
         </button>

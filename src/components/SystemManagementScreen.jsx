@@ -62,7 +62,7 @@ const TZ = "America/Boise";
 const STAGES = ["design", "production", "finishing"];
 
 const COLORS = {
-  primary: "#16525F",
+  primary: "var(--primary)",
   success: "#22c55e",
   warning: "#f59e0b",
   danger: "#ef4444",
@@ -558,7 +558,7 @@ const PipelineFlowVisualization = memo(function PipelineFlowVisualization({
                 className={clsx(
                   "w-full p-4 rounded-xl border-2 transition-all flex items-center justify-between",
                   isSelected
-                    ? "border-[#16525F] bg-[#16525F]/5"
+                    ? "border-[var(--primary)] bg-[var(--primary)]/5"
                     : "border-gray-200 bg-white hover:border-gray-300",
                   stage.isBottleneck && "ring-2 ring-amber-400 ring-offset-2"
                 )}
@@ -1134,7 +1134,7 @@ const ProjectionsPanel = memo(function ProjectionsPanel({
   if (isLoading) {
     return (
       <div className="glass-panel p-12 text-center">
-        <div className="w-8 h-8 border-3 border-gray-200 border-t-[#16525F] rounded-full animate-spin mx-auto mb-4" />
+        <div className="w-8 h-8 border-3 border-gray-200 border-t-[var(--primary)] rounded-full animate-spin mx-auto mb-4" />
         <p className="text-gray-500">Loading projections...</p>
       </div>
     );
@@ -1634,7 +1634,7 @@ const LoadingSpinner = memo(function LoadingSpinner({ size = "md" }) {
     <div
       className={clsx(
         sizes[size],
-        "border-gray-200 border-t-[#16525F] rounded-full animate-spin"
+        "border-gray-200 border-t-[var(--primary)] rounded-full animate-spin"
       )}
     />
   );
@@ -1651,7 +1651,7 @@ const UserRow = memo(function UserRow({ user, isSelected, onSelect }) {
       className={clsx(
         "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-all",
         isSelected
-          ? "bg-[#16525F]/10 border-l-2 border-[#16525F]"
+          ? "bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]"
           : "hover:bg-gray-50 border-l-2 border-transparent",
         user.status === "offline" && !isSelected && "opacity-60"
       )}

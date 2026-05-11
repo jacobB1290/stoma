@@ -61,7 +61,7 @@ const getHeatLevel = (count) => {
 
 function SummaryBar({ totalCases, overdueCount, priorityCount, todayCount }) {
   return (
-    <div className="flex items-center justify-between px-3 py-2 bg-[#16525F] border-b border-white/10">
+    <div className="flex items-center justify-between px-3 py-2 bg-[var(--primary)] border-b border-white/10">
       <div className="flex items-center gap-3">
         <div className="text-white">
           <span className="text-xl font-bold">{totalCases}</span>
@@ -184,7 +184,7 @@ function WeekGrid({ horizon, map, today, selectedKey, onSelect }) {
               className={clsx(
                 "relative flex flex-col items-center py-2 rounded-lg transition-all",
                 // Use theme-compatible classes
-                isToday ? "bg-yellow-100" : "bg-[#16525F]",
+                isToday ? "bg-yellow-100" : "bg-[var(--primary)]",
                 isSelected && "ring-2 ring-white",
                 // Heat intensity via opacity overlay
                 !isToday && heatLevel >= 3 && "brightness-125",
@@ -277,7 +277,7 @@ function DetailPanel({
     ? "bg-amber-700"
     : isToday
     ? "bg-yellow-100"
-    : "bg-[#16525F]";
+    : "bg-[var(--primary)]";
 
   const textClass = isToday ? "text-gray-800" : "text-white";
 
@@ -858,9 +858,9 @@ export default function BoardMobile({
 
   return (
     <>
-      {/* Main container - uses bg-[#16525F] for theme compatibility */}
+      {/* Main container - uses bg-[var(--primary)] for theme compatibility */}
       <div
-        className="fixed inset-0 z-40 flex flex-col bg-[#16525F]"
+        className="fixed inset-0 z-40 flex flex-col bg-[var(--primary)]"
         style={{ top: HEADER_HEIGHT }}
       >
         {/* Summary bar */}

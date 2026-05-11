@@ -8,9 +8,11 @@ import React, {
 import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { db, restoreCase, logCase } from "../services/caseService";
+import { useToast } from "../context/ToastContext";
 import CaseHistory from "./CaseHistory";
 
 export default function ArchiveModal({ isOpen, onClose, searchQuery = "" }) {
+  const toast = useToast();
   const [archivedCases, setArchivedCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -18,6 +20,7 @@ export default function ArchiveModal({ isOpen, onClose, searchQuery = "" }) {
   const [isReady, setIsReady] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [animationComplete, setAnimationComplete] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
   // Clear state when modal closes
   useEffect(() => {
@@ -120,20 +123,25 @@ export default function ArchiveModal({ isOpen, onClose, searchQuery = "" }) {
 
       // Remove from local state
       setArchivedCases((prev) => prev.filter((c) => c.id !== caseId));
+      toast.success("Case restored");
     } catch (err) {
       console.error("Error restoring case:", err);
-      alert("Failed to restore case");
+      toast.error("Failed to restore case");
     }
   };
 
-  const handlePermanentDelete = async (caseId) => {
-    if (
-      !window.confirm(
-        "Are you sure you want to permanently delete this case? This action cannot be undone."
-      )
-    ) {
-      return;
-    }
+  const requestPermanentDelete = (caseId) => {
+    setPendingDeleteId(caseId);
+  };
+
+  const cancelPermanentDelete = () => {
+    setPendingDeleteId(null);
+  };
+
+  const confirmPermanentDelete = async () => {
+    const caseId = pendingDeleteId;
+    if (!caseId) return;
+    setPendingDeleteId(null);
 
     try {
       // Log the deletion first
@@ -145,9 +153,10 @@ export default function ArchiveModal({ isOpen, onClose, searchQuery = "" }) {
 
       // Remove from local state
       setArchivedCases((prev) => prev.filter((c) => c.id !== caseId));
+      toast.success("Case permanently deleted");
     } catch (err) {
       console.error("Error deleting case:", err);
-      alert("Failed to delete case");
+      toast.error("Failed to delete case");
     }
   };
 
@@ -421,7 +430,7 @@ export default function ArchiveModal({ isOpen, onClose, searchQuery = "" }) {
                                           </button>
                                           <button
                                             onClick={() =>
-                                              handlePermanentDelete(caseItem.id)
+                                              requestPermanentDelete(caseItem.id)
                                             }
                                             className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                             title="Delete permanently"
@@ -475,6 +484,48 @@ export default function ArchiveModal({ isOpen, onClose, searchQuery = "" }) {
                 </motion.div>
               )}
             </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Permanent delete confirmation */}
+      <AnimatePresence>
+        {pendingDeleteId && (
+          <motion.div
+            className="fixed inset-0 z-[400] flex items-center justify-center bg-black/50 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={cancelPermanentDelete}
+          >
+            <motion.div
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl"
+            >
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Permanently delete this case?
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={cancelPermanentDelete}
+                  className="flex-1 rounded-lg border border-gray-300 bg-white py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmPermanentDelete}
+                  className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-700 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

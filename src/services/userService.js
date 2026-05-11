@@ -4,6 +4,7 @@ import {
   getCanonicalName,
   getNameVariations,
 } from "../utils/nameNormalization";
+import { logger } from "../utils/logger";
 
 // ============================================
 // ROBUST STORAGE - Multiple fallback layers
@@ -18,7 +19,7 @@ function getStoredName() {
       return localName.trim();
     }
   } catch (e) {
-    console.warn("[Storage] localStorage read failed:", e);
+    logger.warn("[Storage] localStorage read failed:", e);
   }
 
   // 2. Try IndexedDB via a cached value (if we've stored it before)
@@ -46,7 +47,7 @@ function getStoredName() {
       return cookieName.trim();
     }
   } catch (e) {
-    console.warn("[Storage] Cookie read failed:", e);
+    logger.warn("[Storage] Cookie read failed:", e);
   }
 
   return "";
@@ -60,7 +61,7 @@ function saveToAllStorages(name) {
   try {
     localStorage.setItem("userName", trimmedName);
   } catch (e) {
-    console.warn("[Storage] localStorage write failed:", e);
+    logger.warn("[Storage] localStorage write failed:", e);
   }
 
   // 2. Cookie (backup - survives some localStorage clears)
@@ -73,7 +74,7 @@ function saveToAllStorages(name) {
       trimmedName
     )};expires=${expires.toUTCString()};path=/;SameSite=Lax${secureAttr}`;
   } catch (e) {
-    console.warn("[Storage] Cookie write failed:", e);
+    logger.warn("[Storage] Cookie write failed:", e);
   }
 
   // 3. Ask browser for durable storage (best effort)
@@ -117,10 +118,10 @@ async function ensureDurableStorage() {
     if (alreadyPersisted) return true;
 
     const granted = await navigator.storage.persist();
-    console.log("[Storage] Persistent storage", granted ? "granted" : "not granted");
+    logger.debug("[Storage] Persistent storage", granted ? "granted" : "not granted");
     return granted;
   } catch (e) {
-    console.warn("[Storage] Persistent storage request failed:", e);
+    logger.warn("[Storage] Persistent storage request failed:", e);
     return false;
   }
 }
@@ -158,7 +159,7 @@ function openDB() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = () => {
-      console.warn("[IndexedDB] Failed to open:", request.error);
+      logger.warn("[IndexedDB] Failed to open:", request.error);
       reject(request.error);
     };
 
@@ -185,7 +186,7 @@ async function saveToIndexedDB(name) {
     store.put({ key: "userName", value: name });
     cachedIndexedDBName = name;
   } catch (e) {
-    console.warn("[IndexedDB] Save failed:", e);
+    logger.warn("[IndexedDB] Save failed:", e);
   }
 }
 
@@ -206,7 +207,7 @@ async function loadFromIndexedDB() {
       request.onerror = () => { resolve(null); };
     });
   } catch (e) {
-    console.warn("[IndexedDB] Load failed:", e);
+    logger.warn("[IndexedDB] Load failed:", e);
     return null;
   }
 }
@@ -246,10 +247,10 @@ export async function getOrCreateDeviceId() {
     tx.objectStore(STORE_NAME).put({ key: "deviceId", value: newId });
 
     cachedDeviceId = newId;
-    console.log("[DeviceId] Created new device ID:", newId);
+    logger.debug("[DeviceId] Created new device ID:", newId);
     return newId;
   } catch (e) {
-    console.warn("[DeviceId] Could not persist device ID:", e);
+    logger.warn("[DeviceId] Could not persist device ID:", e);
     if (!cachedDeviceId) cachedDeviceId = `tmp-${Date.now()}`;
     return cachedDeviceId;
   }
@@ -287,10 +288,10 @@ export async function lookupNameByDeviceId() {
 
     if (error || !data?.user_name) return null;
 
-    console.log("[DeviceId] Restored name from Supabase:", data.user_name);
+    logger.debug("[DeviceId] Restored name from Supabase:", data.user_name);
     return data.user_name;
   } catch (e) {
-    console.warn("[DeviceId] Supabase lookup failed:", e);
+    logger.warn("[DeviceId] Supabase lookup failed:", e);
     return null;
   }
 }
@@ -304,7 +305,7 @@ async function clearIndexedDB() {
     // NOTE: deviceId is intentionally kept so the device can still be
     // recognised by Supabase after the user logs out / switches profiles.
   } catch (e) {
-    console.warn("[IndexedDB] Clear failed:", e);
+    logger.warn("[IndexedDB] Clear failed:", e);
   }
 }
 
@@ -323,13 +324,13 @@ export function initUserStorage() {
 
       if (!localName && indexedDBName) {
         // ── Restore from IndexedDB (e.g. localStorage cleared) ─────────
-        console.log("[Storage] Restoring name from IndexedDB:", indexedDBName);
+        logger.debug("[Storage] Restoring name from IndexedDB:", indexedDBName);
         try { localStorage.setItem("userName", indexedDBName); } catch { /* ignore */ }
         setLongCookie(indexedDBName);
 
       } else if (!localName && !indexedDBName && cookieName) {
         // ── Restore from cookie ─────────────────────────────────────────
-        console.log("[Storage] Restoring name from cookie:", cookieName);
+        logger.debug("[Storage] Restoring name from cookie:", cookieName);
         try { localStorage.setItem("userName", cookieName); } catch { /* ignore */ }
         await saveToIndexedDB(cookieName);
 
@@ -338,7 +339,7 @@ export function initUserStorage() {
         // This covers the Chrome-profile-switch scenario.
         const supabaseName = await lookupNameByDeviceId();
         if (supabaseName) {
-          console.log("[Storage] Restored name from Supabase device lookup:", supabaseName);
+          logger.debug("[Storage] Restored name from Supabase device lookup:", supabaseName);
           try { localStorage.setItem("userName", supabaseName); } catch { /* ignore */ }
           await saveToIndexedDB(supabaseName);
           setLongCookie(supabaseName);
@@ -346,7 +347,7 @@ export function initUserStorage() {
 
       } else if (localName && !indexedDBName) {
         // ── Sync localStorage → IndexedDB ───────────────────────────────
-        console.log("[Storage] Syncing existing name to IndexedDB:", localName);
+        logger.debug("[Storage] Syncing existing name to IndexedDB:", localName);
         await saveToIndexedDB(localName);
         setLongCookie(localName);
       }
@@ -412,7 +413,7 @@ let isTabVisible = true;
 
 function log(...args) {
   if (DEBUG) {
-    console.log(`[Heartbeat ${new Date().toLocaleTimeString()}]`, ...args);
+    logger.debug(`[Heartbeat ${new Date().toLocaleTimeString()}]`, ...args);
   }
 }
 
@@ -438,9 +439,6 @@ export async function reportActive(reason = "unknown") {
       device_id:   deviceId,
     };
 
-    // NOTE: "lite-ui" is intentionally excluded — Performance / Lite Mode is
-    // a per-device preference (saved in localStorage only) and must not follow
-    // the user across machines.
     const settingsKeys = [
       "boardTheme",
       "showInfoBar",
@@ -452,6 +450,7 @@ export async function reportActive(reason = "unknown") {
       "boostDarkMode",
       "autoUpdate",
       "facultySystemManager",
+      "lite-ui",
     ];
 
     const settings = {};
@@ -488,10 +487,10 @@ export async function reportActive(reason = "unknown") {
       if (!error) break;
     }
 
-    if (error) console.error("Failed to report active:", error);
+    if (error) logger.error("Failed to report active:", error);
     else log("Successfully reported active");
   } catch (error) {
-    console.error("Failed to report active status:", error);
+    logger.error("Failed to report active status:", error);
   }
 }
 
@@ -675,7 +674,7 @@ export async function fetchActiveUsers() {
     if (error) throw error;
     return data || [];
   } catch (error) {
-    console.error("Failed to fetch active users:", error);
+    logger.error("Failed to fetch active users:", error);
     return [];
   }
 }
@@ -695,10 +694,10 @@ export async function fetchSettingsForName(inputName) {
     const variations = getNameVariations(inputName);
     const canonicalName = getCanonicalName(inputName);
 
-    console.log(
+    logger.debug(
       `[UserService] Looking up settings for "${inputName}" (canonical: "${canonicalName}")`
     );
-    console.log(`[UserService] Checking variations:`, variations);
+    logger.debug(`[UserService] Checking variations:`, variations);
 
     // Fetch all active_devices records
     const { data, error } = await db
@@ -707,12 +706,12 @@ export async function fetchSettingsForName(inputName) {
       .order("last_seen", { ascending: false });
 
     if (error) {
-      console.error("[UserService] Failed to fetch devices:", error);
+      logger.error("[UserService] Failed to fetch devices:", error);
       return null;
     }
 
     if (!data || data.length === 0) {
-      console.log("[UserService] No devices found in database");
+      logger.debug("[UserService] No devices found in database");
       return null;
     }
 
@@ -730,11 +729,11 @@ export async function fetchSettingsForName(inputName) {
     });
 
     if (matchingRecords.length === 0) {
-      console.log(`[UserService] No matching records found for "${inputName}"`);
+      logger.debug(`[UserService] No matching records found for "${inputName}"`);
       return null;
     }
 
-    console.log(
+    logger.debug(
       `[UserService] Found ${matchingRecords.length} matching record(s)`
     );
 
@@ -751,14 +750,14 @@ export async function fetchSettingsForName(inputName) {
     const bestRecord = recordsWithSettings[0] ?? matchingRecords[0];
 
     if (!bestRecord) {
-      console.log(`[UserService] No usable record found for "${inputName}"`);
+      logger.debug(`[UserService] No usable record found for "${inputName}"`);
       return null;
     }
 
     const settings = bestRecord.device_info?.settings || {};
     const settingsUpdatedAt = bestRecord.device_info?.settings_updated_at ?? null;
 
-    console.log(
+    logger.debug(
       `[UserService] Using settings from "${bestRecord.user_name}" (last_seen: ${bestRecord.last_seen}, settings_updated_at: ${settingsUpdatedAt}):`,
       settings
     );
@@ -772,7 +771,7 @@ export async function fetchSettingsForName(inputName) {
       appVersion: bestRecord.app_version,
     };
   } catch (error) {
-    console.error("[UserService] Error fetching settings for name:", error);
+    logger.error("[UserService] Error fetching settings for name:", error);
     return null;
   }
 }
@@ -785,11 +784,6 @@ export function applySettings(settings) {
     return false;
   }
 
-  // NOTE: "lite-ui" is intentionally excluded — Performance / Lite Mode is a
-  // per-device preference (localStorage only) and must not follow the user
-  // across machines. The legacy "liteUi" key is also ignored for the same
-  // reason; old Supabase records carrying it will simply be left alone and the
-  // device's existing local value wins.
   const settingsKeys = [
     "boardTheme",
     "showInfoBar",
@@ -801,6 +795,7 @@ export function applySettings(settings) {
     "boostDarkMode",
     "autoUpdate",
     "facultySystemManager",
+    "lite-ui",
   ];
 
   let appliedCount = 0;
@@ -812,14 +807,34 @@ export function applySettings(settings) {
         localStorage.setItem(key, settings[key]);
         appliedSettings[key] = settings[key];
         appliedCount++;
-        console.log(`[UserService] Applied setting: ${key} = ${settings[key]}`);
+        logger.debug(`[UserService] Applied setting: ${key} = ${settings[key]}`);
       } catch (e) {
-        console.warn(`[UserService] Failed to apply setting ${key}:`, e);
+        logger.warn(`[UserService] Failed to apply setting ${key}:`, e);
       }
     }
   });
 
-  console.log(`[UserService] Applied ${appliedCount} settings`);
+  // Backward compat: old Supabase records stored lite mode as "liteUi" (camelCase).
+  // If the canonical "lite-ui" key wasn't in the settings payload but the old key is,
+  // apply it to the correct key so pre-fix sessions still restore Lite Mode correctly.
+  if (
+    settings["liteUi"] !== undefined &&
+    settings["liteUi"] !== null &&
+    settings["lite-ui"] === undefined
+  ) {
+    try {
+      localStorage.setItem("lite-ui", settings["liteUi"]);
+      appliedSettings["lite-ui"] = settings["liteUi"];
+      appliedCount++;
+      logger.debug(
+        `[UserService] Applied legacy liteUi → lite-ui: ${settings["liteUi"]}`
+      );
+    } catch (e) {
+      logger.warn("[UserService] Failed to apply legacy liteUi setting:", e);
+    }
+  }
+
+  logger.debug(`[UserService] Applied ${appliedCount} settings`);
 
   // Dispatch events to notify the app of the changes
   if (appliedCount > 0) {

@@ -1,6 +1,16 @@
 // src/utils/date.js
 
 /**
+ * One minute in milliseconds.
+ */
+export const MINUTE_MS = 60_000;
+
+/**
+ * One hour in milliseconds.
+ */
+export const HOUR_MS = 3_600_000;
+
+/**
  * One day in milliseconds.
  */
 export const DAY_MS = 86_400_000;
@@ -68,4 +78,44 @@ export function getWeekStart(d) {
   const diff = day === 0 ? -6 : 1 - day; // Adjust to Monday
   date.setDate(date.getDate() + diff);
   return date;
+}
+
+/**
+ * Count business days (Mon–Fri) strictly between two dates.
+ *
+ * Accepts either Date objects or ISO date strings ("YYYY-MM-DD" or
+ * full ISO timestamps). Returns an integer count of weekdays that fall
+ * AFTER `start` and ON OR BEFORE `end` — i.e. start-exclusive,
+ * end-inclusive. Weekends (Saturday/Sunday) are never counted.
+ *
+ * Returns 0 when inputs are equal or when `end` precedes `start`, and
+ * returns null when either input is missing or unparseable.
+ */
+export function businessDaysBetween(start, end) {
+  if (start == null || end == null) return null;
+
+  const toDate = (v) => {
+    if (v instanceof Date) return new Date(v);
+    if (typeof v === "string") {
+      const [base] = v.split("T");
+      const [y, m, d] = base.split("-").map(Number);
+      if (y && m && d) return new Date(y, m - 1, d);
+    }
+    const parsed = new Date(v);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const s = toDate(start);
+  const e = toDate(end);
+  if (!s || !e) return null;
+  if (e < s) return 0;
+
+  let count = 0;
+  const cursor = new Date(s);
+  while (cursor < e) {
+    cursor.setDate(cursor.getDate() + 1);
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
 }

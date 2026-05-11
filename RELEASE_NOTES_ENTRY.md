@@ -1,5 +1,11 @@
-- The case details and the Efficiency page used to sometimes show different predictions for the same case. Now they always agree.
-- Opening a case used to make the page lag for a second. It opens instantly now.
-- The Details button used to open two windows you had to close one by one. Now it just opens one.
-- Each case now shows a quick on track or at risk tag near the top, so you can tell at a glance without opening the full risk view.
-- Turning on Performance Mode now only affects the computer you turn it on with, instead of following you to every computer you sign into.
+- Pop-up messages about saving and deleting now appear inside the app instead of harsh browser pop-ups.
+- The pink and dark themes now color more parts of the app correctly when you switch between them.
+- The board feels snappier when cases update — fewer parts of the page have to redo work behind the scenes.
+- The first time you open the app it loads faster, and the big screens like editing cases and management load only when you open them.
+- The prediction info on cases now loads in the background instead of slowing down the app's first opening.
+- Times on the case history page now match the rest of the app (was showing in the wrong timezone).
+- The system records changes more reliably when a save runs into a hiccup.
+- The download size of the app is smaller now.
+- The notification sound and a few other small parts of the case editor have been tidied up.
+- Behind-the-scenes work to make pop-up windows, buttons, loading spinners, and settings respond more consistently across the app.
+- Stricter code checks now run automatically before changes go live to catch problems earlier.
