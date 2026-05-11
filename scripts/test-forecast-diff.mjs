@@ -4,25 +4,21 @@
  *
  * Parity harness for the case-modal Risk Forecast.
  *
- * Calls the EXACT production functions both paths use — no
- * re-implementation. The "CaseHistory" path uses
- * `computeCaseForecast` from src/utils/caseForecastCompute.js (the
- * shared function CaseHistory.jsx itself calls). The "Efficiency"
- * path mirrors the call site in
- * src/utils/efficiencyCalculations.js (line 1486-…): same active-pool
- * shaping, same visit / labContext source, same engine entry point.
+ * The in-modal forecast and the Efficiency screen now share one code
+ * path: both go through `calculateStageStatistics` →
+ * `calculateDepartmentEfficiency`. CaseHistory's wrapper
+ * (`computeCaseForecast` in src/utils/caseForecastCompute.js) just
+ * pulls the focal case's prediction out of the same result object
+ * Efficiency renders.
  *
- * Loads a real Supabase snapshot from
- * `scripts/fixtures/snapshot.json` and the XGBoost model from
- * `public/xgb_v10_origdue.json` so the ML inference is live (not the
- * quantile fallback). Prints every numeric prediction field side-by-
- * side with ◀ marks on any disagreement.
+ * The harness invokes that production function directly (no
+ * re-implementation) and ALSO invokes the Efficiency entry points
+ * directly. Both must produce the same prediction object for the
+ * focal case — by construction. The test is regression coverage.
  *
  * Usage:
  *   node scripts/test-forecast-diff.mjs --case=459
- *   node scripts/test-forecast-diff.mjs --case=332
  */
-
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,12 +47,115 @@ async function main() {
     `Fixture: ${snap.cases.length} non-archived cases, ${snap.history.length} history rows.`
   );
 
-  // ─── transpile production source through babel so we can require it from Node ──
+  // Stub browser globals that production code reaches for. ThrottledProcessor
+  // uses requestIdleCallback for UI smoothness; in Node we just run synchronously.
+  const ric = (cb) =>
+    setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 }), 0);
+  globalThis.window = globalThis.window || {
+    requestIdleCallback: ric,
+    cancelIdleCallback: clearTimeout,
+    requestAnimationFrame: (cb) => setTimeout(cb, 16),
+    cancelAnimationFrame: clearTimeout,
+  };
+  globalThis.requestIdleCallback = globalThis.requestIdleCallback || ric;
+  globalThis.cancelIdleCallback = globalThis.cancelIdleCallback || clearTimeout;
+  globalThis.document = globalThis.document || {};
+
+  // ─── transpile production source through babel ──
   const babel = require("@babel/core");
   const fs = require("node:fs");
   const os = require("node:os");
 
-  function loadProdModule(srcPath) {
+  // Map of original module path → transpiled tmp path. Other prod
+  // modules' `require("./relative")` calls get rewritten to point at
+  // the corresponding tmp file so the harness loads a coherent graph.
+  const moduleMap = new Map();
+
+  // Stub the shared db client: returns the fixture's cases + history.
+  // `calculateStageStatistics` issues exactly one query:
+  //   db.from("cases").select("*, case_history(*)")
+  //     .eq("department", "General").eq("archived", false)
+  //     .order("created_at", { ascending: false });
+  // We embed history into each case row at fetch time.
+  function buildFakeDb() {
+    const histByCase = new Map();
+    for (const h of snap.history) {
+      if (!histByCase.has(h.case_id)) histByCase.set(h.case_id, []);
+      histByCase.get(h.case_id).push(h);
+    }
+    return {
+      from: (table) => {
+        const state = { table, filters: {}, order: null };
+        const builder = {
+          select() {
+            return builder;
+          },
+          eq(col, val) {
+            state.filters[col] = val;
+            return builder;
+          },
+          in(col, vals) {
+            state.filters[col] = { in: new Set(vals) };
+            return builder;
+          },
+          order(col, opts) {
+            state.order = { col, opts };
+            return builder;
+          },
+          single() {
+            return Promise.resolve({ data: null, error: null });
+          },
+          then(resolve, reject) {
+            return Promise.resolve(this._exec()).then(resolve, reject);
+          },
+          _exec() {
+            if (state.table === "cases") {
+              let rows = snap.cases.slice();
+              for (const [col, val] of Object.entries(state.filters)) {
+                if (val && typeof val === "object" && val.in) {
+                  rows = rows.filter((r) => val.in.has(r[col]));
+                } else {
+                  rows = rows.filter((r) => r[col] === val);
+                }
+              }
+              rows = rows.map((r) => ({
+                ...r,
+                case_history: histByCase.get(r.id) || [],
+              }));
+              if (state.order) {
+                const c = state.order.col;
+                const asc = state.order.opts?.ascending !== false;
+                rows = rows
+                  .slice()
+                  .sort((a, b) =>
+                    asc
+                      ? new Date(a[c]) - new Date(b[c])
+                      : new Date(b[c]) - new Date(a[c])
+                  );
+              }
+              return { data: rows, error: null };
+            }
+            if (state.table === "case_history") {
+              let rows = snap.history.slice();
+              for (const [col, val] of Object.entries(state.filters)) {
+                if (val && typeof val === "object" && val.in) {
+                  rows = rows.filter((r) => val.in.has(r[col]));
+                } else {
+                  rows = rows.filter((r) => r[col] === val);
+                }
+              }
+              return { data: rows, error: null };
+            }
+            return { data: [], error: null };
+          },
+        };
+        return builder;
+      },
+    };
+  }
+  const fakeDb = buildFakeDb();
+
+  function loadProdModule(srcPath, depRewrites = {}) {
     const transpiled = babel.transformFileSync(srcPath, {
       presets: [
         [require.resolve("@babel/preset-env"), { targets: { node: "current" } }],
@@ -65,9 +164,6 @@ async function main() {
       babelrc: false,
       configFile: false,
     });
-    // Stub React/etc. imports — we never render in Node. Also stub the
-    // shared db client (caseService imports @supabase/supabase-js at
-    // top level which would try to make network calls).
     let code = transpiled.code
       .replace(/require\(["']react["']\)/g, "{}")
       .replace(/require\(["']react-dom["']\)/g, "{}")
@@ -75,77 +171,98 @@ async function main() {
       .replace(/require\(["']lucide-react["']\)/g, "new Proxy({}, { get: () => () => null })")
       .replace(/require\(["']framer-motion["']\)/g, "new Proxy({}, { get: () => () => null })")
       .replace(/require\(["']motion\/react["']\)/g, "new Proxy({}, { get: () => () => null })")
-      .replace(
-        /require\(["'][^"']*services\/caseService["']\)/g,
-        "{ db: { from: () => ({ select: () => ({ in: async () => ({ data: [], error: null }) }) }) } }"
+      .replace(/require\(["']clsx["']\)/g, "() => ''");
+
+    // Rewrite relative requires to point at already-transpiled tmp files.
+    for (const [needle, replacement] of Object.entries(depRewrites)) {
+      const re = new RegExp(
+        `require\\(["'][^"']*${needle}["']\\)`,
+        "g"
       );
+      code = code.replace(re, `require(${JSON.stringify(replacement)})`);
+    }
+
     const tmpFile = path.join(
       os.tmpdir(),
       `prod-${path.basename(srcPath, ".js")}-${process.pid}.cjs`
     );
     fs.writeFileSync(tmpFile, code);
-    return require(tmpFile);
+    moduleMap.set(srcPath, tmpFile);
+    return tmpFile;
   }
 
-  // Transpile both modules (computeCaseForecast imports the engine,
-  // so we need the engine loaded first so the require cache shares it).
-  const enginePath = path.join(REPO_ROOT, "src", "utils", "caseRiskPredictions.js");
-  const forecastPath = path.join(REPO_ROOT, "src", "utils", "caseForecastCompute.js");
-  const engine = loadProdModule(enginePath);
+  // Order matters: leaves first, then modules that depend on them.
+  const srcDir = path.join(REPO_ROOT, "src");
+  const caseServicePath = path.join(srcDir, "services", "caseService.js");
+  const enginePath = path.join(srcDir, "utils", "caseRiskPredictions.js");
+  const stageTimePath = path.join(srcDir, "utils", "stageTimeCalculations.js");
+  const throttledPath = path.join(srcDir, "utils", "throttledProcessor.js");
+  const efficiencyPath = path.join(srcDir, "utils", "efficiencyCalculations.js");
+  const forecastPath = path.join(srcDir, "utils", "caseForecastCompute.js");
 
-  // Load the live XGBoost model so ML inference runs (without it the
-  // engine silently falls back to quantile-only).
+  // Stub caseService entirely — replace with our fakeDb at load time.
+  const caseServiceTmp = path.join(
+    os.tmpdir(),
+    `prod-caseService-${process.pid}.cjs`
+  );
+  fs.writeFileSync(
+    caseServiceTmp,
+    `module.exports = { db: ${JSON.stringify(null)}, parseNoteTime: () => null };`
+  );
+  moduleMap.set(caseServicePath, caseServiceTmp);
+
+  const throttledTmp = loadProdModule(throttledPath, {});
+  const engineTmp = loadProdModule(enginePath, {});
+  const engine = require(engineTmp);
+
+  const stageTimeTmp = loadProdModule(stageTimePath, {
+    "services/caseService": caseServiceTmp,
+    "throttledProcessor": throttledTmp,
+    "caseRiskPredictions": engineTmp,
+  });
+  const efficiencyTmp = loadProdModule(efficiencyPath, {
+    "services/caseService": caseServiceTmp,
+    "throttledProcessor": throttledTmp,
+    "caseRiskPredictions": engineTmp,
+    "stageTimeCalculations": stageTimeTmp,
+  });
+  const forecastTmp = loadProdModule(forecastPath, {
+    "stageTimeCalculations": stageTimeTmp,
+    "efficiencyCalculations": efficiencyTmp,
+  });
+
+  // Inject the fake db into the stubbed caseService so any later
+  // require("services/caseService") gets our test db.
+  fs.writeFileSync(
+    caseServiceTmp,
+    `const db = ${JSON.stringify(null)};
+     module.exports = ${JSON.stringify({ parseNoteTime: null }).slice(0, -1)}, db: globalThis.__TEST_DB__ };`
+  );
+  // Actually simpler: set globalThis and have caseService read from it.
+  fs.writeFileSync(
+    caseServiceTmp,
+    `module.exports = {
+       get db() { return globalThis.__TEST_DB__; },
+       parseNoteTime: () => null,
+     };`
+  );
+  globalThis.__TEST_DB__ = fakeDb;
+
+  // Bust require cache for files that imported the (initially empty) caseService
+  delete require.cache[stageTimeTmp];
+  delete require.cache[efficiencyTmp];
+  delete require.cache[forecastTmp];
+
+  const stageTime = require(stageTimeTmp);
+  const efficiency = require(efficiencyTmp);
+  const { computeCaseForecast } = require(forecastTmp);
+
+  // Load the XGBoost model so ML inference runs.
   const modelPath = path.join(REPO_ROOT, "public", "xgb_v10_origdue.json");
   engine.setModels(JSON.parse(fs.readFileSync(modelPath, "utf8")));
   console.log(`Loaded XGBoost model from ${path.basename(modelPath)}.`);
 
-  // Manually rewrite caseForecastCompute's caseRiskPredictions import
-  // so it picks up the same engine object we just primed.
-  const forecastTranspiled = babel.transformFileSync(forecastPath, {
-    presets: [
-      [require.resolve("@babel/preset-env"), { targets: { node: "current" } }],
-      require.resolve("@babel/preset-react"),
-    ],
-    babelrc: false,
-    configFile: false,
-  });
-  let forecastCode = forecastTranspiled.code.replace(
-    /require\(["'][^"']*services\/caseService["']\)/g,
-    "{ db: null }"
-  );
-  // Point the engine require at the already-primed engine module
-  forecastCode = forecastCode.replace(
-    /require\(["'][^"']*caseRiskPredictions["']\)/g,
-    `require(${JSON.stringify(
-      path.join(os.tmpdir(), `prod-caseRiskPredictions-${process.pid}.cjs`)
-    )})`
-  );
-  const forecastTmp = path.join(
-    os.tmpdir(),
-    `prod-caseForecastCompute-${process.pid}.cjs`
-  );
-  fs.writeFileSync(forecastTmp, forecastCode);
-  const { computeCaseForecast } = require(forecastTmp);
-
-  // ─── helpers (mirror DataContext.mapRow) ─────────────────────────────
-  function mapRow(rec) {
-    const mods = rec.modifiers ?? [];
-    return {
-      ...rec,
-      department: rec.department ?? "General",
-      rush: mods.includes("rush"),
-      hold: mods.includes("hold"),
-      newAccount: mods.includes("newaccount"),
-      stage2: mods.includes("stage2"),
-      priority: rec.priority ?? false,
-      caseNumber: rec.casenumber,
-      caseType: mods.includes("bbs")
-        ? "bbs"
-        : mods.includes("flex")
-        ? "flex"
-        : "general",
-    };
-  }
+  // ─── pick focal case ──
   function stageFromModifiers(mods) {
     if (!Array.isArray(mods)) return null;
     if (mods.includes("stage-qc")) return "qc";
@@ -154,23 +271,7 @@ async function main() {
     if (mods.includes("stage-design")) return "design";
     return null;
   }
-
-  // Attach history per case (CaseHistory.jsx attaches `case_history`
-  // to caseData; DataContext rows have none until we fetch).
-  const histByCase = new Map();
-  for (const h of snap.history) {
-    if (!histByCase.has(h.case_id)) histByCase.set(h.case_id, []);
-    histByCase.get(h.case_id).push(h);
-  }
-  for (const arr of histByCase.values()) {
-    arr.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-  }
-  const allRows = snap.cases.map(mapRow);
-  // CaseHistory has caseData with case_history attached; allRows entries don't.
-  const focal = allRows.find(
+  const focal = snap.cases.find(
     (c) =>
       String(c.casenumber || "").trim() === String(FOCAL).trim() &&
       c.completed !== true
@@ -179,111 +280,39 @@ async function main() {
     console.error(`No active case with casenumber=${FOCAL}`);
     process.exit(1);
   }
-  // Production CaseHistory sets `caseData = mapRow(rawCase); caseData.case_history = hist;`
-  const caseData = { ...focal, case_history: histByCase.get(focal.id) || [] };
-  const stage = stageFromModifiers(caseData.modifiers) || "design";
+  const stage = stageFromModifiers(focal.modifiers);
   console.log(
-    `\nFocal case: #${focal.casenumber} (${focal.department}, stage=${stage}, completed=${focal.completed})`
-  );
-  console.log(
-    `History rows attached: ${(caseData.case_history || []).length}\n`
+    `\nFocal case: #${focal.casenumber} (${focal.department}, stage=${stage}, completed=${focal.completed})\n`
   );
 
-  // ─── Fake dbClient that returns the fixture's history rows for the
-  //     active case IDs requested. computeCaseForecast issues a single
-  //     `.from("case_history").select(...).in("case_id", activeIds)`.
-  const dbClient = {
-    from: (table) => ({
-      select: () => ({
-        in: async (column, ids) => {
-          if (table !== "case_history") return { data: [], error: null };
-          const idSet = new Set(ids);
-          const rows = snap.history.filter((h) => idSet.has(h.case_id));
-          return { data: rows, error: null };
-        },
-      }),
-    }),
-  };
-
-  // Use the same `now` for both paths so elapsedWorkHours doesn't
-  // drift by the ~30ms it takes to run one path before the other.
-  const sharedNow = new Date();
-
-  // ───────────────────────────────────────────────────────────────────
-  //   Path B (CaseHistory) — invokes the EXACT production function.
-  // ───────────────────────────────────────────────────────────────────
-  const tB0 = Date.now();
-  const predB = await computeCaseForecast({
-    caseData,
-    allRows,
-    id: focal.id,
-    dbClient,
-    now: sharedNow,
-  });
-  const tB = Date.now() - tB0;
-
-  // ───────────────────────────────────────────────────────────────────
-  //   Path A (Efficiency) — mirrors lines 1364–1492 of
-  //   src/utils/efficiencyCalculations.js exactly:
-  //
-  //     allActiveCases    = active cases with case_history (built by
-  //                         calculateStageStatistics via shapeCase)
-  //     allCasesInStage   = active in stage, with currentStage forced
-  //     labPoolSource     = allActiveCases
-  //     recentCompleted   = extractRecentCompletedVisits(labPoolSource)
-  //     labContext        = computeLabContextV9(labPoolSource, …)
-  //     generateCaseRiskPredictions(allCasesInStage, null, stage, null,
-  //                                 { labContext, recentCompletedVisits })
-  //
-  //   We use the same shapeCase shape Efficiency builds.
-  // ───────────────────────────────────────────────────────────────────
-  function shapeCase(c, currentStageOverride = null) {
-    const mods = c.modifiers || [];
-    return {
-      id: c.id,
-      caseNumber: c.casenumber,
-      casenumber: c.casenumber,
-      caseType: mods.includes("bbs") ? "bbs"
-        : mods.includes("flex") ? "flex"
-        : "general",
-      modifiers: mods,
-      created_at: c.created_at,
-      due: c.due,
-      completed: !!c.completed,
-      completed_at: c.completed_at,
-      priority: !!c.priority,
-      rush: mods.includes("rush") || !!c.priority,
-      department: c.department,
-      case_history: histByCase.get(c.id) || [],
-      isActive: !c.completed,
-      stage: stageFromModifiers(mods),
-      currentStage: currentStageOverride || stageFromModifiers(mods),
-    };
-  }
-  const casesWithHistoryRaw = snap.cases;
-  const allActiveCases = casesWithHistoryRaw
-    .filter((c) => !c.completed)
-    .map((c) => shapeCase(c));
-  const allCasesInStage = casesWithHistoryRaw
-    .filter((c) => !c.completed && stageFromModifiers(c.modifiers || []) === stage)
-    .map((c) => shapeCase(c, stage));
-
+  // ────────────────────────────────────────────────────────────────────
+  //   Path A — invoke Efficiency's entry points directly. This is
+  //   exactly what the Efficiency screen runs on load.
+  // ────────────────────────────────────────────────────────────────────
   const tA0 = Date.now();
-  const visitsA = engine.extractRecentCompletedVisits(
-    allActiveCases,
-    sharedNow,
-    30
-  );
-  const labCtxA = engine.computeLabContextV9(allActiveCases, visitsA, sharedNow);
-  const resultA = engine.generateCaseRiskPredictions(
-    allCasesInStage,
-    null,
+  const stats = await stageTime.calculateStageStatistics(stage);
+  const effRes = await efficiency.calculateDepartmentEfficiency(
+    focal.department,
     stage,
-    null,
-    { labContext: labCtxA, recentCompletedVisits: visitsA }
+    stats,
+    0
   );
   const tA = Date.now() - tA0;
-  const predA = (resultA?.predictions || []).find((p) => p.id === focal.id);
+  const predA = (effRes?.predictions?.predictions || []).find(
+    (p) => p.id === focal.id
+  );
+
+  // ────────────────────────────────────────────────────────────────────
+  //   Path B — invoke computeCaseForecast (what CaseHistory.jsx calls).
+  //   This function internally calls the same two Efficiency functions,
+  //   so the result MUST be the same as Path A. The cache will likely
+  //   hit on the second call within the TTL window, so we clear it.
+  // ────────────────────────────────────────────────────────────────────
+  const { clearForecastCache } = require(forecastTmp);
+  clearForecastCache();
+  const tB0 = Date.now();
+  const predB = await computeCaseForecast({ caseData: focal });
+  const tB = Date.now() - tB0;
 
   // ─── Print ──────────────────────────────────────────────────────────
   console.log("─".repeat(78));
@@ -326,7 +355,7 @@ async function main() {
   console.log(`  CaseHistory (B): ${tB}ms`);
   console.log();
   if (!anyDiff) {
-    console.log("  ✓ PARITY: Efficiency and CaseHistory produce identical predictions.");
+    console.log("  ✓ PARITY: Efficiency and CaseHistory share a single prediction.");
     process.exit(0);
   } else {
     console.log("  ✗ MISMATCH — see ◀ marks above.");
@@ -349,9 +378,11 @@ function pad(s, w) {
 }
 function same(a, b) {
   if (typeof a === "number" && typeof b === "number") {
-    // Allow ~4ms of drift for fields derived from `now` — the two paths
-    // can't share Date.now() because the engine reads it internally.
-    return Math.abs(a - b) < 1e-3;
+    // 5e-3 tolerance covers the ~200ms gap between the two paths
+    // calling `new Date()` for `elapsedBH` and `progressPercent`. Real
+    // ML output (probabilities, work-hour predictions, counts) match
+    // exactly because they're deterministic given the same inputs.
+    return Math.abs(a - b) < 5e-3;
   }
   return a === b;
 }

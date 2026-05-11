@@ -1313,6 +1313,10 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
 
     let cancelled = false;
 
+    // Hand the heavy work off to background priority so the case modal
+    // entrance isn't delayed. scheduler.postTask is preferred on Chrome
+    // (genuinely lowest-priority task class); requestIdleCallback /
+    // setTimeout cover Safari and other older browsers.
     const yieldToBackground = () =>
       new Promise((resolve) => {
         if (cancelled) {
@@ -1345,17 +1349,16 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setForecastError(null);
       }
       try {
-        // Single source of truth for the compute logic — same function
-        // the parity harness runs against — so the in-modal pill, the
-        // detail modal opened from this strip, and the Efficiency screen
-        // all see the same prediction object.
-        const pred = await computeCaseForecast({
-          caseData,
-          allRows,
-          id,
-          dbClient: db,
-          yieldFn: yieldToBackground,
-        });
+        // Yield once so the modal paints before the heavy compute runs.
+        await yieldToBackground();
+        if (cancelled) return;
+
+        // Single source of truth: this function internally calls the
+        // same calculateStageStatistics + calculateDepartmentEfficiency
+        // that the Efficiency screen runs, and pulls the focal case's
+        // prediction out of the result. The strip and the Efficiency
+        // screen show the SAME prediction object by construction.
+        const pred = await computeCaseForecast({ caseData });
         if (cancelled) return;
 
         if (!pred) {

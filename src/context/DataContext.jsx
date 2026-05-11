@@ -26,6 +26,7 @@ import { userService } from "../services/userService";
 import { buildWorkflowMap } from "../utils/workflowDetection";
 import { initFrontOfficeSync } from "../utils/frontOfficeStaff";
 import { deepRefresh } from "../utils/deepRefresh";
+import { clearForecastCache } from "../utils/caseForecastCompute";
 
 /* ────── flag "update" rows ────── */
 function flagUpdatePending(record) {
@@ -291,7 +292,13 @@ export function DataProvider({ activeDept, children }) {
       .on(
         "postgres_changes",
         { schema: "public", table: "cases", event: "*" },
-        (ev) =>
+        (ev) => {
+          // Bust the shared forecast cache on every cases-table change.
+          // The case-modal forecast strip and the Efficiency screen both
+          // read from the same cache so they stay in sync; without this
+          // invalidation a stage move could leave both surfaces showing
+          // a stale prediction until the TTL expires.
+          clearForecastCache();
           setRows((cur) => {
             if (ev.new?.archived) return cur;
 
@@ -318,7 +325,8 @@ export function DataProvider({ activeDept, children }) {
             const next = [...cur];
             next[i] = row;
             return next;
-          })
+          });
+        }
       )
       .subscribe();
     return () => db.removeChannel(ch);

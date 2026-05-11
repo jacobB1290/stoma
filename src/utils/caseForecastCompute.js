@@ -1,41 +1,22 @@
 /**
  * caseForecastCompute.js
  *
- * Shared compute used by:
- *   - the in-modal "Risk Forecast" strip in CaseHistory.jsx (production)
- *   - scripts/test-forecast-diff.mjs (parity harness against Efficiency)
+ * Single source of truth for the case-modal "Risk Forecast".
  *
- * The function takes the same data CaseHistory has on hand (a focal
- * case row with its case_history attached, plus the full active-case
- * pool from DataContext) and runs the production risk-prediction
- * engine the way the Efficiency screen does. The forecast strip and
- * the Efficiency screen produce identical predictions because they
- * call the same engine with the same shapes of inputs.
+ * Rather than reimplement the prediction pipeline, this function just
+ * calls the EXACT functions the Efficiency screen calls and pulls the
+ * focal case's prediction out of the result. The case-modal pill and
+ * the Efficiency screen are guaranteed to show the same numbers
+ * because they go through the same code paths — same DB query, same
+ * stage-statistics builder, same lab-context derivation, same engine
+ * call. There is no parallel implementation to drift.
  *
- * The compute matches Efficiency's pipeline byte-for-byte:
- *   - fetch case_history for every active case in the pool
- *   - enrich every pool row (including the focal) with stage fields
- *     (currentStage / current_stage / stage) derived from modifiers
- *     and with case_history attached. The engine reads two different
- *     stage-field patterns in two different spots; setting all three
- *     covers both.
- *   - feed the *full* active pool (all stages) to extractRecent-
- *     CompletedVisits and computeLabContextV9 — this is what
- *     Efficiency's `labPoolSource` is. Completed cases are NOT in
- *     the pool; visits come from active cases' past stage transitions.
- *   - filter to the same-stage subset for `peerPool` — this is what
- *     Efficiency passes as `activeCases` to the engine, so timesSeen
- *     / sameDayCases / batchSiblings (which the ML model reads) all
- *     scan the identical pool.
- *   - call the engine with [enrichedFocal] as activeCases so it runs
- *     exactly one per-case loop iteration (single ML inference).
+ * Used by:
+ *   - src/components/CaseHistory.jsx (the in-modal forecast strip)
+ *   - scripts/test-forecast-diff.mjs (regression harness)
  */
-import { db as defaultDb } from "../services/caseService";
-import {
-  generateCaseRiskPredictions,
-  extractRecentCompletedVisits,
-  computeLabContextV9,
-} from "./caseRiskPredictions";
+import { calculateStageStatistics } from "./stageTimeCalculations";
+import { calculateDepartmentEfficiency } from "./efficiencyCalculations";
 
 export function stageFromModifiers(mods) {
   if (!Array.isArray(mods)) return null;
@@ -46,115 +27,83 @@ export function stageFromModifiers(mods) {
   return null;
 }
 
-function enrichRow(rowFromContext, caseHistory) {
-  const s = stageFromModifiers(rowFromContext.modifiers);
-  const base = { ...rowFromContext, case_history: caseHistory || [] };
-  return s
-    ? { ...base, currentStage: s, current_stage: s, stage: s }
-    : base;
+// Module-level cache so consecutive case-modal opens for the same
+// stage don't re-fetch ~900 cases + their history every time. The
+// Efficiency screen also re-runs from scratch on each open today; we
+// piggyback on the same cache when both surfaces ask for the same
+// stage within the TTL.
+const CACHE_TTL_MS = 60 * 1000;
+const cache = new Map(); // key=stage → {at, statsPromise, efficiencyPromise}
+
+function cacheKey(department, stage) {
+  return `${department || "General"}|${stage}`;
+}
+
+function getCached(department, stage) {
+  const key = cacheKey(department, stage);
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function storeCached(department, stage, payload) {
+  cache.set(cacheKey(department, stage), { at: Date.now(), ...payload });
+}
+
+/**
+ * Manually invalidate the cache. Called from DataContext when a
+ * cases-table row changes via realtime so stale predictions never
+ * outlive a real edit.
+ */
+export function clearForecastCache() {
+  cache.clear();
 }
 
 /**
  * @param {object} args
- * @param {object} args.caseData    Focal case row (with case_history attached).
- * @param {array}  args.allRows     The full cases array from DataContext.
- * @param {string} args.id          Focal case id (allRows[i].id === id is the focal).
- * @param {object} [args.dbClient]  Supabase client. Defaults to the app's shared client.
- * @param {Date}   [args.now]       Reference time. Defaults to `new Date()`.
- * @param {function} [args.yieldFn] Optional `() => Promise<void>` called between
- *                                  preparation steps so the caller can yield to
- *                                  scheduler.postTask / requestIdleCallback.
- * @returns {Promise<object|null>}  The prediction object the engine produces for
- *                                  this case, or null if forecast unavailable.
+ * @param {object} args.caseData    Focal case row. Must have department
+ *                                  and stage-* modifier set.
+ * @returns {Promise<object|null>}  The same prediction object the
+ *                                  Efficiency screen would show for
+ *                                  this case, or null if the engine
+ *                                  has no prediction for it.
  */
-export async function computeCaseForecast({
-  caseData,
-  allRows,
-  id,
-  dbClient = defaultDb,
-  now = new Date(),
-  yieldFn = null,
-}) {
+export async function computeCaseForecast({ caseData }) {
   if (!caseData) return null;
-  const stage = stageFromModifiers(caseData.modifiers) || "design";
-  const maybeYield = async () => {
-    if (typeof yieldFn === "function") await yieldFn();
-  };
+  const stage = stageFromModifiers(caseData.modifiers);
+  if (!stage) return null;
+  const department = caseData.department || "General";
 
-  // Fetch case_history for every active case. Efficiency's pipeline
-  // fetches this up front; without it, extractRecentCompletedVisits
-  // sees only the focal case's transitions and the stage-timing
-  // features come out wrong.
-  const activeIds = (allRows || [])
-    .filter((r) => r.completed !== true)
-    .map((r) => r.id);
-
-  let activeHistRows = [];
-  if (activeIds.length > 0) {
-    const { data, error } = await dbClient
-      .from("case_history")
-      .select("id, case_id, action, user_name, created_at")
-      .in("case_id", activeIds);
-    if (error) throw error;
-    activeHistRows = data || [];
-  }
-
-  const histByCaseId = new Map();
-  for (const h of activeHistRows) {
-    if (!histByCaseId.has(h.case_id)) histByCaseId.set(h.case_id, []);
-    histByCaseId.get(h.case_id).push(h);
-  }
-  for (const arr of histByCaseId.values()) {
-    arr.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-  }
-
-  await maybeYield();
-
-  // Full active pool, enriched. The focal case is replaced with its
-  // history-enriched copy (already attached in caseData).
-  //
-  // Filter note: cases table has a `completed` BOOLEAN column — not
-  // `completed_at` (no such column).
-  const fullActivePool = (allRows || [])
-    .filter(
-      (r) => r.completed !== true && !r.modifiers?.includes("excluded")
-    )
-    .map((c) => {
-      const history =
-        c.id === id
-          ? caseData.case_history || []
-          : histByCaseId.get(c.id) || [];
-      const source = c.id === id ? caseData : c;
-      return enrichRow(source, history);
+  // Hit the cache first — within the TTL, return the same predictions
+  // object Efficiency just computed (or another in-flight call to this
+  // function for the same stage).
+  let entry = getCached(department, stage);
+  if (!entry) {
+    const statsPromise = calculateStageStatistics(stage);
+    const efficiencyPromise = statsPromise.then((stats) => {
+      if (!stats || stats.noData) return null;
+      return calculateDepartmentEfficiency(department, stage, stats, 0);
     });
+    storeCached(department, stage, { statsPromise, efficiencyPromise });
+    entry = getCached(department, stage);
+  }
 
-  // Same-stage subset for peerPool — matches Efficiency's `allCasesInStage`.
-  const peerPool = fullActivePool.filter(
-    (c) => stageFromModifiers(c.modifiers) === stage
+  const efficiency = await entry.efficiencyPromise;
+  if (!efficiency || efficiency.noData) return null;
+
+  // efficiency.predictions is the full result object returned by
+  // generateCaseRiskPredictions — { atRisk, predictions: [...], ... }.
+  const predictions = efficiency.predictions?.predictions || [];
+  return (
+    predictions.find(
+      (p) =>
+        p.id === caseData.id ||
+        p.caseNumber === caseData.casenumber ||
+        p.caseNumber === caseData.caseNumber
+    ) || null
   );
-
-  await maybeYield();
-
-  const visits = extractRecentCompletedVisits(fullActivePool, now, 30);
-  await maybeYield();
-  const labContext = computeLabContextV9(fullActivePool, visits, now);
-  await maybeYield();
-
-  // CRITICAL: pass the *enriched* focal — same stage fields the rest of
-  // the pool has — so labContext-driven features and any focal-row
-  // stage check sees a consistent stage assignment. Passing raw caseData
-  // here was the last remaining source of drift versus Efficiency.
-  const enrichedFocal = enrichRow(caseData, caseData.case_history || []);
-
-  const result = generateCaseRiskPredictions(
-    [enrichedFocal],
-    null,
-    stage,
-    null,
-    { peerPool, labContext, recentCompletedVisits: visits }
-  );
-  return result?.predictions?.[0] || null;
 }
