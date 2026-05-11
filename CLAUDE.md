@@ -370,16 +370,16 @@ Write release notes as if explaining changes to someone who has never used softw
 
 Words to AVOID entirely: modal, dialog, window (as UI jargon), page lag/freeze (use "the page felt slow"), API, sync, cache, render, state, component, prop, deploy, build, schema, query, cross-device, per-user, per-device (say "on your computer" / "for your account" / "follows you when you sign in elsewhere"). Don't name internal screens by their developer names ("Risk Modal", "Efficiency Screen", "Case Modal", "Forecast Strip") — describe what the user sees and does instead ("when you open a case", "the page that shows efficiency numbers", "the small tag at the top of each case").
 
-Keep it short. A few one-line sentences, one per change. No headers, no bullets, no bold, no emojis, no markdown of any kind — just plain lines separated by line breaks.
+Keep it short. A few one-line sentences, one per change, written as a simple bulleted list. No headers, no bold, no emojis, no other markdown — just the bullet markers (`-`).
 
 Creating custom release notes:
 
 1. During PR development, create or overwrite a file called `RELEASE_NOTES_ENTRY.md` at the repo root. Use this exact style:
 ```
-The case details and the Efficiency page used to sometimes show different predictions for the same case. Now they always agree.
-Opening a case used to make the page feel slow for a second. It opens instantly now.
-Each case now shows a quick on track or at risk tag near the top.
-Turning on Performance Mode now only affects the computer you turn it on with.
+- The case details and the Efficiency page used to sometimes show different predictions for the same case. Now they always agree.
+- Opening a case used to make the page feel slow for a second. It opens instantly now.
+- Each case now shows a quick on track or at risk tag near the top.
+- Turning on Performance Mode now only affects the computer you turn it on with.
 ```
 
 2. The `scripts/generate-changelog.mjs` script will automatically detect this file during build
@@ -389,11 +389,12 @@ Turning on Performance Mode now only affects the computer you turn it on with.
 Rules:
 
 - Always create `RELEASE_NOTES_ENTRY.md` for every PR — required, not optional.
-- One line per change. Start with what the user will notice, not the technical name of what changed.
+- Format the file as a simple bulleted list — every line starts with `- ` and a single sentence. Use `-` (not `*`).
+- Start each bullet with what the user will notice, not the technical name of what changed.
 - Past-tense for fixes ("used to do X, now does Y"); present-tense for new behavior ("Each case now shows…"). Either way, plain English.
-- No markdown syntax (no `#`, `*`, `-`, `**`, no emojis, no horizontal rules, no code blocks). Plain lines only.
+- No other markdown syntax (no `#`, no `**`, no emojis, no horizontal rules, no code blocks, no nested bullets). Plain bullets only.
 - No tech jargon. Re-read each line and ask: would my grandmother understand this? If not, rewrite.
-- Keep the whole file to a handful of lines. If you wrote more than ~6 lines, trim.
+- Keep the whole file to a handful of bullets. If you wrote more than ~6, trim.
 - Skip internal-only refactors, test harnesses, build scaffolding — anything the user can't see or feel.
 - This file is committed as part of your PR (it stays in git history).
 
