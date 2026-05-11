@@ -366,44 +366,33 @@ The GitHub Action reads the **squash commit subject** (= PR title) to decide the
 
 #### Release Notes Entry
 
-Instead of relying solely on git commit messages for the changelog, you can provide **user-friendly release notes** that will be displayed to users in the app's update notifier.
+Instead of relying solely on git commit messages for the changelog, you can provide user-friendly release notes that will be displayed to users in the app's update notifier.
 
-**Creating custom release notes:**
+Keep the notes very short and very plain. A few one-line sentences, one per change, written for non-technical users. No headers, no bullets, no bold, no emojis, no section dividers — just plain lines.
 
-1. During PR development, create a file called `RELEASE_NOTES_ENTRY.md` at the repo root:
-```markdown
-# Release Notes: Feature Name
+Creating custom release notes:
 
-## What's New ✨
-- User-visible feature or improvement
-
-## What Got Fixed 🐛
-- Bug fixes and resolved issues
-
-## For Users 👤
-- How users should use this feature
-
-## For Admins 👨‍💼
-- Admin-specific information (if applicable)
-
-## For Developers 👨‍💻
-- Technical details (if applicable)
+1. During PR development, create or overwrite a file called `RELEASE_NOTES_ENTRY.md` at the repo root. Use this exact style:
+```
+Fixed a bug where the case modal showed a different forecast than the Efficiency screen.
+Fixed a bug where opening the case history modal could briefly freeze the page.
+Added a small Risk Forecast strip inside the case modal.
+The Performance toggle in Settings is now saved per device instead of per user.
 ```
 
 2. The `scripts/generate-changelog.mjs` script will automatically detect this file during build
 3. If `RELEASE_NOTES_ENTRY.md` exists, its content takes precedence over git commit history in the changelog
 4. If it doesn't exist, the script falls back to showing git commits (as before)
 
-**Rules:**
+Rules:
 
-- **Always create `RELEASE_NOTES_ENTRY.md`** for every PR — this is required, not optional. Users see these notes in the update notifier, so every release should have clear, human-readable notes ready at merge time.
-- Use **markdown formatting** for readability (headers, lists, bold/italic)
-- Include **sections relevant to your work** — delete sections that don't apply
-- Use **emojis** sparingly but for visual scanning
-- Keep it **concise** — users scan changelogs quickly
-- This file is **committed** as part of your PR (it stays in git history)
-- If the file is missing, the build falls back to git commits — but this produces poor-quality notes, so always include it
+- Always create `RELEASE_NOTES_ENTRY.md` for every PR — required, not optional.
+- One line per change. Start each with a verb the user understands: "Fixed a bug…", "Added…", "Changed…", "Improved…".
+- No markdown syntax (no `#`, `*`, `-`, `**`, no emojis, no horizontal rules). Plain lines only.
+- Keep the whole file to a handful of lines. If you wrote more than ~6 lines, trim.
+- Write for users, not developers. Skip internal-only refactors and scaffolding.
+- This file is committed as part of your PR (it stays in git history).
 
-**Why this matters:**
+Why this matters:
 
-Git commit subjects are often abbreviated and technical. This lets developers write user-friendly, well-formatted release notes that make sense to both technical and non-technical users.
+Git commit subjects are often abbreviated and technical. Plain user-facing one-liners are what the update notifier shows; keep them readable to a non-technical reader scanning at a glance.
