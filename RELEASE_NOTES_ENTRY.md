@@ -1,1 +1,2 @@
-- Times on the case history page now match the rest of the app.
+- The app is safer when it loads from the internet.
+- The case prediction data now stays saved on your computer instead of being downloaded again every time you open the app, so the app starts up faster.
