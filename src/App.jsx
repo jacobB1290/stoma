@@ -5,6 +5,8 @@ import React, {
   useCallback,
   useLayoutEffect,
   useContext,
+  lazy,
+  Suspense,
 } from "react";
 import { createPortal } from "react-dom";
 import { DataProvider, useMut } from "./context/DataContext";
@@ -13,6 +15,7 @@ import { FlashProvider } from "./FlashContext";
 import clsx from "clsx";
 import UserSetupModal from "./components/UserSetupModal";
 import Board from "./components/Board";
+import ErrorBoundary from "./components/ErrorBoundary";
 import "./theme-white.css";
 import "./theme-dark.css";
 import "./theme-pink.css";
@@ -20,11 +23,20 @@ import "./styles/glass.css";
 import "./flash.css";
 import { LiteModeProvider } from "./LiteModePerformancePatch";
 
-import Editor from "./components/Editor";
 import SettingsModal from "./components/SettingsModal";
-import SystemManagementScreen from "./components/SystemManagementScreen";
 import FrontOfficePill from "./components/FrontOfficeBubble";
 import { startVersionPolling } from "./services/versionCheckService";
+
+// Code-split heavy views — these bundles only download when the user opens
+// the corresponding tab, so the initial board view loads faster.
+const Editor = lazy(() => import("./components/Editor"));
+const SystemManagementScreen = lazy(() =>
+  import("./components/SystemManagementScreen")
+);
+
+const LazyViewFallback = () => (
+  <div className="p-8 text-center text-sm text-gray-500">Loading…</div>
+);
 
 /* =============================
    Shared pill styling helper
@@ -1381,9 +1393,21 @@ function Inner({
       {/* Main content */}
       {view === "manage" ? (
         facultySystemManagerEnabled && manageView === "system" ? (
-          <SystemManagementScreen />
+          <ErrorBoundary>
+            <Suspense fallback={<LazyViewFallback />}>
+              <SystemManagementScreen />
+            </Suspense>
+          </ErrorBoundary>
         ) : (
-          <Editor data={rows} deptDefault="Digital" showInfoBar={showInfoBar} />
+          <ErrorBoundary>
+            <Suspense fallback={<LazyViewFallback />}>
+              <Editor
+                data={rows}
+                deptDefault="Digital"
+                showInfoBar={showInfoBar}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )
       ) : (
         <Board

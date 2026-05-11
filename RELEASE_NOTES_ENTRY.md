@@ -1,1 +1,2 @@
-- The project has clearer setup and contribution docs for the team.
+- The app now opens faster the first time you start it, because the bigger screens for editing cases and management only load when you open them.
+- If something unexpected goes wrong in one of those bigger screens, you now see a friendly message with a Try again button instead of a blank page.
