@@ -1,2 +1,2 @@
-- The board feels snappier when cases update. Toggling rush, hold, or stage no longer makes the rest of the page feel slow.
-- The case list opens a touch faster the first time the page loads.
+- The app now starts up faster because it waits to download the prediction file until you actually need it.
+- Quieted down some background chatter the app was making while showing case risk, so the page feels a touch snappier.
