@@ -1,2 +1,1 @@
-- The pink and dark themes now color more parts of the app correctly. A few buttons, the user setup screen, and the case stats screen used to keep the same teal color in every theme. They now match the theme you picked.
-- The number showing how often the front office missed entering a case used to take a moment to update when you switched themes. It now changes the moment you switch.
+- The project has clearer setup and contribution docs for the team.
