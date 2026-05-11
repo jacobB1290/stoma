@@ -12,13 +12,11 @@ import { useMut } from "../context/DataContext";
 import { getWorkflowStatus } from "../utils/workflowDetection";
 import { formatHistoryAction } from "../utils/historyActionFormatter";
 import {
-  generateCaseRiskPredictions,
   CaseRiskAnalyticsModal,
   unifiedStatus as computePredictionStatus,
   RISK_STYLE,
-  extractRecentCompletedVisits,
-  computeLabContextV9,
 } from "../utils/caseRiskPredictions";
+import { computeCaseForecast } from "../utils/caseForecastCompute";
 import clsx from "clsx";
 
 /* ══════════════════════════════════════════════ */
@@ -1315,6 +1313,10 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
 
     let cancelled = false;
 
+    // Hand the heavy work off to background priority so the case modal
+    // entrance isn't delayed. scheduler.postTask is preferred on Chrome
+    // (genuinely lowest-priority task class); requestIdleCallback /
+    // setTimeout cover Safari and other older browsers.
     const yieldToBackground = () =>
       new Promise((resolve) => {
         if (cancelled) {
@@ -1340,17 +1342,6 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setTimeout(resolve, 100);
       });
 
-    // Match the stage-derivation pattern used elsewhere in the app
-    // (App.jsx, Board.jsx, MetaCol.jsx).
-    const stageFromModifiers = (mods) => {
-      if (!Array.isArray(mods)) return null;
-      if (mods.includes("stage-qc")) return "qc";
-      if (mods.includes("stage-finishing")) return "finishing";
-      if (mods.includes("stage-production")) return "production";
-      if (mods.includes("stage-design")) return "design";
-      return null;
-    };
-
     const compute = async () => {
       forecastFetchedRef.current = true;
       if (mountedRef.current) {
@@ -1358,70 +1349,21 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         setForecastError(null);
       }
       try {
+        // Yield once so the modal paints before the heavy compute runs.
         await yieldToBackground();
         if (cancelled) return;
 
-        // Build the peer pool from the active cases in DataContext, with
-        // each row enriched with stage fields the engine looks for. The
-        // engine reads two distinct field-name patterns in different
-        // spots — `currentStage || stage` (peer concurrent count) and
-        // `stage || current_stage` (lab-context per-stage load) — so we
-        // set all three.
-        //
-        // IMPORTANT: the cases table has a `completed` boolean column,
-        // not `completed_at` — filtering on `completed_at` lets every
-        // ever-completed case through (verified against Supabase: of 874
-        // non-archived rows, only 73 have completed=false). Using the
-        // wrong filter is what caused the "169 concurrent" reading.
-        const peerPool = allRows
-          .filter(
-            (r) =>
-              r.completed !== true &&
-              !r.modifiers?.includes("excluded")
-          )
-          .map((c) => {
-            if (c.id === id) return caseData; // history-enriched copy
-            const s = stageFromModifiers(c.modifiers);
-            return s
-              ? { ...c, currentStage: s, current_stage: s, stage: s }
-              : c;
-          });
-
-        await yieldToBackground();
+        // Single source of truth: this function internally calls the
+        // same calculateStageStatistics + calculateDepartmentEfficiency
+        // that the Efficiency screen runs, and pulls the focal case's
+        // prediction out of the result. The strip and the Efficiency
+        // screen show the SAME prediction object by construction.
+        const pred = await computeCaseForecast({ caseData });
         if (cancelled) return;
-
-        const stage =
-          stageFromModifiers(caseData.modifiers) || "design";
-
-        const now = new Date();
-        const visits = extractRecentCompletedVisits(peerPool, now, 30);
-
-        await yieldToBackground();
-        if (cancelled) return;
-
-        const labContext = computeLabContextV9(peerPool, visits, now);
-
-        await yieldToBackground();
-        if (cancelled) return;
-
-        // activeCases = [caseData] → engine runs one ML inference.
-        // peerPool = full pool → cross-case features computed correctly.
-        const result = generateCaseRiskPredictions(
-          [caseData],
-          null,
-          stage,
-          null,
-          {
-            peerPool,
-            labContext,
-            recentCompletedVisits: visits,
-          }
-        );
-        const pred = result?.predictions?.[0];
 
         if (!pred) {
           if (mountedRef.current) setForecastError("Forecast unavailable.");
-        } else if (mountedRef.current && !cancelled) {
+        } else if (mountedRef.current) {
           setForecastPrediction(pred);
         }
       } catch (err) {
