@@ -25,6 +25,8 @@ import SettingsModal from "./components/SettingsModal";
 import SystemManagementScreen from "./components/SystemManagementScreen";
 import FrontOfficePill from "./components/FrontOfficeBubble";
 import { startVersionPolling } from "./services/versionCheckService";
+import { ToastProvider } from "./context/ToastContext";
+import Toast from "./components/ui/Toast";
 
 /* =============================
    Shared pill styling helper
@@ -516,9 +518,12 @@ const Divider = () => <div className="border-t border-gray-200 my-1" />;
 
 export default function App() {
   return (
-    <UserProvider>
-      <AuthGate />
-    </UserProvider>
+    <ToastProvider>
+      <UserProvider>
+        <AuthGate />
+      </UserProvider>
+      <Toast />
+    </ToastProvider>
   );
 }
 

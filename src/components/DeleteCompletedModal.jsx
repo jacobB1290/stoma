@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { SPRING } from "../animationEngine";
 import { db, archiveCases } from "../services/caseService";
+import { useToast } from "../context/ToastContext";
 
 // Action Selection Dialog for Duplicates
 const DuplicateActionDialog = ({
@@ -163,6 +164,7 @@ export default function DeleteCompletedModal({
   onClose,
   onArchive,
 }) {
+  const toast = useToast();
   // Use provided dates or fall back to defaults
   const defaultDates = dates || getDefaultDates();
 
@@ -326,7 +328,7 @@ export default function DeleteCompletedModal({
           }
         } catch (err) {
           console.error("Error archiving duplicates:", err);
-          alert("Failed to archive duplicate cases");
+          toast.error("Failed to archive duplicate cases");
         }
       },
       onDelete: async () => {
@@ -349,7 +351,7 @@ export default function DeleteCompletedModal({
               onDelete("duplicates", null, duplicateStats.toProcess.length);
             } catch (err) {
               console.error("Error deleting duplicates:", err);
-              alert("Failed to delete duplicate cases");
+              toast.error("Failed to delete duplicate cases");
             }
           },
         });
