@@ -1,1 +1,1 @@
-- Behind the scenes, buttons and loading indicators across the app now have a shared style foundation, so future updates can keep them looking and behaving the same everywhere.
+- Behind-the-scenes work to help the app respond more consistently when you change settings.
