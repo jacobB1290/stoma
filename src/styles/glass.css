@@ -2,6 +2,38 @@
   --glass-bg: rgba(255, 255, 255, 0.3); /* card tint */
   --glass-bg-dark: rgba(255, 255, 255, 0.26); /* header tint you asked for */
   --glass-br: rgba(255, 255, 255, 0.45);
+
+  /* Default "blue" theme tokens — overridden by .theme-{white,pink,dark}.
+     These ensure components using semantic CSS variables work when no
+     theme class is applied (initial load / blue theme). */
+  --primary: #16525f;
+  --primary-hover: #1f6f7c;
+  --surface: #ffffff;
+  --surface-elevated: #f3f4f6;
+  --text: #0f172a;
+  --text-muted: #475569;
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.20);
+
+  /* Front-office pill / tooltip — blue/default theme */
+  --fo-pill-bg: rgba(255, 255, 255, 0.10);
+  --fo-pill-border: rgba(255, 255, 255, 0.20);
+  --fo-pill-text: rgba(255, 255, 255, 0.90);
+  --fo-tooltip-surface: #ffffff;
+  --fo-tooltip-border: rgba(0, 0, 0, 0.08);
+  --fo-tooltip-text-primary: #111827;
+  --fo-tooltip-text-muted: #6b7280;
+  --fo-tooltip-track: rgba(0, 0, 0, 0.06);
+  --fo-tooltip-divider: rgba(0, 0, 0, 0.06);
+  --fo-tooltip-shadow: 0 12px 40px rgba(0, 0, 0, 0.14),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  --fo-tooltip-row-bg: rgba(0, 0, 0, 0.03);
+  --fo-tooltip-row-bg-hover: rgba(0, 0, 0, 0.07);
+  --fo-tooltip-row-chip-bg: rgba(0, 0, 0, 0.05);
+  --fo-tooltip-ytd-bg: rgba(0, 0, 0, 0.02);
+  --fo-header-gradient: linear-gradient(135deg, #103e48 0%, #16525f 100%);
+  --fo-amber-pill-bg: rgba(245, 158, 11, 0.14);
+  --fo-red-pill-bg: rgba(220, 38, 38, 0.18);
 }
 
 /* with border */

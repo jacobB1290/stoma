@@ -294,7 +294,7 @@ export default function UserSetupModal() {
                   onKeyDown={handleKeyDown}
                   placeholder="Enter your name"
                   className="w-full rounded border p-2 outline-none pr-8 bg-transparent relative z-10
-                             focus:ring-2 focus:ring-[#16525F]/40 focus:border-[#16525F]"
+                             focus:ring-2 focus:ring-[var(--primary)]/40 focus:border-[var(--primary)]"
                   autoFocus
                   autoComplete="off"
                   spellCheck="false"
@@ -360,7 +360,7 @@ export default function UserSetupModal() {
               <button
                 onClick={handleProceed}
                 disabled={namesLoading && !name.trim()}
-                className="w-full rounded-lg py-2 bg-[#16525F] hover:bg-[#1F6F7C] disabled:opacity-50
+                className="w-full rounded-lg py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-50
                            text-white shadow transition-colors font-medium"
               >
                 {namesLoading ? "Loading…" : "Continue"}
@@ -402,7 +402,7 @@ export default function UserSetupModal() {
                 </button>
                 <button
                   onClick={handleConfirmNew}
-                  className="flex-1 rounded-lg py-2 bg-[#16525F] hover:bg-[#1F6F7C]
+                  className="flex-1 rounded-lg py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)]
                              text-white text-sm font-medium shadow transition-colors"
                 >
                   Yes, that's me
@@ -414,7 +414,7 @@ export default function UserSetupModal() {
           {/* ── Step: adding (brief spinner) ────────────────────────────── */}
           {step === "adding" && (
             <div className="flex flex-col items-center gap-3 py-4">
-              <div className="w-8 h-8 border-3 border-gray-200 border-t-[#16525F] rounded-full animate-spin" />
+              <div className="w-8 h-8 border-3 border-gray-200 border-t-[var(--primary)] rounded-full animate-spin" />
               <p className="text-sm text-gray-600">Setting you up…</p>
             </div>
           )}

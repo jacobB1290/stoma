@@ -49,36 +49,20 @@ export function isFrontOfficePillDisabled() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Theme helpers — mirrors getHeaderPillStyle / getHeaderPillTextColor in App.jsx
+// Theme-aware styling — all theme-dependent colors come from CSS variables
+// defined per theme in theme-*.css. Pill background, border and text color all
+// re-resolve automatically when `<html>` switches theme class, with no JS
+// observer needed.
 // ─────────────────────────────────────────────────────────────────────────────
-function getThemeKey() {
-  const cl = document.documentElement.classList;
-  if (cl.contains("theme-white")) return "white";
-  if (cl.contains("theme-pink"))  return "pink";
-  if (cl.contains("theme-dark"))  return "dark";
-  return "blue";
-}
 
-function getHeaderPillStyle(theme) {
-  if (theme === "white") return {
-    background: "rgba(22,82,95,0.08)",
-    border: "1px solid rgba(22,82,95,0.22)",
-  };
-  if (theme === "pink") return {
-    background: "rgba(157,75,108,0.09)",
-    border: "1px solid rgba(157,75,108,0.24)",
-  };
-  return {
-    background: "rgba(255,255,255,0.10)",
-    border: "1px solid rgba(255,255,255,0.20)",
-  };
-}
+// Pill background + border come from CSS variables (`--fo-pill-bg`,
+// `--fo-pill-border`) which each theme overrides in its own CSS file.
+const getHeaderPillStyle = () => ({
+  background: "var(--fo-pill-bg)",
+  border: "1px solid var(--fo-pill-border)",
+});
 
-function getHeaderPillTextColor(theme) {
-  if (theme === "white") return "#16525f";
-  if (theme === "pink")  return "#9d4b6c";
-  return "rgba(255,255,255,0.90)";
-}
+const getHeaderPillTextColor = () => "var(--fo-pill-text)";
 
 const PILL_H = "36px"; // matches App.jsx locked height
 
@@ -323,14 +307,6 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
   // Trend hover state
   const [trendHover, setTrendHover] = useState(null);
   const [pos, setPos] = useState({ top: 0, right: 16 });
-  const [theme, setTheme] = useState(getThemeKey);
-
-  // Track theme changes while tooltip is open
-  useEffect(() => {
-    const observer = new MutationObserver(() => setTheme(getThemeKey()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     if (!anchorRef.current) return;
@@ -341,24 +317,20 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
     });
   }, [anchorRef]);
 
-  const light = theme !== "dark";
+  // Tooltip color tokens — each theme defines its own values in CSS. Using
+  // var(...) here lets the tooltip recolor live when the theme changes without
+  // needing a MutationObserver on the html class list.
+  const surfaceBg = "var(--fo-tooltip-surface)";
+  const surfaceBorder = "var(--fo-tooltip-border)";
+  const textPrimary = "var(--fo-tooltip-text-primary)";
+  const textMuted = "var(--fo-tooltip-text-muted)";
+  const trackBg = "var(--fo-tooltip-track)";
+  const dividerColor = "var(--fo-tooltip-divider)";
 
-  // Tooltip surface — theme-aware
-  const surfaceBg = theme === "pink"  ? "#fdf8fa" :
-                    theme === "dark"  ? "#1a2e33"  :
-                    "#ffffff";
-  const surfaceBorder = light ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.10)";
-  const textPrimary = light ? "#111827" : "#f1f5f9";
-  const textMuted = light ? "#6b7280" : "#94a3b8";
-  const trackBg = light ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.08)";
-  const dividerColor = light ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.08)";
-
-  // Header band gradient — matches the theme accent
-  const headerGradient =
-    theme === "pink"  ? "linear-gradient(135deg, #6b2440 0%, #9d4b6c 100%)" :
-    theme === "white" ? "linear-gradient(135deg, #103E48 0%, #16525F 100%)" :
-    theme === "dark"  ? "linear-gradient(135deg, #0d2e35 0%, #1cc7b6 100%)" :
-                        "linear-gradient(135deg, #103E48 0%, #16525F 100%)"; // blue default
+  // Header band gradient — matches the theme accent. Source-of-truth is the
+  // per-theme `--fo-header-gradient` CSS variable so all four themes stay in
+  // sync with their accent colors without JS branching.
+  const headerGradient = "var(--fo-header-gradient)";
 
   const barColor =
     pct > 10 ? "rgba(220,38,38,0.85)" :
@@ -508,9 +480,7 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
       style={{
         top: pos.top,
         right: pos.right,
-        boxShadow: light
-          ? "0 12px 40px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)"
-          : "0 12px 40px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.25)",
+        boxShadow: "var(--fo-tooltip-shadow)",
         background: surfaceBg,
         border: `1px solid ${surfaceBorder}`,
         // While exiting, let the cursor pass through. Without this the
@@ -637,18 +607,18 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
                       onClick={() => onOpenCase(c)}
                       className="w-full flex items-center justify-between rounded-md px-2 py-1 cursor-pointer text-left"
                       style={{
-                        background: light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)",
+                        background: "var(--fo-tooltip-row-bg)",
                         border: "none",
                         transition: "background 0.15s",
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.10)"}
-                      onMouseLeave={(e) => e.currentTarget.style.background = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"}
+                      onMouseEnter={(e) => e.currentTarget.style.background = "var(--fo-tooltip-row-bg-hover)"}
+                      onMouseLeave={(e) => e.currentTarget.style.background = "var(--fo-tooltip-row-bg)"}
                     >
                       <div className="flex items-center gap-1.5">
                         <span className="text-[11px] font-medium" style={{ color: textPrimary }}>{c.caseNumber}</span>
                         <span className="text-[9px] px-1 py-0.5 rounded" style={{
                           color: textMuted,
-                          background: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)",
+                          background: "var(--fo-tooltip-row-chip-bg)",
                         }}>{displayDept}</span>
                       </div>
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: textMuted, flexShrink: 0, opacity: 0.5 }}>
@@ -695,19 +665,19 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
                               onClick={() => onOpenCase(c)}
                               className="w-full flex items-center justify-between rounded-md px-2 py-1 cursor-pointer text-left"
                               style={{
-                                background: light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)",
+                                background: "var(--fo-tooltip-row-bg)",
                                 border: "none",
                                 transition: "background 0.15s",
                                 opacity: 0.55,
                               }}
-                              onMouseEnter={(e) => { e.currentTarget.style.background = light ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.10)"; e.currentTarget.style.opacity = "0.85"; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.background = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.opacity = "0.55"; }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--fo-tooltip-row-bg-hover)"; e.currentTarget.style.opacity = "0.85"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--fo-tooltip-row-bg)"; e.currentTarget.style.opacity = "0.55"; }}
                             >
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[11px] font-medium" style={{ color: textPrimary }}>{c.caseNumber}</span>
                                 <span className="text-[9px] px-1 py-0.5 rounded" style={{
                                   color: textMuted,
-                                  background: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)",
+                                  background: "var(--fo-tooltip-row-chip-bg)",
                                 }}>{displayDept}</span>
                               </div>
                               <div className="flex items-center gap-1">
@@ -791,15 +761,15 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
                   {hPt && (
                     <>
                       {/* Vertical guide line */}
-                      <line x1={hPt.x} y1={TOP_PAD} x2={hPt.x} y2={H} stroke={textMuted} strokeWidth="0.5" opacity="0.4" strokeDasharray="2,2" />
+                      <line x1={hPt.x} y1={TOP_PAD} x2={hPt.x} y2={H} style={{ stroke: textMuted }} strokeWidth="0.5" opacity="0.4" strokeDasharray="2,2" />
                       {/* Dot */}
-                      <circle cx={hPt.x} cy={hPt.y} r="3" fill={lineColor} stroke={surfaceBg} strokeWidth="1.5" />
+                      <circle cx={hPt.x} cy={hPt.y} r="3" fill={lineColor} style={{ stroke: surfaceBg }} strokeWidth="1.5" />
                       {/* Label — day + pct */}
                       <text
                         x={hPt.x}
                         y={Math.max(hPt.y - 7, 9)}
                         textAnchor={hPt.x < W / 2 ? "start" : "end"}
-                        fill={textPrimary}
+                        style={{ fill: textPrimary }}
                         fontSize="8"
                         fontWeight="600"
                       >
@@ -808,8 +778,8 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
                     </>
                   )}
                   {/* X-axis labels */}
-                  <text x={PAD} y={H + 10} fill={textMuted} fontSize="7" opacity="0.6">1</text>
-                  <text x={W - PAD} y={H + 10} textAnchor="end" fill={textMuted} fontSize="7" opacity="0.6">{trend[trend.length - 1].day}</text>
+                  <text x={PAD} y={H + 10} style={{ fill: textMuted }} fontSize="7" opacity="0.6">1</text>
+                  <text x={W - PAD} y={H + 10} textAnchor="end" style={{ fill: textMuted }} fontSize="7" opacity="0.6">{trend[trend.length - 1].day}</text>
                 </svg>
               );
             })()}
@@ -820,7 +790,7 @@ function PillTooltip({ stats, anchorRef, isOpen = true, onMouseEnter, onMouseLea
         <div style={{
           borderTop: `1px solid ${dividerColor}`,
           paddingTop: "0.5rem",
-          background: light ? "rgba(0,0,0,0.02)" : "rgba(255,255,255,0.03)",
+          background: "var(--fo-tooltip-ytd-bg)",
           margin: "0 -1rem",
           padding: "0.5rem 1rem 0",
         }}>
@@ -861,17 +831,13 @@ export default function FrontOfficePill() {
   const { stats, loading } = useFrontOfficeStats();
   const [hovered, setHovered] = useState(false);
   const [disabled, setDisabled] = useState(() => isFrontOfficePillDisabled());
-  const [theme, setTheme] = useState(getThemeKey);
   const pillRef = useRef(null);
   const hoverTimerRef = useRef(null);
   const [historyCase, setHistoryCase] = useState(null); // { id, caseNumber }
 
-  // React to theme changes
-  useEffect(() => {
-    const observer = new MutationObserver(() => setTheme(getThemeKey()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
+  // All theme-dependent colors now come from CSS variables (declared per
+  // theme in the *.css files), so the pill and tooltip recolor automatically
+  // when the html theme class changes — no MutationObserver needed.
 
   // React to settings-applied (DB sync) and local toggle events
   useEffect(() => {
@@ -903,25 +869,23 @@ export default function FrontOfficePill() {
 
   const { pct } = stats;
   const accent   = getPillAccent(pct);
-  const pillSt   = getHeaderPillStyle(theme);
-  const textColor = getHeaderPillTextColor(theme);
+  const pillSt   = getHeaderPillStyle();
+  const textColor = getHeaderPillTextColor();
 
   // Icon color: use accent dot color when it's visible; otherwise use text color
   const iconColor = accent.level !== "normal" ? accent.dot : textColor;
 
-  // Amber-level pill overrides — warm tint so it's not ignorable
+  // Amber/red pill overrides use per-theme background opacities defined as
+  // CSS variables (--fo-amber-pill-bg, --fo-red-pill-bg) so the conditional
+  // tint stays in sync with the active theme without JS branching.
   const amberPillOverrides = accent.level === "amber" ? {
-    background: theme === "white" ? "rgba(245,158,11,0.10)" :
-                theme === "pink"  ? "rgba(245,158,11,0.12)" :
-                                    "rgba(245,158,11,0.14)",
+    background: "var(--fo-amber-pill-bg)",
     border: `1px solid rgba(245,158,11,0.35)`,
     boxShadow: "0 0 8px rgba(245,158,11,0.15)",
   } : {};
 
   const redPillOverrides = accent.level === "red" ? {
-    background: theme === "white" ? "rgba(220,38,38,0.12)" :
-                theme === "pink"  ? "rgba(220,38,38,0.15)" :
-                                    "rgba(220,38,38,0.18)",
+    background: "var(--fo-red-pill-bg)",
     border: `1px solid rgba(220,38,38,0.50)`,
     boxShadow: "0 0 12px rgba(220,38,38,0.25), 0 0 4px rgba(220,38,38,0.15)",
   } : {};

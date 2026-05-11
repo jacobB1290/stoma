@@ -28,6 +28,34 @@ html.theme-white {
   --primary-light: #16525f24;
   --primary-glow: #16525f47;
 
+  /* ───────── semantic aliases (shared with other themes) ───────── */
+  --surface: var(--w-surface);
+  --surface-elevated: var(--w-surface-2);
+  --text: var(--w-text);
+  --text-muted: var(--w-text-muted);
+  --hover-bg: #0f172a0a;
+  --border: var(--w-border);
+
+  /* ───────── front-office pill / tooltip tokens ───────── */
+  --fo-pill-bg: rgba(22, 82, 95, 0.08);
+  --fo-pill-border: rgba(22, 82, 95, 0.22);
+  --fo-pill-text: #16525f;
+  --fo-tooltip-surface: #ffffff;
+  --fo-tooltip-border: rgba(0, 0, 0, 0.08);
+  --fo-tooltip-text-primary: #111827;
+  --fo-tooltip-text-muted: #6b7280;
+  --fo-tooltip-track: rgba(0, 0, 0, 0.06);
+  --fo-tooltip-divider: rgba(0, 0, 0, 0.06);
+  --fo-tooltip-shadow: 0 12px 40px rgba(0, 0, 0, 0.14),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  --fo-tooltip-row-bg: rgba(0, 0, 0, 0.03);
+  --fo-tooltip-row-bg-hover: rgba(0, 0, 0, 0.07);
+  --fo-tooltip-row-chip-bg: rgba(0, 0, 0, 0.05);
+  --fo-tooltip-ytd-bg: rgba(0, 0, 0, 0.02);
+  --fo-header-gradient: linear-gradient(135deg, #103e48 0%, #16525f 100%);
+  --fo-amber-pill-bg: rgba(245, 158, 11, 0.10);
+  --fo-red-pill-bg: rgba(220, 38, 38, 0.12);
+
   --w-focus: #16525f57;
 
   /* ───────── shadows ───────── */
@@ -173,6 +201,7 @@ html.theme-white
   :is(button, a, [role="button"]):is(
     .bg-gray-900,
     .bg-\[\#16525F\],
+    .bg-\[var\(--primary\)\],
     .bg-teal-600,
     .bg-teal-700
   ) {
@@ -315,7 +344,10 @@ html.theme-white .ring-amber-500\/30 {
 }
 
 /* ───────── board columns ───────── */
-html.theme-white .bg-\[\#16525F\]:not(button):not(a):not([role="button"]) {
+html.theme-white
+  :is(.bg-\[\#16525F\], .bg-\[var\(--primary\)\]):not(button):not(a):not(
+    [role="button"]
+  ) {
   background: #fffffff5;
   border: 1px solid var(--w-border);
   box-shadow: var(--w-shadow-2);
@@ -581,6 +613,7 @@ html.theme-white
     .bg-teal-700,
     .bg-gray-900,
     .bg-\[\#16525F\],
+    .bg-\[var\(--primary\)\],
     .bg-\[\#1F6F7C\]
   ):is(.text-white),
 html.theme-white
@@ -589,6 +622,7 @@ html.theme-white
     .bg-teal-700,
     .bg-gray-900,
     .bg-\[\#16525F\],
+    .bg-\[var\(--primary\)\],
     .bg-\[\#1F6F7C\]
   )
   .text-white {
