@@ -1,2 +1,1 @@
-- The app now starts up faster because it waits to download the prediction file until you actually need it.
-- Quieted down some background chatter the app was making while showing case risk, so the page feels a touch snappier.
+- Behind the scenes, pop-up windows in the app are being set up to all share the same look and behavior. You won't see any change yet, but future updates will use this to make pop-ups feel more consistent.
