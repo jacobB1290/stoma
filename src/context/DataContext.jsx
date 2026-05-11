@@ -3,6 +3,8 @@ import React, {
   useEffect,
   useState,
   useRef,
+  useCallback,
+  useMemo,
 } from "react";
 
 import {
@@ -228,7 +230,7 @@ export const useMut = () => React.useContext(DataCtx);
 const mapRow = (rec) => {
   const mods = rec.modifiers ?? [];
   return {
-    ...structuredClone(rec),
+    ...rec,
     department: rec.department ?? "General",
     rush: mods.includes("rush"),
     hold: mods.includes("hold"),
@@ -345,76 +347,99 @@ export function DataProvider({ activeDept, children }) {
   }, [rows]);
 
   /* ── CRUD helpers ── */
-  const togglePriority = (r) => svcTogglePriority(r).catch(console.error);
-  const toggleRush = (r) => svcToggleRush(r).catch(console.error);
-  const toggleHold = (r) => svcToggleHold(r).catch(console.error);
-  const toggleNewAccount = (r) => svcToggleNewAccount(r).catch(console.error);
-  const toggleComplete = (id, cur) =>
-    svcToggleComplete(id, cur).catch(console.error);
-  const toggleStage2 = (r) => svcToggleStage2(r).catch(console.error);
+  const togglePriority = useCallback(
+    (r) => svcTogglePriority(r).catch(console.error),
+    []
+  );
+  const toggleRush = useCallback(
+    (r) => svcToggleRush(r).catch(console.error),
+    []
+  );
+  const toggleHold = useCallback(
+    (r) => svcToggleHold(r).catch(console.error),
+    []
+  );
+  const toggleNewAccount = useCallback(
+    (r) => svcToggleNewAccount(r).catch(console.error),
+    []
+  );
+  const toggleComplete = useCallback(
+    (id, cur) => svcToggleComplete(id, cur).catch(console.error),
+    []
+  );
+  const toggleStage2 = useCallback(
+    (r) => svcToggleStage2(r).catch(console.error),
+    []
+  );
 
-  const addOrUpdate = async (payload, editId) => {
+  const addOrUpdate = useCallback(async (payload, editId) => {
     return editId ? updateCase({ id: editId, ...payload }) : addCase(payload);
-  };
+  }, []);
 
   /* ── DELETE single case ── */
-  const removeCase = async (id) => {
+  const removeCase = useCallback(async (id) => {
     const { error } = await db.from("cases").delete().eq("id", id);
     if (!error) {
       setRows((cur) => cur.filter((r) => r.id !== id));
     }
-  };
+  }, []);
 
   /* ── UPDATE case stage (WITH QC HANDLING) ── */
-  const updateCaseStage = async (caseItem, newStage, isRepair = false) => {
-    const { id, modifiers = [] } = caseItem;
+  const updateCaseStage = useCallback(
+    async (caseItem, newStage, isRepair = false) => {
+      const { id, modifiers = [] } = caseItem;
 
-    const filteredMods = modifiers.filter((m) => !m.startsWith("stage-"));
+      const filteredMods = modifiers.filter((m) => !m.startsWith("stage-"));
 
-    if (newStage) {
-      filteredMods.push(`stage-${newStage}`);
-    }
-
-    const { error } = await db
-      .from("cases")
-      .update({ modifiers: filteredMods })
-      .eq("id", id);
-
-    if (!error) {
-      if (isRepair) {
-        await logCase(
-          id,
-          "Sent for repair - moved directly to Finishing stage"
-        );
-      } else if (newStage === "qc") {
-        await logCase(id, "Moved from Finishing to Quality Control");
-      } else if (modifiers.includes("stage-qc") && newStage === "finishing") {
-        await logCase(id, "Moved from Quality Control back to Finishing stage");
-      } else {
-        const stageNames = {
-          design: "Design",
-          production: "Production",
-          finishing: "Finishing",
-          qc: "Quality Control",
-        };
-
-        const currentStage = modifiers
-          .find((m) => m.startsWith("stage-"))
-          ?.replace("stage-", "");
-        const fromStage = currentStage ? stageNames[currentStage] : "Unknown";
-        const toStage = newStage ? stageNames[newStage] : "Unknown";
-
-        await logCase(id, `Moved from ${fromStage} to ${toStage} stage`);
+      if (newStage) {
+        filteredMods.push(`stage-${newStage}`);
       }
 
-      setRows((cur) =>
-        cur.map((r) => (r.id === id ? { ...r, modifiers: filteredMods } : r))
-      );
-    }
-  };
+      const { error } = await db
+        .from("cases")
+        .update({ modifiers: filteredMods })
+        .eq("id", id);
+
+      if (!error) {
+        if (isRepair) {
+          await logCase(
+            id,
+            "Sent for repair - moved directly to Finishing stage"
+          );
+        } else if (newStage === "qc") {
+          await logCase(id, "Moved from Finishing to Quality Control");
+        } else if (modifiers.includes("stage-qc") && newStage === "finishing") {
+          await logCase(
+            id,
+            "Moved from Quality Control back to Finishing stage"
+          );
+        } else {
+          const stageNames = {
+            design: "Design",
+            production: "Production",
+            finishing: "Finishing",
+            qc: "Quality Control",
+          };
+
+          const currentStage = modifiers
+            .find((m) => m.startsWith("stage-"))
+            ?.replace("stage-", "");
+          const fromStage = currentStage ? stageNames[currentStage] : "Unknown";
+          const toStage = newStage ? stageNames[newStage] : "Unknown";
+
+          await logCase(id, `Moved from ${fromStage} to ${toStage} stage`);
+        }
+
+        setRows((cur) =>
+          cur.map((r) => (r.id === id ? { ...r, modifiers: filteredMods } : r))
+        );
+      }
+    },
+    []
+  );
 
   /* ── UNLINK / RELINK workflow ── */
-  const unlinkFromWorkflow = async (caseId) => {
+  const unlinkFromWorkflow = useCallback(async (caseId) => {
     const result = await svcUnlinkFromWorkflow(caseId);
     if (!result.error) {
       setRows((cur) =>
@@ -426,9 +451,9 @@ export function DataProvider({ activeDept, children }) {
       );
     }
     return result;
-  };
+  }, []);
 
-  const relinkToWorkflow = async (caseId) => {
+  const relinkToWorkflow = useCallback(async (caseId) => {
     const result = await svcRelinkToWorkflow(caseId);
     if (!result.error) {
       setRows((cur) =>
@@ -445,10 +470,10 @@ export function DataProvider({ activeDept, children }) {
       );
     }
     return result;
-  };
+  }, []);
 
   /* ── REFRESH cases ── */
-  const refreshCases = async () => {
+  const refreshCases = useCallback(async () => {
     const { data, error } = await db
       .from("cases")
       .select("*")
@@ -473,58 +498,81 @@ export function DataProvider({ activeDept, children }) {
     });
 
     setRows(filtered);
-  };
+  }, []);
 
-  const toggleCaseExclusion = async (caseId, stage = null, reason = null) => {
-    const result = await svcToggleCaseExclusion(caseId, stage, reason);
-    if (!result.error) {
-      await refreshCases();
-    }
-    return result;
-  };
-
-  const batchToggleExclusions = async (
-    caseIds,
-    exclude = true,
-    stage = null,
-    reason = null
-  ) => {
-    const results = await svcBatchToggleExclusions(
-      caseIds,
-      exclude,
-      stage,
-      reason
-    );
-    await refreshCases();
-    return results;
-  };
-
-  const visible =
-    activeDept == null ? rows : rows.filter((r) => r.department === activeDept);
-
-  return (
-    <DataCtx.Provider
-      value={{
-        rows: visible,
-        allRows: rows,
-        workflowMap,
-        togglePriority,
-        toggleRush,
-        toggleHold,
-        toggleNewAccount,
-        toggleComplete,
-        toggleStage2,
-        addOrUpdate,
-        removeCase,
-        refreshCases,
-        updateCaseStage,
-        unlinkFromWorkflow,
-        relinkToWorkflow,
-        toggleCaseExclusion,
-        batchToggleExclusions,
-      }}
-    >
-      {children}
-    </DataCtx.Provider>
+  const toggleCaseExclusion = useCallback(
+    async (caseId, stage = null, reason = null) => {
+      const result = await svcToggleCaseExclusion(caseId, stage, reason);
+      if (!result.error) {
+        await refreshCases();
+      }
+      return result;
+    },
+    [refreshCases]
   );
+
+  const batchToggleExclusions = useCallback(
+    async (caseIds, exclude = true, stage = null, reason = null) => {
+      const results = await svcBatchToggleExclusions(
+        caseIds,
+        exclude,
+        stage,
+        reason
+      );
+      await refreshCases();
+      return results;
+    },
+    [refreshCases]
+  );
+
+  const visible = useMemo(
+    () =>
+      activeDept == null
+        ? rows
+        : rows.filter((r) => r.department === activeDept),
+    [rows, activeDept]
+  );
+
+  const value = useMemo(
+    () => ({
+      rows: visible,
+      allRows: rows,
+      workflowMap,
+      togglePriority,
+      toggleRush,
+      toggleHold,
+      toggleNewAccount,
+      toggleComplete,
+      toggleStage2,
+      addOrUpdate,
+      removeCase,
+      refreshCases,
+      updateCaseStage,
+      unlinkFromWorkflow,
+      relinkToWorkflow,
+      toggleCaseExclusion,
+      batchToggleExclusions,
+    }),
+    [
+      visible,
+      rows,
+      workflowMap,
+      togglePriority,
+      toggleRush,
+      toggleHold,
+      toggleNewAccount,
+      toggleComplete,
+      toggleStage2,
+      addOrUpdate,
+      removeCase,
+      refreshCases,
+      updateCaseStage,
+      unlinkFromWorkflow,
+      relinkToWorkflow,
+      toggleCaseExclusion,
+      batchToggleExclusions,
+    ]
+  );
+
+  return <DataCtx.Provider value={value}>{children}</DataCtx.Provider>;
 }
