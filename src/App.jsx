@@ -28,6 +28,7 @@ import FrontOfficePill from "./components/FrontOfficeBubble";
 import { startVersionPolling } from "./services/versionCheckService";
 import { ToastProvider } from "./context/ToastContext";
 import Toast from "./components/ui/Toast";
+import { logger } from "./utils/logger";
 
 // Code-split heavy views — these bundles only download when the user opens
 // the corresponding tab, so the initial board view loads faster.
@@ -676,7 +677,7 @@ function AppShell() {
   useEffect(() => {
     const onSettingsApplied = (e) => {
       const appliedSettings = e.detail || {};
-      console.log("[App] Settings applied event received:", appliedSettings);
+      logger.debug("[App] Settings applied event received:", appliedSettings);
 
       // Update theme if it was changed
       if (appliedSettings.boardTheme !== undefined) {

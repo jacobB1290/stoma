@@ -1,2 +1,2 @@
-- Messages about saving, archiving, and deleting now show up as small notes inside the app instead of as pop-ups from the browser.
-- When you delete an archived case, the confirmation now appears as a small message inside the app instead of a browser pop-up.
+- The app runs a bit lighter behind the scenes now.
+- Background chatter the app used to write to itself is hidden in the live version, so things feel snappier without changing anything you see.

@@ -23,6 +23,7 @@ import {
 } from "../qa/LLMChatService";
 import { useMut } from "../context/DataContext";
 import { db } from "../services/caseService";
+import { logger } from "../utils/logger";
 
 const pct = (x) => Math.max(0, Math.min(100, Number(x) || 0));
 
@@ -1899,7 +1900,7 @@ export default function SystemInsightsPanel({
 
   const executeAction = useCallback(
     async (actionData) => {
-      console.log("[SystemInsightsPanel] Executing action:", actionData);
+      logger.debug("[SystemInsightsPanel] Executing action:", actionData);
 
       try {
         const {
@@ -2216,7 +2217,7 @@ export default function SystemInsightsPanel({
   // Dynamic action handler (from live-coded components)
   const handleDynamicAction = useCallback(
     async (actionType, payload, componentData) => {
-      console.log("[SystemInsightsPanel] Dynamic action:", actionType, payload);
+      logger.debug("[SystemInsightsPanel] Dynamic action:", actionType, payload);
 
       // Handle various action types from dynamic components
       if (actionType === "confirm" || actionType === "execute") {
@@ -2230,7 +2231,7 @@ export default function SystemInsightsPanel({
           handleAsk(payload.question);
         }
       } else {
-        console.log(
+        logger.debug(
           "[SystemInsightsPanel] Unhandled dynamic action:",
           actionType
         );
