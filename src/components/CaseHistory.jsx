@@ -1393,8 +1393,60 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
         const stage =
           stageFromModifiers(caseData.modifiers) || "design";
 
+        // Fetch case_history for completed cases over the last 30 days.
+        // This is what makes our prediction agree with the Efficiency
+        // screen's: the engine's stage-timing features (stageAvg7d,
+        // stageThroughput7d, stageTrend, recentCompletedVisits) come
+        // from completed-case history. Without it the model sees only
+        // this one case's history (4 visits) instead of the lab's ~185
+        // and silently produces a different verdict.
+        //
+        // Verified with scripts/test-forecast-diff.mjs: for case #459,
+        // omitting this query produced riskLevel=low / pLate=0.33;
+        // including it matches Efficiency's riskLevel=critical /
+        // pLate=0.85. The query runs in background priority so the
+        // user doesn't notice it.
+        const thirtyDaysAgoIso = new Date(
+          Date.now() - 30 * 86400 * 1000
+        ).toISOString();
+        const { data: recentHistRows } = await db
+          .from("case_history")
+          .select("id, case_id, action, user_name, created_at")
+          .gte("created_at", thirtyDaysAgoIso);
+        if (cancelled) return;
+
+        // Attach history to completed cases so the engine can extract
+        // stage exits from them.
+        const histByCaseId = new Map();
+        for (const h of recentHistRows || []) {
+          if (!histByCaseId.has(h.case_id)) histByCaseId.set(h.case_id, []);
+          histByCaseId.get(h.case_id).push(h);
+        }
+        for (const arr of histByCaseId.values()) {
+          arr.sort(
+            (a, b) =>
+              new Date(b.created_at).getTime() -
+              new Date(a.created_at).getTime()
+          );
+        }
+        const recentCompletedPool = allRows
+          .filter((r) => r.completed === true && histByCaseId.has(r.id))
+          .map((c) => ({
+            ...c,
+            case_history: histByCaseId.get(c.id),
+          }));
+
+        await yieldToBackground();
+        if (cancelled) return;
+
         const now = new Date();
-        const visits = extractRecentCompletedVisits(peerPool, now, 30);
+        // Extract from BOTH active and recent-completed so the engine
+        // sees the lab's full stage-throughput history.
+        const visits = extractRecentCompletedVisits(
+          [...peerPool, ...recentCompletedPool],
+          now,
+          30
+        );
 
         await yieldToBackground();
         if (cancelled) return;
@@ -1406,6 +1458,8 @@ export default function CaseHistory({ id, caseNumber, onClose }) {
 
         // activeCases = [caseData] → engine runs one ML inference.
         // peerPool = full pool → cross-case features computed correctly.
+        // visits / labContext include completed-case timings → ML
+        // features (stageAvg7d, stageTrend, etc.) match Efficiency.
         const result = generateCaseRiskPredictions(
           [caseData],
           null,
