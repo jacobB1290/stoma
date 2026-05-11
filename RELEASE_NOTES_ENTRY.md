@@ -1,1 +1,3 @@
-- The app's download size is smaller now.
+- Marking a case as priority, rush, hold, done, or stage 2 used to log the change even when the change had not actually saved. Now the history only records changes that really went through.
+- Excluding or including a big group of cases from the numbers used to take a noticeable pause. It now finishes much faster.
+- Archiving several cases at once also finishes faster.
