@@ -1,1 +1,2 @@
-- The team now has stricter code checks running automatically before changes go live, which should help catch small mistakes earlier.
+- The app is a little smaller and lighter after removing some parts that were no longer being used.
+- Internal notes for the team have been updated to match the way the app actually works today.
