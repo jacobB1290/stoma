@@ -1,1 +1,1 @@
-- Behind-the-scenes work to help the app respond more consistently when you change settings.
+- Times on the case history page now match the rest of the app.
