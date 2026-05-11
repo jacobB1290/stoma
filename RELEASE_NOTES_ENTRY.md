@@ -1,1 +1,1 @@
-- Behind the scenes, pop-up windows in the app are being set up to all share the same look and behavior. You won't see any change yet, but future updates will use this to make pop-ups feel more consistent.
+- Behind the scenes, buttons and loading indicators across the app now have a shared style foundation, so future updates can keep them looking and behaving the same everywhere.
