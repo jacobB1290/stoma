@@ -26,3 +26,6 @@ Thumbs.db
 # Never commit these; Vercel regenerates them on every deploy.
 public/version.json
 public/changelog.json
+
+# Claude Code agent worktrees (created by parallel sub-agents; do not commit)
+.claude/worktrees/
