@@ -1,0 +1,5 @@
+{
+  "*.{js,jsx}": [
+    "eslint --resolve-plugins-relative-to ./node_modules/react-scripts"
+  ]
+}
